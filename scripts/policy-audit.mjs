@@ -148,12 +148,9 @@ check(
 );
 // Capitalisation of proper nouns is a submission requirement, so check the one
 // that actually appears.
-check(
-  "Copyright",
-  "proper nouns capitalised in the description",
-  /Obsidian's/.test(manifest.description) && !/obsidian(?!')/i.test(manifest.description),
-  JSON.stringify(manifest.description.slice(0, 60)),
-);
+// The submission-requirements page asks for correct capitalisation of proper
+// nouns such as "Obsidian", but the linter forbids the word in a description at
+// all. Both cannot be satisfied, so the stricter rule wins — see the check above.
 
 // =============================================================================
 // Submission requirements
@@ -177,6 +174,15 @@ check(
   [...description].length <= 250 && description.endsWith(".") && [...description].every((c) => c.charCodeAt(0) <= 126),
   `${[...description].length} chars, ends with ".", ASCII only`,
 );
+check(
+  "Requirements",
+  "description does not contain the word Obsidian",
+  !/obsidian/i.test(description),
+  /obsidian/i.test(description)
+    ? "**the directory's linter rejects this outright**"
+    : "absent; the plugin directory implies the context",
+);
+
 check(
   "Requirements",
   "description starts with an action, not 'This is a plugin'",

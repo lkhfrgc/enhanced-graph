@@ -33,6 +33,15 @@ check(
   [...description].filter((c) => c.charCodeAt(0) > 126).join("") || "pure ASCII",
 );
 check(
+  "Requirements",
+  "description does not contain the word Obsidian",
+  !/obsidian/i.test(description),
+  /obsidian/i.test(description)
+    ? "**the directory's linter rejects this outright**"
+    : "absent; the plugin directory implies the context",
+);
+
+check(
   "description does not start with 'This is a plugin'",
   !/^this is a plugin/i.test(description),
   JSON.stringify(description.slice(0, 24)),
