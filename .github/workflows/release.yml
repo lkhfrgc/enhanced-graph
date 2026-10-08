@@ -1,0 +1,171 @@
+name: Release
+
+# Mirrors Obsidian's documented release flow, with two additions that earn their
+# keep: the checks that can run without a vault, and a guard on the tag/version
+# mismatch that the directory README calls out as a hard requirement.
+#
+# Note what is NOT run here: `npm run verify`. It includes `verify:vault`, which
+# reads the vault this plugin is developed against — a directory outside the
+# repository that no runner has. Typecheck and the unit tests are self-contained,
+# so those are what gate the release.
+#
+# `npm run build` writes into that same outside-the-repo vault directory, so CI
+# uses `npm run build:ci`, which builds into the checkout where the upload step
+# can find the files.
+
+on:
+  push:
+    tags:
+      - "*"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck and unit tests
+        run: |
+          npm run typecheck
+          npm test
+
+      - name: Check the tag matches the manifest version
+        # Obsidian looks for a release tagged identically to `manifest.json`'s
+        # version. A mismatch publishes a release nobody can install, and the
+        # failure surfaces later as "my plugin won't update".
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          version="$(node -p "require('./manifest.json').version")"
+          if [ "$tag" != "$version" ]; then
+            echo "::error::tag $tag does not match manifest version $version"
+            exit 1
+          fi
+          echo "tag $tag matches manifest version $version"
+
+      - name: Check versions.json covers this version
+        run: |
+          version="$(node -p "require('./manifest.json').version")"
+          node -e "
+            const versions = require('./versions.json');
+            if (!versions['$version']) {
+              console.error('::error::versions.json has no entry for $version');
+              process.exit(1);
+            }
+            console.log('versions.json: $version ->', versions['$version']);
+          "
+
+      - name: Build into the checkout
+        run: npm run build:ci
+
+      - name: Create the release as a draft
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+
+          # Re-pushing a tag is how a release gets rebuilt, so replace whatever
+          # is there. `--cleanup-tag=false` keeps the tag itself — it is the ref
+          # we are building from. Without this the create below fails with
+          # "already exists" and the whole point of re-pushing the tag is lost.
+          gh release delete "$tag" --yes --cleanup-tag=false || true
+
+          # Per-release notes live in the repo so they are versioned with the
+          # code. Falling back keeps the workflow usable for a tag that has no
+          # note file yet.
+          if [ -f "docs/releases/$tag.md" ]; then
+            notes=(--notes-file "docs/releases/$tag.md")
+          else
+            notes=(--generate-notes)
+          fi
+
+          # Draft first: the next step refuses to publish a release whose assets
+          # did not land, and an asset-less release is uninstallable.
+          gh release create "$tag" \
+            --title="Enhanced Graph $tag" \
+            --draft \
+            "${notes[@]}" \
+            main.js \
+            manifest.json \
+            styles.css \
+            THIRD-PARTY-NOTICES.md
+
+          # `::notice::` annotations are readable through the API without a
+          # token, unlike the step log. This is how the title/notes get inspected
+          # at the moment they are set, rather than only after publishing.
+          echo "::notice::create reported: $(gh release view "$tag" --json name,body,isDraft --jq '{name, bodyLength: (.body|length), isDraft}')"
+
+      - name: Verify the assets landed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+
+          # Obsidian installs a plugin by fetching main.js, manifest.json and
+          # styles.css FROM THE RELEASE ASSETS. `gh release create` still exits 0
+          # when an asset is silently missing, and the failure then surfaces much
+          # later, as "the plugin will not install". So read the release back and
+          # refuse to go further if any of the four is absent or empty.
+          gh release view "$tag" --json assets \
+            --jq '.assets[] | "\(.name) \(.size)"' > /tmp/assets.txt
+          echo "assets reported by the API:"
+          cat /tmp/assets.txt
+
+          for name in main.js manifest.json styles.css THIRD-PARTY-NOTICES.md; do
+            size="$(awk -v want="$name" '$1 == want { print $2 }' /tmp/assets.txt)"
+            if [ -z "$size" ]; then
+              echo "::error::$name is missing from the release assets"
+              exit 1
+            fi
+            if [ "$size" -eq 0 ]; then
+              echo "::error::$name was uploaded but is empty"
+              exit 1
+            fi
+            echo "  ok  $name  $size bytes"
+          done
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "${GITHUB_REF#refs/tags/}" --draft=false
+
+      - name: Verify the title and notes survived
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+
+          # The title and the notes are set on the draft and then the release is
+          # published. Both have silently gone missing once already, and the
+          # release still looked fine from the outside — four assets, published,
+          # no error. So read them back and say so out loud.
+          gh release view "$tag" --json name,body,isDraft > /tmp/final.json
+          cat /tmp/final.json
+
+          name="$(jq -r '.name // ""' /tmp/final.json)"
+          body_length="$(jq -r '(.body // "") | length' /tmp/final.json)"
+          is_draft="$(jq -r '.isDraft' /tmp/final.json)"
+
+          echo "title: \"$name\"  notes: $body_length chars  draft: $is_draft"
+
+          if [ "$is_draft" != "false" ]; then
+            echo "::error::the release is still a draft"
+            exit 1
+          fi
+          if [ "$name" != "Enhanced Graph $tag" ]; then
+            echo "::error::title is \"$name\", expected \"Enhanced Graph $tag\""
+            exit 1
+          fi
+          if [ "$body_length" -lt 100 ]; then
+            echo "::error::release notes are missing or suspiciously short ($body_length chars)"
+            exit 1
+          fi

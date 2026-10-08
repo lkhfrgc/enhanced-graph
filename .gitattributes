@@ -1,0 +1,13 @@
+# Normalise every text file to LF in the repository and in the working tree.
+# The global config on this machine is core.autocrlf=true; an explicit `eol=lf`
+# keeps the TypeScript sources byte-identical across machines, which matters
+# because a lot of the content is CJK.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary

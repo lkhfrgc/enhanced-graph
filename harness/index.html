@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Enhanced Graph — harness</title>
+    <!-- Inline empty icon: avoids a 404 for /favicon.ico, which would show up
+         as a console error and trip the cleanliness check. -->
+    <link rel="icon" href="data:," />
+    <style>
+      /* A minimal stand-in for Obsidian's theme variables, dark + light. */
+      :root,
+      body.theme-dark {
+        --background-primary: #1e1e1e;
+        --background-primary-alt: #1a1a1a;
+        --background-secondary: #161616;
+        --background-secondary-alt: #262626;
+        --background-modifier-border: #333333;
+        --background-modifier-hover: rgba(255, 255, 255, 0.06);
+        --background-modifier-border-focus: #555555;
+        --text-normal: #dcddde;
+        --text-muted: #b3b3b3;
+        --text-faint: #666666;
+        --text-accent: #7f6df2;
+        --text-error: #f87171;
+        --text-warning: #d29922;
+        --text-on-accent: #ffffff;
+        --interactive-accent: #7f6df2;
+        --color-blue: #60a5fa;
+        --color-orange: #fb923c;
+        --shadow-s: 0 1px 2px rgba(0, 0, 0, 0.3);
+        --shadow-l: 0 4px 16px rgba(0, 0, 0, 0.5);
+      }
+      body.theme-light {
+        --background-primary: #ffffff;
+        --background-primary-alt: #fafafa;
+        --background-secondary: #f2f3f5;
+        --background-secondary-alt: #eaecef;
+        --background-modifier-border: #dddddd;
+        --background-modifier-hover: rgba(0, 0, 0, 0.05);
+        --background-modifier-border-focus: #bbbbbb;
+        --text-normal: #2e3338;
+        --text-muted: #555555;
+        --text-faint: #999999;
+        --text-accent: #705dcf;
+        --text-error: #d64545;
+        --text-warning: #b45309;
+        --text-on-accent: #ffffff;
+        --interactive-accent: #705dcf;
+        --shadow-s: 0 1px 2px rgba(0, 0, 0, 0.08);
+        --shadow-l: 0 4px 16px rgba(0, 0, 0, 0.14);
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+        background: var(--background-primary);
+        color: var(--text-normal);
+      }
+      #app {
+        position: absolute;
+        inset: 0;
+      }
+      #app > .workspace-leaf-content {
+        height: 100%;
+      }
+      #app .view-content {
+        height: 100%;
+      }
+      .harness-notice {
+        position: fixed;
+        right: 12px;
+        top: 12px;
+        z-index: 999;
+        padding: 6px 10px;
+        border-radius: 6px;
+        background: var(--background-secondary);
+        border: 1px solid var(--background-modifier-border);
+        font-size: 12px;
+      }
+    </style>
+    <link rel="stylesheet" href="../styles.css" />
+  </head>
+  <body class="theme-dark">
+    <div id="app"></div>
+    <script type="module" src="./bundle.js"></script>
+  </body>
+</html>

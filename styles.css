@@ -1,0 +1,1139 @@
+/* ==========================================================================
+   Enhanced Graph — 增强关系图谱
+   All colours come from Obsidian's theme variables so the view matches the
+   active theme (and every community palette keeps working in both modes).
+   ========================================================================== */
+
+.enhanced-graph-content {
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.enhanced-graph-root {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  background: var(--background-primary);
+}
+
+/* --------------------------------------------------------------------------
+   Toolbar
+   -------------------------------------------------------------------------- */
+
+.enhanced-graph-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+}
+
+.enhanced-graph-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.enhanced-graph-segmented {
+  display: inline-flex;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.enhanced-graph-segmented .enhanced-graph-button {
+  border: none;
+  border-radius: 0;
+}
+
+.enhanced-graph-segmented .enhanced-graph-button + .enhanced-graph-button {
+  border-left: 1px solid var(--background-modifier-border);
+}
+
+.enhanced-graph-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.enhanced-graph-button:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+
+.enhanced-graph-button.is-active {
+  color: var(--text-on-accent);
+  background: var(--interactive-accent);
+  border-color: var(--interactive-accent);
+}
+
+.enhanced-graph-button.is-primary {
+  color: var(--text-on-accent);
+  background: var(--interactive-accent);
+  border-color: var(--interactive-accent);
+}
+
+.enhanced-graph-button.is-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.enhanced-graph-button.is-icon {
+  padding: 4px 6px;
+}
+
+.enhanced-graph-button-icon {
+  display: inline-flex;
+  align-items: center;
+}
+
+.enhanced-graph-button-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* The search box plus its persistent "no matches" line. The wrapper is a column
+   so the message sits under the input without shifting the toolbar row. */
+.enhanced-graph-search-wrap {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+
+
+.enhanced-graph-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background: var(--background-primary);
+  min-width: 180px;
+}
+
+.enhanced-graph-search-icon svg {
+  width: 13px;
+  height: 13px;
+  color: var(--text-faint);
+}
+
+.enhanced-graph-search input {
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  font-size: 12px;
+  width: 100%;
+  padding: 5px 0;
+}
+
+.enhanced-graph-search input:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+.enhanced-graph-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  cursor: pointer;
+}
+
+.enhanced-graph-link:hover {
+  color: var(--text-accent);
+  background: transparent;
+}
+
+.enhanced-graph-link svg {
+  width: 13px;
+  height: 13px;
+}
+
+/* --------------------------------------------------------------------------
+   Body / canvas
+   -------------------------------------------------------------------------- */
+
+.enhanced-graph-body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.enhanced-graph-canvas-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  outline: none;
+}
+
+.enhanced-graph-canvas {
+  position: absolute;
+  inset: 0;
+}
+
+.enhanced-graph-canvas-wrap .sigma-container {
+  background: transparent !important;
+}
+
+/* --------------------------------------------------------------------------
+   Zoom controls
+   -------------------------------------------------------------------------- */
+
+.enhanced-graph-zoom {
+  position: absolute;
+  right: 10px;
+  top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  z-index: 3;
+}
+
+.enhanced-graph-zoom .enhanced-graph-button {
+  background: var(--background-secondary);
+  width: 28px;
+  height: 28px;
+  justify-content: center;
+}
+
+/* --------------------------------------------------------------------------
+   Legend
+   -------------------------------------------------------------------------- */
+
+.enhanced-graph-legend {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  max-width: 280px;
+  max-height: 46%;
+  display: flex;
+  flex-direction: column;
+  padding: 7px 9px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-secondary);
+  box-shadow: var(--shadow-s);
+  font-size: 11px;
+  z-index: 3;
+}
+
+.enhanced-graph-legend.is-hidden {
+  display: none;
+}
+
+.enhanced-graph-legend-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.enhanced-graph-legend-title {
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+.enhanced-graph-legend-header .enhanced-graph-link {
+  margin-left: auto;
+}
+
+.enhanced-graph-legend-body {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.enhanced-graph-legend-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 3px;
+  border-radius: 4px;
+  cursor: default;
+}
+
+.enhanced-graph-legend-row:hover {
+  background: var(--background-modifier-hover);
+}
+
+.enhanced-graph-legend-row.is-hidden-type {
+  opacity: 0.45;
+}
+
+.enhanced-graph-legend-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+.enhanced-graph-legend-label {
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.enhanced-graph-legend-count {
+  margin-left: auto;
+  color: var(--text-faint);
+  flex: 0 0 auto;
+}
+
+.enhanced-graph-legend-cohesion {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--text-faint);
+  font-size: 10px;
+  flex: 0 0 auto;
+}
+
+.enhanced-graph-legend-cohesion.is-sparse {
+  color: var(--text-warning, #d29922);
+}
+
+.enhanced-graph-legend-warn svg {
+  width: 11px;
+  height: 11px;
+}
+
+/* --------------------------------------------------------------------------
+   Status
+   -------------------------------------------------------------------------- */
+
+.enhanced-graph-status {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-size: 11px;
+  z-index: 3;
+}
+
+.enhanced-graph-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--background-modifier-border);
+  border-top-color: var(--interactive-accent);
+  border-radius: 50%;
+  animation: enhanced-graph-spin 0.8s linear infinite;
+}
+
+@keyframes enhanced-graph-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Side panel
+   -------------------------------------------------------------------------- */
+
+.enhanced-graph-panel {
+  flex: 0 0 320px;
+  width: 320px;
+  border-left: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.enhanced-graph-panel.is-hidden {
+  display: none;
+}
+
+.enhanced-graph-panel-header {
+  display: flex;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-normal);
+  padding: 0 2px;
+}
+
+.enhanced-graph-panel-header .enhanced-graph-link {
+  margin-left: auto;
+}
+
+.enhanced-graph-section {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.enhanced-graph-section-title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-faint);
+  margin-top: 4px;
+}
+
+.enhanced-graph-section-title svg {
+  width: 13px;
+  height: 13px;
+}
+
+.enhanced-graph-icon-connection {
+  color: var(--color-blue, #60a5fa);
+  display: inline-flex;
+}
+
+.enhanced-graph-icon-gap {
+  color: var(--color-orange, #fb923c);
+  display: inline-flex;
+}
+
+.enhanced-graph-empty {
+  color: var(--text-faint);
+  font-size: 12px;
+  padding: 12px 4px;
+  text-align: center;
+}
+
+/* --------------------------------------------------------------------------
+   Insight cards
+   -------------------------------------------------------------------------- */
+
+.enhanced-graph-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 9px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 7px;
+  background: var(--background-primary);
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.enhanced-graph-card:hover {
+  background: var(--background-modifier-hover);
+}
+
+.enhanced-graph-card.is-active-connection {
+  border-color: var(--color-blue, #60a5fa);
+  background: rgba(96, 165, 250, 0.1);
+}
+
+.enhanced-graph-card.is-active-gap {
+  border-color: var(--color-orange, #fb923c);
+  background: rgba(251, 146, 60, 0.1);
+}
+
+.enhanced-graph-card.is-dismissed {
+  opacity: 0.45;
+}
+
+.enhanced-graph-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.enhanced-graph-card-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-normal);
+  flex: 1 1 auto;
+  line-height: 1.35;
+}
+
+.enhanced-graph-card-head .enhanced-graph-link {
+  flex: 0 0 auto;
+  margin-top: -2px;
+}
+
+.enhanced-graph-card-score {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.enhanced-graph-card-score-value {
+  font-weight: 600;
+  color: var(--text-accent);
+}
+
+.enhanced-graph-card-surprise {
+  margin-left: auto;
+  color: var(--color-orange, #fb923c);
+  font-size: 10px;
+}
+
+.enhanced-graph-card-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.enhanced-graph-card-suggestion {
+  font-size: 11px;
+  font-style: italic;
+  color: var(--text-faint);
+  line-height: 1.45;
+}
+
+.enhanced-graph-card .enhanced-graph-button {
+  align-self: flex-start;
+  margin-top: 3px;
+}
+
+/* --------------------------------------------------------------------------
+   Filters
+   -------------------------------------------------------------------------- */
+
+.enhanced-graph-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 2px 2px;
+  cursor: pointer;
+}
+
+.enhanced-graph-checkbox-inner {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.enhanced-graph-checkbox .enhanced-graph-legend-count {
+  margin-left: auto;
+}
+
+/* --------------------------------------------------------------------------
+   Tag filtering
+   -------------------------------------------------------------------------- */
+
+.enhanced-graph-tag-search {
+  width: 100%;
+  font-size: 12px;
+  padding: 3px 6px;
+}
+
+/* A vault can carry hundreds of tags; cap the list so the rest of the panel
+   stays reachable, and let the search box do the narrowing. */
+.enhanced-graph-tag-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 190px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.enhanced-graph-tag-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.enhanced-graph-tag-empty,
+.enhanced-graph-tag-more {
+  font-size: 11px;
+  color: var(--text-faint);
+  padding: 4px 2px;
+}
+
+.enhanced-graph-slider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 2px;
+}
+
+.enhanced-graph-slider input[type="range"] {
+  flex: 1 1 auto;
+}
+
+.enhanced-graph-slider-label {
+  flex: 0 0 auto;
+  min-width: 3.2em;
+}
+
+/* --------------------------------------------------------------------------
+   Connection range control (status bar)
+   -------------------------------------------------------------------------- */
+
+/* Sits inside the status bar, right after the "shortest N hops" text it
+   controls, so cause and effect are in the same place. */
+.enhanced-graph-focus-range {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 10px;
+}
+
+.enhanced-graph-focus-range-label {
+  color: var(--text-faint);
+  margin-right: 2px;
+}
+
+.enhanced-graph-hop-button {
+  padding: 1px 8px;
+  font-size: 11px;
+  line-height: 1.5;
+  border-radius: 10px;
+  border: 1px solid var(--background-modifier-border);
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  box-shadow: none;
+  height: auto;
+}
+
+.enhanced-graph-hop-button:hover {
+  background: var(--background-modifier-hover);
+}
+
+.enhanced-graph-hop-button.is-active {
+  background: var(--interactive-accent);
+  border-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+/* --------------------------------------------------------------------------
+   Marker layer
+   -------------------------------------------------------------------------- */
+
+/* A 2D layer above sigma's WebGL canvases, used to ring the nodes the user
+   explicitly focused. `pointer-events: none` is essential: sigma's own picking
+   canvas must stay the topmost hit target or hovering and right-clicking break. */
+.enhanced-graph-marker-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 4;
+  pointer-events: none;
+}
+
+/* --------------------------------------------------------------------------
+   Appearance panel
+   -------------------------------------------------------------------------- */
+
+/* Number field plus a stacked pair of step buttons. The buttons are ~11px tall
+   each, so the pair is easier to hit than a native spinner and works the same
+   in every browser. */
+.enhanced-graph-stepper {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+}
+
+.enhanced-graph-stepper .enhanced-graph-number {
+  width: 4.5em;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.enhanced-graph-stepper-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.enhanced-graph-stepper-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 12px;
+  padding: 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 3px;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  box-shadow: none;
+}
+
+.enhanced-graph-stepper-button:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.enhanced-graph-stepper-button .svg-icon {
+  width: 12px;
+  height: 12px;
+}
+
+.enhanced-graph-colour-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 2px;
+}
+
+.enhanced-graph-colour {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background: none;
+  cursor: pointer;
+}
+
+/* Typing an exact value is the point of these boxes, so they are wide enough
+   for a full #rrggbb and use a monospace face to keep the digits aligned. */
+.enhanced-graph-hex {
+  flex: 0 0 auto;
+  width: 8.5em;
+  font-family: var(--font-monospace);
+  font-size: 11px;
+  padding: 2px 5px;
+}
+
+.enhanced-graph-number {
+  flex: 0 0 auto;
+  width: 5.2em;
+  font-size: 11px;
+  padding: 2px 4px;
+}
+
+.enhanced-graph-slider-value {
+  flex: 0 0 auto;
+  min-width: 3.2em;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+}
+
+.enhanced-graph-subtitle {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-top: 6px;
+  padding-top: 4px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.enhanced-graph-hint {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-faint);
+  padding: 2px 0 4px;
+}
+
+.enhanced-graph-colour-row .enhanced-graph-link {
+  flex: 0 0 auto;
+  padding: 0 6px;
+  font-size: 12px;
+}
+
+.enhanced-graph-colour-row .enhanced-graph-link.is-active {
+  color: var(--text-faint);
+  opacity: 0.55;
+}
+
+.enhanced-graph-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+/* A preset is a round chip of the colour it applies. The active one gets a ring
+   rather than a border, so the colour itself stays unobstructed. */
+.enhanced-graph-swatch {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: 0 0 0 1px var(--background-modifier-border);
+}
+
+.enhanced-graph-swatch:hover {
+  box-shadow: 0 0 0 2px var(--text-muted);
+}
+
+.enhanced-graph-swatch.is-active {
+  box-shadow:
+    0 0 0 2px var(--background-primary),
+    0 0 0 4px var(--interactive-accent);
+}
+
+/* "Follow the theme" has no single colour, so it is drawn as a hollow chip. */
+.enhanced-graph-swatch.is-theme {
+  background: repeating-conic-gradient(
+    var(--text-faint) 0% 25%,
+    var(--background-primary) 0% 50%
+  ) 50% / 8px 8px !important;
+}
+
+/* --------------------------------------------------------------------------
+   Tooltip
+   -------------------------------------------------------------------------- */
+
+.enhanced-graph-tooltip {
+  position: absolute;
+  z-index: 20;
+  max-width: 280px;
+  padding: 7px 9px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 7px;
+  background: var(--background-primary);
+  box-shadow: var(--shadow-l);
+  font-size: 11px;
+  color: var(--text-normal);
+  pointer-events: none;
+  line-height: 1.45;
+}
+
+.enhanced-graph-tooltip-title {
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.enhanced-graph-tooltip-meta {
+  color: var(--text-faint);
+  font-size: 10px;
+}
+
+.enhanced-graph-tooltip-score {
+  color: var(--text-muted);
+  margin-bottom: 3px;
+}
+
+.enhanced-graph-tooltip-value {
+  font-weight: 600;
+  color: var(--text-accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.enhanced-graph-tooltip-table,
+.enhanced-graph-tooltip-scores {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: 2px;
+}
+
+.enhanced-graph-tooltip-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.enhanced-graph-tooltip-row .enhanced-graph-tooltip-name {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+}
+
+.enhanced-graph-tooltip-row .enhanced-graph-tooltip-value {
+  flex: 0 0 auto;
+}
+
+.enhanced-graph-tooltip-row.is-zero {
+  opacity: 0.4;
+}
+
+/* --------------------------------------------------------------------------
+   Built-in graph enhancement (overlay inside the official graph view)
+   -------------------------------------------------------------------------- */
+
+/* `view.contentEl` is already `position: relative` and hosts the WebGL canvas
+   plus Obsidian's own `.graph-controls`; a later absolutely-positioned sibling
+   paints above the canvas and receives pointer events. */
+
+/* Our chrome is pinned to the TOP-LEFT and grows downwards: `top` is the fixed
+   edge, so the panel extends away from the corner as it fills rather than
+   pushing up off-screen the way a `bottom`-anchored box does. */
+/* The chrome lives in one flow: the panel sits under the toolbar whatever height
+   it takes, instead of both being positioned against a guessed offset. */
+.enhanced-graph-official-overlay {
+  position: absolute;
+  top: var(--size-4-3, 12px);
+  left: var(--size-4-3, 12px);
+  /* A definite width: with `left` only, the box is shrink-to-fit and the
+     toolbar inside it had no real space to measure against. */
+  right: var(--size-4-3, 12px);
+  z-index: 11;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  max-height: calc(100% - var(--size-4-6, 24px));
+  pointer-events: none;
+}
+
+/* The legend keeps the base class (bottom-left placement) but is given a FIXED
+   box: a legend that resizes as clusters come and go makes the graph beside it
+   look like it moved. */
+.enhanced-graph-official-legend {
+  width: 260px;
+  height: 200px;
+  max-width: none;
+  max-height: none;
+  overflow-y: auto;
+  z-index: 10;
+}
+.enhanced-graph-official-overlay > .enhanced-graph-official-panel {
+  pointer-events: auto;
+}
+
+.enhanced-graph-official-toolbar {
+  /* Sized to its content rather than stretched across the view: the built-in
+     graph keeps its own settings gear in the top-right, and a full-width bar
+     would put our own toggles underneath it. */
+  /* The gear Obsidian keeps in the top-right corner; the bar stops short of it. */
+  max-width: calc(100% - 48px);
+  display: flex;
+  /* Wrapping is the LAST resort, not the first: the search box gives up its width
+     before anything moves to a second line. `nowrap` was worse — it clipped the
+     end of the row instead. */
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  /* Standalone's toolbar is a full-width strip with a bottom rule; floating over
+     the canvas it needs to read as a card instead. */
+  padding: 6px 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m, 8px);
+  background: var(--background-secondary);
+  /* Only the buttons should swallow clicks, so the graph stays pannable right
+     up to their edges. */
+  pointer-events: none;
+}
+
+.enhanced-graph-official-toolbar .enhanced-graph-toolbar-right {
+  margin-left: 0;
+}
+
+/* Only the search shrinks; every button keeps its label on one line. */
+.enhanced-graph-official-toolbar .enhanced-graph-search-wrap {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.enhanced-graph-official-toolbar .enhanced-graph-search {
+  min-width: 0;
+  width: 100%;
+}
+
+.enhanced-graph-official-toolbar .enhanced-graph-search input {
+  min-width: 0;
+}
+
+.enhanced-graph-official-toolbar .enhanced-graph-button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.enhanced-graph-official-toolbar > * {
+  pointer-events: auto;
+}
+
+.enhanced-graph-official-panel {
+  width: 300px;
+  /* `min-height: 0` lets it scroll inside the column instead of pushing the
+     overlay past the view. */
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  overflow-y: auto;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m, 8px);
+  background: var(--background-primary);
+  box-shadow: var(--shadow-s);
+  font-size: var(--font-ui-smaller, 12px);
+}
+
+.enhanced-graph-official-panel.is-hidden {
+  display: none;
+}
+
+.enhanced-graph-official-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+
+.enhanced-graph-official-panel-header .enhanced-graph-link:first-of-type {
+  margin-left: auto;
+}
+
+.enhanced-graph-official-panel-summary {
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.enhanced-graph-official-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.enhanced-graph-official-insights {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.enhanced-graph-official-tooltip {
+  position: absolute;
+  z-index: 11;
+  max-width: 240px;
+  padding: 7px 9px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 7px;
+  background: var(--background-primary);
+  box-shadow: var(--shadow-l);
+  font-size: 11px;
+  /* Must never swallow the pointer events the graph relies on. */
+  pointer-events: none;
+  line-height: 1.45;
+}
+
+.enhanced-graph-official-tooltip.is-hidden {
+  display: none;
+}
+
+.enhanced-graph-official-tooltip-title {
+  font-weight: 600;
+  color: var(--text-normal);
+  margin-bottom: 2px;
+}
+
+.enhanced-graph-official-tooltip-meta {
+  color: var(--text-faint);
+  font-size: 10px;
+}
+
+.enhanced-graph-official-tooltip-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: 3px;
+}
+
+.enhanced-graph-official-tooltip-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.enhanced-graph-official-tooltip-name {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+}
+
+.enhanced-graph-official-tooltip-value {
+  flex: 0 0 auto;
+  font-weight: 600;
+  color: var(--text-accent);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --------------------------------------------------------------------------
+   Node context menu
+   -------------------------------------------------------------------------- */
+.enhanced-graph-menu {
+  position: absolute;
+  z-index: 30;
+  min-width: 180px;
+  padding: 4px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-primary);
+  box-shadow: var(--shadow-l);
+}
+
+.enhanced-graph-menu-head {
+  padding: 5px 7px 7px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  margin-bottom: 3px;
+}
+
+.enhanced-graph-menu-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-normal);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.enhanced-graph-menu-meta {
+  font-size: 10px;
+  color: var(--text-faint);
+}
+
+.enhanced-graph-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 5px 7px;
+  font-size: 12px;
+  color: var(--text-normal);
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  border-radius: 5px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.enhanced-graph-menu-item:hover {
+  background: var(--background-modifier-hover);
+}

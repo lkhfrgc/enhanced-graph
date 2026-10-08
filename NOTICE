@@ -1,0 +1,30 @@
+# Notices
+
+## Enhanced Graph
+
+Copyright (C) 2026 lkhfrgc
+
+Licensed under the GNU General Public License, version 3 only. See `LICENSE`.
+
+## Upstream reference
+
+The association model and graph pipeline of this plugin were designed with
+reference to **LLM Wiki** (<https://github.com/nashsu/llm_wiki>):
+
+    Copyright (C) 2024-2026 Yong Su
+    Licensed under the GNU General Public License, version 3
+
+This plugin does not include code from that project. The measurements behind
+that statement, the design parameters the two have in common, and the list of
+deliberate differences are recorded in
+[README → 来源与许可](README.md#来源与许可). Anyone who believes the two share
+more than is stated there is invited to open an issue.
+
+Because this plugin is itself distributed under GPL-3.0, the question does not
+change what you may do with it — the terms are the same either way.
+
+## Bundled libraries
+
+The five libraries compiled into `main.js` are MIT-licensed. Their copyright
+lines and the full licence text are in `THIRD-PARTY-NOTICES.md`, which also
+travels with the built plugin.

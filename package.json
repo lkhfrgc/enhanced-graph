@@ -1,0 +1,51 @@
+{
+  "name": "obsidian-enhanced-graph",
+  "version": "1.0.0",
+  "description": "Obsidian 增强关系图谱：关联度引擎 + Louvain 社区发现 + 图谱洞察 + 内置图谱增强",
+  "private": true,
+  "license": "GPL-3.0-only",
+  "author": "lkhfrgc",
+  "type": "module",
+  "scripts": {
+    "architecture": "node scripts/architecture-report.mjs",
+    "archive:terms": "node scripts/archive-terms.mjs",
+    "audit:policy": "node scripts/policy-audit.mjs",
+    "audit:submission": "node scripts/pre-submission-audit.mjs",
+    "build": "node esbuild.config.mjs production",
+    "build:ci": "node esbuild.config.mjs production --out=.",
+    "dev": "node esbuild.config.mjs --watch",
+    "eval:weights": "node node_modules/esbuild/bin/esbuild scripts/weight-eval.ts --bundle --platform=node --format=cjs --outfile=scripts/weight-eval.cjs --log-level=warning && node scripts/weight-eval.cjs",
+    "harness": "node esbuild.config.mjs harness",
+    "palette": "node scripts/build-palette.mjs",
+    "similarity:scan": "node scripts/similarity-scan.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "verify": "npm run typecheck && npm test && npm run verify:vault && npm run harness && npm run verify:view && npm run build && npm run verify:bundle",
+    "verify:bundle": "node scripts/smoke-load.cjs",
+    "verify:obsidian": "node scripts/obsidian-check.mjs --attach",
+    "verify:vault": "node node_modules/esbuild/bin/esbuild scripts/verify-vault.ts --bundle --platform=node --format=cjs --outfile=scripts/verify-vault.cjs --log-level=warning && node scripts/verify-vault.cjs",
+    "verify:view": "node scripts/harness-check.mjs"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.10.2",
+    "esbuild": "^0.25.0",
+    "jsdom": "^29.1.1",
+    "obsidian": "1.8.7",
+    "playwright-core": "^1.63.0",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.0"
+  },
+  "dependencies": {
+    "graphology": "^0.26.0",
+    "graphology-communities-louvain": "^2.0.2",
+    "graphology-layout-forceatlas2": "^0.10.1",
+    "js-yaml": "^4.1.0",
+    "sigma": "4.0.0-beta.8"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lkhfrgc/enhanced-graph.git"
+  }
+}
