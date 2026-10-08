@@ -35,7 +35,7 @@ import { countUndismissed } from "../view/insights-panel";
 import { communityColor, hexToRgbInt, themePalette, typeColor } from "../view/palette";
 import { OfficialHoverTooltip, type HoverTooltipOptions } from "./official-hover";
 import { OfficialLegend } from "./official-legend";
-import { OfficialMarkerLayer, type MarkerPoint } from "./official-markers";
+import { OfficialMarkerLayer, type MarkerLine, type MarkerPoint } from "./official-markers";
 import { OfficialToolbar } from "./official-toolbar";
 import { OfficialSidePanel, type OfficialPanelOptions } from "./official-panel";
 import {
@@ -1032,7 +1032,7 @@ export class OfficialGraphEnhancer {
       // The ticker stops below without drawing again, so the rings have to be
       // wiped here — otherwise they stay on the canvas with nothing left to
       // remove them.
-      attachment.markers.draw([], this.markerPalette());
+      attachment.markers.draw([], [], this.markerPalette());
       attachment.panel.render();
       renderer.changed?.();
       return;
@@ -1314,7 +1314,7 @@ export class OfficialGraphEnhancer {
     );
     if (!attachment) return;
     if (!focused || focused.size === 0) {
-      attachment.markers.draw([], this.markerPalette());
+      attachment.markers.draw([], [], this.markerPalette());
       return;
     }
 
@@ -1332,14 +1332,31 @@ export class OfficialGraphEnhancer {
     const panY = renderer.panY ?? 0;
     const dpr = window.devicePixelRatio || 1;
 
-    const points: MarkerPoint[] = [];
-    for (const id of focused) {
+    const screenOf = (id: string): { x: number; y: number } | null => {
       const officialId = officialIdOf.get(id);
       const node = officialId ? lookup[officialId] : undefined;
-      if (!node || typeof node.x !== "number" || typeof node.y !== "number") continue;
+      if (!node || typeof node.x !== "number" || typeof node.y !== "number") return null;
+      return { x: (node.x * scale + panX) / dpr, y: (node.y * scale + panY) / dpr };
+    };
+
+    // Every edge of the focus, as a segment. See the note in OfficialMarkerLayer:
+    // the built-in graph's own edge brightness is not something this plugin can
+    // reliably drive, so the focus draws its edges here instead.
+    const lines: MarkerLine[] = [];
+    for (const [a, b] of this.focusEdgePairs(renderer)) {
+      const from = screenOf(a);
+      const to = screenOf(b);
+      if (!from || !to) continue;
+      lines.push({ x1: from.x, y1: from.y, x2: to.x, y2: to.y });
+    }
+
+    const points: MarkerPoint[] = [];
+    for (const id of focused) {
+      const position = screenOf(id);
+      if (!position) continue;
       points.push({
-        x: (node.x * scale + panX) / dpr,
-        y: (node.y * scale + panY) / dpr,
+        x: position.x,
+        y: position.y,
         // A fixed size of our own, in CSS pixels, and deliberately not derived
         // from the node. Pinned at the centre it does not have to match anything,
         // which is the point: four attempts to compute the node's drawn radius
@@ -1348,7 +1365,7 @@ export class OfficialGraphEnhancer {
         radius: MARKER_RADIUS_PX,
       });
     }
-    attachment.markers.draw(points, this.markerPalette());
+    attachment.markers.draw(points, lines, this.markerPalette());
   }
 
   private markerPalette(): { ring: string; halo: string } {
@@ -1399,7 +1416,7 @@ export class OfficialGraphEnhancer {
       // The ticker stops below without drawing again, so the rings have to be
       // wiped here — otherwise they stay on the canvas with nothing left to
       // remove them.
-      attachment.markers.draw([], this.markerPalette());
+      attachment.markers.draw([], [], this.markerPalette());
       attachment.panel.render();
       renderer.changed?.();
       return;

@@ -18,8 +18,19 @@ export interface MarkerPoint {
   radius: number;
 }
 
+/** One edge of the focus, in the same CSS-pixel space as {@link MarkerPoint}. */
+export interface MarkerLine {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
 /** Thickness of the dark rim that separates the dot from the node beneath it. */
 export const MARKER_RIM_PX = 2;
+
+/** Stroke width of a highlighted edge, and of the dark outline under it. */
+export const EDGE_WIDTH_PX = 2.5;
 
 export interface MarkerPalette {
   readonly ring: string;
@@ -47,8 +58,8 @@ export class OfficialMarkerLayer {
     this.mounted = false;
   }
 
-  /** Redraws the rings; an empty list just clears the layer. */
-  draw(points: readonly MarkerPoint[], palette: MarkerPalette): void {
+  /** Redraws the edges and rings; empty lists just clear the layer. */
+  draw(points: readonly MarkerPoint[], lines: readonly MarkerLine[], palette: MarkerPalette): void {
     if (!this.mounted) return;
     const width = this.container.clientWidth;
     const height = this.container.clientHeight;
@@ -68,6 +79,43 @@ export class OfficialMarkerLayer {
     if (!context) return;
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
     context.clearRect(0, 0, width, height);
+    if (points.length === 0 && lines.length === 0) return;
+
+    // The edges are drawn here rather than left to the built-in graph.
+    //
+    // The built-in graph owns its own edge alpha, and what it ends up drawing is
+    // not something this plugin can reliably drive: measured on a real vault, a
+    // link with `alpha: 1` was written and stayed written, the render loop was
+    // shown not to touch it, and the line still did not read as lit against the
+    // ones beside it. Rather than keep chasing the renderer's own state, the
+    // focus draws its edges itself — the same choice the marker already makes for
+    // the node itself, and for the same reason: the position transform is known
+    // and correct, and everything else is ours to decide.
+    //
+    // Two strokes, matching the marker: a wider dark one that separates the edge
+    // from whatever is underneath, and a narrower bright one that carries it.
+    if (lines.length > 0) {
+      context.lineCap = "round";
+      context.beginPath();
+      for (const line of lines) {
+        if (![line.x1, line.y1, line.x2, line.y2].every(Number.isFinite)) continue;
+        context.moveTo(line.x1, line.y1);
+        context.lineTo(line.x2, line.y2);
+      }
+      // One bright stroke, no dark outline.
+      //
+      // The outline was there to separate the edge from whatever is under it, but
+      // at 5px against a 2.5px core the dark stroke dominated and the focus came
+      // out as black spokes. A single bright line is what the built-in graph's own
+      // highlighted edges look like, which is what these are standing in for.
+      // `halo` is the LIGHT of the two: the marker draws a light outer disc and a
+      // dark inner one, so using `ring` here painted the edges black. Measured by
+      // looking at the result, after the first attempt came out as black spokes.
+      context.lineWidth = EDGE_WIDTH_PX;
+      context.strokeStyle = palette.halo;
+      context.stroke();
+    }
+
     if (points.length === 0) return;
 
     for (const point of points) {
