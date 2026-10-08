@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" href="data:," />
+    <title>Enhanced Graph — built-in graph filters</title>
+    <style>
+      /* The theme variables the chrome reads; the same set index.html defines. */
+      :root,
+      body.theme-dark {
+        --background-primary: #1e1e1e;
+        --background-primary-alt: #1a1a1a;
+        --background-secondary: #161616;
+        --background-secondary-alt: #262626;
+        --background-modifier-border: #333333;
+        --background-modifier-hover: rgba(255, 255, 255, 0.06);
+        --background-modifier-border-focus: #555555;
+        --text-normal: #dcddde;
+        --text-muted: #b3b3b3;
+        --text-faint: #666666;
+        --text-accent: #7f6df2;
+        --text-error: #f87171;
+        --text-warning: #d29922;
+        --text-on-accent: #ffffff;
+        --interactive-accent: #7f6df2;
+        --shadow-s: 0 1px 2px rgba(0, 0, 0, 0.3);
+        --shadow-l: 0 4px 16px rgba(0, 0, 0, 0.5);
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+        background: var(--background-primary);
+        color: var(--text-normal);
+      }
+    </style>
+    <link rel="stylesheet" href="../styles.css" />
+  </head>
+  <body class="theme-dark">
+    <script type="module" src="./official-filters.bundle.js"></script>
+  </body>
+</html>

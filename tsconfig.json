@@ -18,5 +18,5 @@
     "lib": ["DOM", "ES2022"],
     "types": ["node"]
   },
-  "include": ["src/**/*.ts", "test/**/*.ts", "esbuild.config.mjs", "vitest.config.ts"]
+  "include": ["src/**/*.ts", "test/**/*.ts", "harness/official-filters.ts", "esbuild.config.mjs", "vitest.config.ts"]
 }

@@ -260,8 +260,14 @@ function setup(
       hideStructural: state.hideStructural,
       hideIsolated: state.hideIsolated,
     }),
-    onSetVisibility: (patch) => {
+    onSetVisibility: async (patch) => {
       Object.assign(state, patch);
+      // `main.ts` awaits the settings write and then calls `refreshViews()`. The
+      // delay is not decoration: a re-render requested while the click that
+      // caused it is still in flight behaves differently from one that lands
+      // afterwards, and a fixture that skips it hides exactly that.
+      await Promise.resolve();
+      state.enhancer.refresh();
     },
     getTypeColors: () => state.typeColors,
     getCommunityColors: () => state.communityColors,
@@ -1472,6 +1478,105 @@ describe("the built-in graph's toolbar", () => {
     input!.checked = false;
     input!.dispatchEvent(new Event("change", { bubbles: true }));
     expect(h.hiddenTypes).toContain("concept");
+  });
+
+  /**
+   * The reported bug, second time around: 全部恢复 restored most tags and left a
+   * few unchecked, and a second click finished the job.
+   *
+   * The first fix for this was written from reasoning, because nothing in the
+   * suite could reproduce it — five attempts, all passing with the bug present.
+   * What every one of them was missing is focus. A real click on a checkbox
+   * leaves it focused, `isEditingWithin` counts an INPUT as an interaction, and
+   * so the panel's re-render is deferred for as long as the user keeps working
+   * inside it. The filters body is then the only record of what the user has
+   * done, and everything it captured at render time is stale:
+   *
+   *   - each toggle rebuilt the whole set from the render-time copy, so three
+   *     unchecks in a row left only the last tag in the settings;
+   *   - the restore button's "is anything hidden?" test read the same copy, and
+   *     the copy said "nothing" while three boxes sat unticked on screen.
+   *
+   * The click itself is the second half. Flushing the deferred re-render on
+   * `focusout` happens while the button is held down, and rebuilding the panel
+   * then destroys the button mid-click: measured in Chromium, a 120ms press
+   * dispatches no `click` at all, which is why the gesture had to be repeated.
+   */
+  it("hides several tags in a row without losing any, and restores them in one click", async () => {
+    const h = setup(
+      [{ id: "a.md" }, { id: "b.md" }, { id: "c.md" }, { id: "d.md" }],
+      [
+        makeNode({ id: "a", tags: ["alpha"] }),
+        makeNode({ id: "b", tags: ["beta"] }),
+        makeNode({ id: "c", tags: ["gamma"] }),
+        makeNode({ id: "d", tags: ["delta"] }),
+      ],
+    );
+    h.enhancer.start();
+    buttonSaying(toolbarOf(h), t("toolbar.filter"))?.dispatchEvent(
+      new MouseEvent("click", { bubbles: true }),
+    );
+    const panel = h.renderer.containerEl.querySelector<HTMLElement>(".enhanced-graph-official-panel")!;
+
+    // Re-queried every time: the panel replaces its body whenever it re-renders,
+    // so a list captured once goes stale exactly when it matters.
+    const tagBoxes = (): HTMLInputElement[] =>
+      Array.from(panel.querySelectorAll<HTMLInputElement>(".enhanced-graph-tag-list input[type=checkbox]"));
+    const boxFor = (tag: string): HTMLInputElement => {
+      const box = tagBoxes().find((candidate) => candidate.closest("label")?.textContent?.includes(tag));
+      if (!box) throw new Error(`no tag row for ${tag}`);
+      return box;
+    };
+    const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
+    /**
+     * Presses a control the way a person and Chromium do.
+     *
+     * `mousedown` (which is also what focuses the button), a held press, the
+     * release, and only then the click — and, the rule this bug turned on, an
+     * element that is gone by the end of the press receives NO `click` at all.
+     * Both halves are measured in Edge rather than assumed: a 120ms press whose
+     * button was rebuilt on mousedown reached nothing, and so did a rebuild on
+     * mouseup or 0ms after it, because the click arrives in a later task than the
+     * release. jsdom has no such rule — it dispatches at a detached node happily
+     * — so it is written out here. `scripts/verify-click-during-rebuild.mjs`
+     * holds the measurements; `scripts/verify-official-filters.mjs` presses the
+     * real panel in a real browser.
+     */
+    const press = async (control: HTMLElement): Promise<void> => {
+      control.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+      control.focus();
+      await settle();
+      window.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+      await settle();
+      if (!control.isConnected) return;
+      control.click();
+      await settle();
+      await settle();
+    };
+
+    // Three unchecks in a row, each focusing its box the way a real click does.
+    // The settings write and the deferred re-render follow inside the fixture.
+    for (const tag of ["alpha", "beta", "gamma"]) {
+      const box = boxFor(tag);
+      box.focus();
+      box.checked = false;
+      box.dispatchEvent(new Event("change", { bubbles: true }));
+      await settle();
+    }
+    // The premise of the test: the panel has NOT been rebuilt under the user.
+    expect(document.activeElement).toBe(boxFor("gamma"));
+    expect([...h.hiddenTags].sort()).toEqual(["alpha", "beta", "gamma"]);
+
+    // One press of 全部恢复. It has to land, and it has to be enough.
+    const restore = Array.from(panel.querySelectorAll("button")).find((candidate) =>
+      (candidate.textContent ?? "").includes(t("filter.clearTags")),
+    );
+    expect(restore).toBeTruthy();
+    await press(restore!);
+
+    expect(h.hiddenTags).toEqual([]);
+    expect(tagBoxes().filter((box) => !box.checked)).toHaveLength(0);
   });
 
   it("hides a filtered type from the built-in graph itself", () => {

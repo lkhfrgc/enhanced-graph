@@ -609,6 +609,18 @@ export class OfficialGraphEnhancer {
    *
    * Every switch writes the shared settings, so a filter set here hides the same
    * notes in both views — there is one `isNodeVisible` behind them.
+   *
+   * The hidden tags are handed over as a LIVE view and the toggles read the
+   * settings at the moment they fire, not from the copy this body was built with.
+   * The panel is deliberately not re-rendered while one of its controls has focus
+   * (a real click focuses the checkbox, and rebuilding the list under the pointer
+   * would take the caret out of the search box), so that copy is the only thing
+   * this body would ever see: a second uncheck then rewrote the whole set as
+   * "the first render's set, plus this one tag" and dropped the tag hidden a
+   * moment earlier, and the restore button's "is anything hidden?" test answered
+   * from a set that predated every toggle the user had made. Measured: three
+   * unchecks in a row left the settings holding one tag while three boxes sat
+   * unticked on screen, which is "点击后总是剩下几个没有勾选".
    */
   private renderFiltersBody(el: HTMLElement): void {
     const { graph } = this.deps.getData();
@@ -617,17 +629,17 @@ export class OfficialGraphEnhancer {
     renderFilters(el, {
       graph,
       hiddenTypes: hiddenTypes as never,
-      hiddenTags: filters.hiddenTags,
+      hiddenTags: liveSet(() => this.deps.getVisibility().hiddenTags),
       hideIsolated: filters.hideIsolated,
       hideStructural: filters.hideStructural,
       onToggleType: (type, visible) => {
-        const next = new Set(filters.hiddenTypes);
+        const next = new Set(this.deps.getVisibility().hiddenTypes);
         if (visible) next.delete(type);
         else next.add(type);
         void this.deps.onSetVisibility({ hiddenTypes: [...next] });
       },
       onToggleTag: (tag, visible) => {
-        const next = new Set(filters.hiddenTags);
+        const next = new Set(this.deps.getVisibility().hiddenTags);
         if (visible) next.delete(tag);
         else next.add(tag);
         void this.deps.onSetVisibility({ hiddenTags: [...next] });
@@ -636,10 +648,9 @@ export class OfficialGraphEnhancer {
       // did; the hidden-type and visibility switches are separate decisions the
       // user made elsewhere, and clearing them here would silently overrule them.
       //
-      // Redrawn once the write lands. Ticking the boxes in place is not enough:
-      // `onSetVisibility` replaces the set, while the options this body was built
-      // with still hold the old one, so the next repaint put the ticks straight
-      // back. Reported as "the tag checkboxes do not all come back at once".
+      // Redrawn once the write lands: the boxes are ticked in place as well, but
+      // a tag that was pinned to the top because it was hidden has to move back
+      // into its place in the list, and only a redraw does that.
       onClearTags: () => {
         void Promise.resolve(this.deps.onSetVisibility({ hiddenTags: [] })).then(() => {
           el.empty();
@@ -681,7 +692,10 @@ export class OfficialGraphEnhancer {
       typeColorOverrides: this.deps.getTypeColors(),
       hiddenTypes: filters.hiddenTypes,
       onToggleType: (type) => {
-        const next = new Set(filters.hiddenTypes);
+        // Read now, not from the copy this legend was drawn with: the legend is
+        // not rebuilt between two clicks either, and a stale base would drop the
+        // type switched off a moment earlier.
+        const next = new Set(this.deps.getVisibility().hiddenTypes);
         if (next.has(type)) next.delete(type);
         else next.add(type);
         void this.deps.onSetVisibility({ hiddenTypes: [...next] });
@@ -1648,6 +1662,34 @@ export class OfficialGraphEnhancer {
       /* nothing to restore */
     }
   }
+}
+
+/**
+ * A `ReadonlySet` that reads its source on every access instead of holding a copy.
+ *
+ * The filters panel is not re-rendered while a control inside it has focus, so a
+ * set captured at render time is stale by the next click — and `graph-filters`
+ * reads `hiddenTags` later than that, both to decide whether the restore button
+ * has anything to do and to keep its own visibility in step. Handing it the live
+ * settings is what makes those reads answer for the state the user is looking at.
+ */
+function liveSet<T>(source: () => ReadonlySet<T>): ReadonlySet<T> {
+  const view: ReadonlySet<T> = {
+    get size(): number {
+      return source().size;
+    },
+    has: (value: T): boolean => source().has(value),
+    keys: (): IterableIterator<T> => source().keys(),
+    values: (): IterableIterator<T> => source().values(),
+    entries: (): IterableIterator<[T, T]> => source().entries(),
+    // The third argument is this view rather than the source, so a callback that
+    // keeps it cannot end up holding the underlying set.
+    forEach: (callback: (value: T, value2: T, set: ReadonlySet<T>) => void, thisArg?: unknown): void => {
+      for (const value of source()) callback.call(thisArg, value, value, view);
+    },
+    [Symbol.iterator]: (): IterableIterator<T> => source()[Symbol.iterator](),
+  };
+  return view;
 }
 
 function leafKey(leaf: WorkspaceLeaf): number {

@@ -70,6 +70,16 @@ export class OfficialSidePanel {
   /** A re-render that was deferred because a control had focus. */
   private pendingRender = false;
   private mounted = false;
+  /**
+   * True while the pointer is down inside the panel.
+   *
+   * A rebuild between mousedown and mouseup removes the element the press is
+   * being delivered to, and Chromium then dispatches NO `click` at all. Measured
+   * with real input: a 120ms press reached nothing, and so did a rebuild on
+   * mouseup or 0ms after it — the click arrives in a later task than the release,
+   * which leaves the end of the click as the first safe moment to rebuild.
+   */
+  private pressed = false;
   /** The node ids the insights cards should mark as active. */
   private activeNodeIds: ReadonlySet<string> = new Set();
   /** Insight sections the user folded away; see `InsightSection`. */
@@ -82,18 +92,37 @@ export class OfficialSidePanel {
     this.el = document.createElement("div");
   }
 
+  /** The press is over, wherever it ended. */
+  private readonly onPointerRelease = (): void => {
+    this.pressed = false;
+  };
+
   /** Builds the panel element and appends it to the container. */
   mount(): void {
     this.el.className = "enhanced-graph-official-panel";
     this.container.appendChild(this.el);
-    // A deferred render has to happen once the interaction is over.
+    this.el.addEventListener("mousedown", () => {
+      this.pressed = true;
+    });
+    // On the window, not the panel: a press that is dragged out still ends.
+    window.addEventListener("mouseup", this.onPointerRelease);
+    // A press can also end without its release arriving — the window losing focus
+    // mid-press is the common one — and a press that never ended would quietly
+    // stop the panel from catching up at all.
+    window.addEventListener("blur", this.onPointerRelease);
+    // Catching up has to wait for the whole gesture. Focus leaving the panel is
+    // the honest signal that a keyboard interaction is over — while focus stays
+    // inside, the press that moved it there may still be in flight. A click is
+    // the last event of that press; it bubbles through here after the control's
+    // own handler has already done its work, so a rebuild then is safe.
     this.el.addEventListener("focusout", () => {
       window.setTimeout(() => {
-        if (this.pendingRender && !isEditingWithin(this.el)) {
-          this.pendingRender = false;
-          this.render();
-        }
+        if (this.el.contains(document.activeElement)) return;
+        this.flushPendingRender();
       }, 0);
+    });
+    this.el.addEventListener("click", () => {
+      window.setTimeout(() => this.flushPendingRender(), 0);
     });
     this.mounted = true;
   }
@@ -142,6 +171,20 @@ export class OfficialSidePanel {
     }
 
   /**
+   * Draws a render that was deferred because a control of ours was being used.
+   *
+   * Nothing happens while the press or the typing is still going on: an input or
+   * a select holding focus means a half-typed search or a colour dialog would be
+   * thrown away, and a pointer that is still down means the click has not been
+   * delivered yet.
+   */
+  private flushPendingRender(): void {
+    if (!this.pendingRender || this.pressed || isEditingWithin(this.el)) return;
+    this.pendingRender = false;
+    this.render();
+  }
+
+  /**
    * Show one tab, or hide the whole panel.
    *
    * Driven by the toolbar's toggles, so the panel and the button that opens it
@@ -154,12 +197,13 @@ export class OfficialSidePanel {
   }
   /** Re-renders in place. */
   render(): void {
-    // Never rebuild while one of our own controls holds focus. Emptying the
+    // Never rebuild while one of our own controls is being used. Emptying the
     // panel removes the very element the interaction is attached to: clicking a
     // colour swatch closed the native picker the instant it opened, because the
-    // settings change it triggered re-rendered the panel. Deferring keeps every
-    // control usable, not just that one.
-    if (this.mounted && isEditingWithin(this.el)) {
+    // settings change it triggered re-rendered the panel, and a press that spans
+    // a rebuild gets no `click` at all. Deferring keeps every control usable, not
+    // just that one.
+    if (this.mounted && (this.pressed || isEditingWithin(this.el))) {
       this.pendingRender = true;
       return;
     }
@@ -245,6 +289,10 @@ export class OfficialSidePanel {
   }
 
   destroy(): void {
+    // On the window, so they outlive the panel: leaving them behind kept a
+    // detached panel alive for the rest of the session.
+    window.removeEventListener("mouseup", this.onPointerRelease);
+    window.removeEventListener("blur", this.onPointerRelease);
     this.el.remove();
   }
 }

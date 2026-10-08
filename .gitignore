@@ -5,6 +5,7 @@ node_modules/
 # (`npm run harness`, `npm run verify:vault`, `npm run verify:view`), and the
 # screenshots are non-deterministic, so they do not belong in version control.
 harness/bundle.js
+harness/official-filters.bundle.js
 harness/graph.json
 harness/shots/
 scripts/verify-vault.cjs

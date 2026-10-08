@@ -1,21 +1,34 @@
 /**
  * Drives the filters panel in a real Obsidian and checks the behaviour by hand.
  *
- * Four attempts to assert this in the harness all failed to discriminate — they
- * passed with the bug present — because the harness clicks and then reads without
- * letting anything repaint in between. This does what a person does: click, wait,
- * click, wait, then look at the boxes.
+ * The point of this file is the INPUT, not the assertions. Five earlier attempts
+ * to reproduce the 全部恢复 bug all passed with it present, because every one of
+ * them clicked synthetically: `dispatchEvent(new MouseEvent("click"))` and
+ * `element.click()` fire a click without pressing anything. A real press focuses
+ * the control first (which is what defers the panel's re-render, and what makes a
+ * rebuild land between mousedown and mouseup), and it lasts long enough for a 0ms
+ * timer to run inside it. Both differences are the bug.
  *
- * Quit Obsidian first. Usage: node scripts/check-filters.mjs
+ * So everything here is pressed, held and released the way a person does:
+ * `locator.click({ delay })` holds the button down for `delay` ms. Measured in
+ * Edge, a 120ms press that spans a panel rebuild dispatches no click at all —
+ * `node scripts/verify-click-during-rebuild.mjs` holds that measurement.
+ *
+ * Attaches to an Obsidian already running with a debug port, or starts one.
+ * The plugin is reloaded first, so the bundle under test is the one on disk.
+ *
+ * Usage: node scripts/check-filters.mjs
  */
 import { spawn } from "node:child_process";
-import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { chromium } from "playwright-core";
 
 const OBSIDIAN = process.env.OBSIDIAN_EXE ?? "D:\\ToWrite\\obsidian\\Obsidian.exe";
+const PLUGIN_ID = "enhanced-graph";
+/** Long enough for a deferred re-render to land inside the press. */
+const PRESS_MS = 120;
 let port = 9222;
 
 const alive = async () => {
@@ -76,7 +89,18 @@ if (!page) {
   process.exit(1);
 }
 
-await page.waitForFunction(() => Boolean(window.app.plugins?.plugins?.["enhanced-graph"]), null, { timeout: 60000 });
+await page.waitForFunction((id) => Boolean(window.app.plugins?.plugins?.[id]), PLUGIN_ID, { timeout: 60000 });
+
+// Reload the plugin: the vault copy is what Obsidian loads, and a stale one has
+// made every check here pass against code that had already been replaced.
+console.log("Reloading the plugin so the bundle on disk is the one under test…");
+await page.evaluate(async (id) => {
+  await window.app.plugins.disablePlugin(id);
+  await new Promise((r) => setTimeout(r, 500));
+  await window.app.plugins.enablePlugin(id);
+  await new Promise((r) => setTimeout(r, 1500));
+}, PLUGIN_ID);
+
 // Obsidian throws "No tab group found" if the workspace has not laid out yet, so
 // opening the graph is retried rather than attempted once.
 await page.evaluate(async () => {
@@ -99,72 +123,88 @@ await page.waitForFunction(
 );
 await page.waitForTimeout(6000);
 
-const step = async (label, fn) => {
-  const result = await page.evaluate(fn);
-  console.log("");
-  console.log("--- " + label + " ---");
-  console.log(JSON.stringify(result, null, 1));
-  return result;
+/** What the panel and the settings say right now. */
+const readState = () =>
+  page.evaluate((id) => {
+    const boxes = [...document.querySelectorAll(".enhanced-graph-tag-list input[type=checkbox]")];
+    const plugin = window.app.plugins.plugins[id];
+    return {
+      tagRows: boxes.length,
+      unticked: boxes.filter((el) => !el.checked).length,
+      hiddenTags: (plugin.settings.hiddenTags ?? []).slice(),
+      hideIsolated: plugin.settings.hideIsolated,
+      hideStructural: plugin.settings.hideStructural,
+      // The deferral this bug lives in: a checkbox that still has focus is what
+      // stops the panel from re-rendering between two clicks.
+      focus: document.activeElement?.tagName ?? null,
+      focusInPanel: Boolean(document.activeElement?.closest?.(".enhanced-graph-official-filters")),
+    };
+  }, PLUGIN_ID);
+
+const results = [];
+const check = (name, pass, detail) => {
+  results.push({ name, pass: Boolean(pass) });
+  console.log(`  ${pass ? "PASS" : "FAIL"}  ${name}${detail ? `: ${detail}` : ""}`);
 };
 
-// Open the filters tab.
-await step("open the filters panel", async () => {
-  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-  const bar = document.querySelector(".enhanced-graph-official-toolbar");
-  const button = [...(bar?.querySelectorAll("button") ?? [])].find((el) =>
-    (el.textContent ?? "").includes("过滤器"),
-  );
-  button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-  await wait(700);
-  return { toolbarButtonFound: Boolean(button), panelOpen: Boolean(document.querySelector(".enhanced-graph-official-filters")) };
-});
+// Open the filters tab the way a person does: a real press on its toolbar button.
+const filterButton = page.locator(".enhanced-graph-official-toolbar button", { hasText: "过滤器" }).first();
+await filterButton.click({ delay: PRESS_MS });
+await page.waitForSelector(".enhanced-graph-tag-list input[type=checkbox]", { timeout: 15000 });
+await page.waitForTimeout(500);
 
-// Hide a few tags the way a person does, then let everything settle.
-const before = await step("hide three tags by clicking their boxes", async () => {
-  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-  const boxes = [...document.querySelectorAll(".enhanced-graph-tag-list input[type=checkbox]")];
-  const ticked = boxes.filter((el) => el.checked);
-  for (const box of ticked.slice(0, 3)) {
-    box.click();
-    await wait(150);
+const round = async (label, query) => {
+  console.log("");
+  console.log(`--- ${label} ---`);
+  if (query !== null) {
+    const search = page.locator(".enhanced-graph-tag-search").first();
+    await search.click({ delay: PRESS_MS });
+    await search.fill(query);
+    await page.waitForTimeout(600);
   }
-  await wait(1200);
-  const after = [...document.querySelectorAll(".enhanced-graph-tag-list input[type=checkbox]")];
-  return {
-    tagRows: after.length,
-    untickedAfterHiding: after.filter((el) => !el.checked).length,
-    visibilitySwitches: [...document.querySelectorAll(".enhanced-graph-official-filters .enhanced-graph-checkbox")]
-      .filter((row) => /孤立|结构/.test(row.textContent ?? ""))
-      .map((row) => ({ text: (row.textContent ?? "").trim().slice(0, 12), checked: row.querySelector("input")?.checked })),
-  };
-});
 
-// Press restore, wait for whatever repaint follows, then look at the boxes.
-const restored = await step("press 全部恢复, then wait and re-read the boxes", async () => {
-  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-  const button = [...document.querySelectorAll("button")].find((el) =>
-    (el.textContent ?? "").includes("全部恢复"),
+  const before = await readState();
+  console.log(`  rows ${before.tagRows}, unticked ${before.unticked}, hidden ${JSON.stringify(before.hiddenTags)}`);
+
+  // Three real presses on three tag checkboxes. Each one focuses the box, which
+  // is what defers the panel's re-render for the whole sequence.
+  const boxes = page.locator(".enhanced-graph-tag-list input[type=checkbox]");
+  for (let index = 0; index < 3; index += 1) {
+    await boxes.nth(index).click({ delay: PRESS_MS });
+    await page.waitForTimeout(400);
+  }
+  const afterHiding = await readState();
+  console.log(
+    `  after three presses: unticked ${afterHiding.unticked}, hidden ${JSON.stringify(afterHiding.hiddenTags)}, ` +
+      `focus ${afterHiding.focus} inPanel=${afterHiding.focusInPanel}`,
   );
-  button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-  await wait(2000);
-  // Force a repaint afterwards: this is the step the harness never did, and the
-  // one that put the ticks back when the list was rebuilt from a stale set.
-  document.querySelector(".enhanced-graph-official-filters")?.dispatchEvent(new Event("scroll", { bubbles: true }));
-  window.dispatchEvent(new Event("resize"));
-  await wait(1500);
+  check(
+    `${label}: three presses hide three tags, and the settings keep all three`,
+    afterHiding.hiddenTags.length === 3 && afterHiding.unticked === 3,
+    `${afterHiding.unticked} unticked on screen, ${afterHiding.hiddenTags.length} in the settings (want 3 and 3)`,
+  );
 
-  const boxes = [...document.querySelectorAll(".enhanced-graph-tag-list input[type=checkbox]")];
-  const plugin = window.app.plugins.plugins["enhanced-graph"];
-  return {
-    buttonFound: Boolean(button),
-    tagRows: boxes.length,
-    untickedAfterRestore: boxes.filter((el) => !el.checked).length,
-    hiddenTagsInSettings: [...(plugin.settings.hiddenTags ?? [])].length,
-    hideIsolated: plugin.settings.hideIsolated,
-    hideStructural: plugin.settings.hideStructural,
-    untickedRows: boxes.filter((el) => !el.checked).map((el) => el.closest("label")?.textContent?.slice(0, 20)),
-  };
-});
+  // The press under test, held the way a person holds it.
+  await page.locator("button", { hasText: "全部恢复" }).first().click({ delay: PRESS_MS });
+  await page.waitForTimeout(1200);
+  const afterRestore = await readState();
+  console.log(
+    `  after 全部恢复: unticked ${afterRestore.unticked}, hidden ${JSON.stringify(afterRestore.hiddenTags)}`,
+  );
+  check(
+    `${label}: ONE press of 全部恢复 brings every tag back`,
+    afterRestore.hiddenTags.length === 0 && afterRestore.unticked === 0,
+    `${afterRestore.unticked} unticked on screen, ${afterRestore.hiddenTags.length} in the settings (want 0 and 0)`,
+  );
+  check(
+    `${label}: the visibility switches were left alone`,
+    afterRestore.hideIsolated === before.hideIsolated && afterRestore.hideStructural === before.hideStructural,
+    `hideIsolated=${afterRestore.hideIsolated} hideStructural=${afterRestore.hideStructural}`,
+  );
+};
+
+await round("plain list", null);
+await round("with a tag search query", "a");
 
 const shot = path.join(os.tmpdir(), "filters-check.png");
 await page.screenshot({ path: shot });
@@ -172,18 +212,9 @@ console.log("");
 console.log("screenshot: " + shot);
 console.log("");
 console.log("VERDICT");
-console.log("  tag rows                     " + restored.tagRows);
-console.log("  hidden tags left in settings " + restored.hiddenTagsInSettings + "   (want 0)");
-console.log("  unticked boxes after restore " + restored.untickedAfterRestore + "   (want 0)");
-console.log(
-  "  " +
-    (restored.hiddenTagsInSettings === 0 && restored.untickedAfterRestore === 0
-      ? "PASS: every tag came back, in the settings and on screen"
-      : "FAIL: see the counts above"),
-);
-console.log("  visibility switches: hideIsolated=" + restored.hideIsolated + " hideStructural=" + restored.hideStructural + "  (must be unchanged by the restore)");
-void before;
-void fs;
+for (const result of results) console.log(`  ${result.pass ? "ok  " : "FAIL"} ${result.name}`);
+const failed = results.filter((result) => !result.pass).length;
+console.log(failed === 0 ? "  all checks passed" : `  ${failed} check(s) failed`);
 
 await browser.close();
-process.exit(0);
+process.exit(failed === 0 ? 0 : 1);
