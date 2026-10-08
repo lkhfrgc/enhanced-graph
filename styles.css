@@ -922,12 +922,26 @@
   /* A definite width: with `left` only, the box is shrink-to-fit and the
      toolbar inside it had no real space to measure against. */
   right: var(--size-4-3, 12px);
+  /* A definite height, for the same reason. Without `bottom` the overlay's height
+     came from its content, so a percentage on any child resolved against `auto`
+     and was ignored — which is why capping the panel did nothing. With `bottom`
+     set, the height comes from the graph view, which has a real one, and the cap
+     below works and follows the pane rather than the window.
+     `pointer-events: none` keeps the enlarged box from intercepting anything. */
+  bottom: var(--size-4-3, 12px);
   z-index: 11;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 8px;
-  max-height: calc(100% - var(--size-4-6, 24px));
+  /* Reserve the legend's strip.
+     The legend is absolutely positioned at the bottom-left, so it is out of flow
+     and the column above knows nothing about it. Padding here makes the column's
+     content area stop above it, and the panel — allowed to shrink — fills
+     whatever is left. Capping the panel with a percentage instead was measured
+     wrong: `100%` counts from the top of this box, while the panel starts below
+     the toolbar, so it overhung the legend by exactly the toolbar's height. */
+  padding-bottom: 212px;
   pointer-events: none;
 }
 
@@ -940,7 +954,11 @@
   max-width: none;
   max-height: none;
   overflow-y: auto;
-  z-index: 10;
+  /* Above the panel. The panel grows with the number of insights and reached down
+     over the legend, hiding the community list behind it. Raising this decides
+     who wins when they do meet; capping the panel's height below stops them
+     meeting at all, which is the real fix. */
+  z-index: 30;
 }
 .enhanced-graph-official-overlay > .enhanced-graph-official-panel {
   pointer-events: auto;
@@ -1002,6 +1020,11 @@
   /* `min-height: 0` lets it scroll inside the column instead of pushing the
      overlay past the view. */
   min-height: 0;
+  /* Shrinks to fit the space the overlay leaves above the legend, and scrolls
+     inside it. `max-height: none` because the reserved strip is what keeps the two
+     apart now; a percentage here measured from the wrong origin. */
+  flex: 0 1 auto;
+  max-height: none;
   display: flex;
   flex-direction: column;
   gap: 6px;
