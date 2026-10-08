@@ -222,6 +222,34 @@ const report = await page.evaluate(async () => {
   }
   stages.collectedLitEdges = collected;
 
+  // The pairs that produce no key, and WHY. "Four edges are missing" is not an
+  // explanation until each one says which endpoint failed and whether that note
+  // is visible in the built-in graph at all.
+  {
+    const dropped = [];
+    for (const [a, b] of pairs) {
+      const from = officialIdOf.get(a);
+      const to = officialIdOf.get(b);
+      if (from && to) continue;
+      const missing = from ? b : a;
+      const missingOfficial = from ? to : from;
+      dropped.push({
+        pair: [a, b],
+        unmappedEndpoint: missing,
+        theOtherOfficialId: (from ?? to) ?? null,
+        // Is a node with this note's name present in nodeLookup under ANY id?
+        presentInOfficialGraph: Object.keys(lookup).some((officialId) => {
+          const key = officialId.replace(/\\/g, "/").replace(/\.md$/i, "").toLowerCase();
+          return key === missing || key.endsWith("/" + missing);
+        }),
+        hasOurNode: ours.graph.nodeIndex.has(missing),
+        inOurGraph: Boolean(ours.graph.nodeIndex.get(missing)),
+      });
+    }
+    stages.droppedPairs = dropped;
+    stages.droppedCount = dropped.length;
+  }
+
   // The decisive check: for every key that should be lit, is the graphics object
   // it resolves to actually one of the objects the render loop walks?
   //

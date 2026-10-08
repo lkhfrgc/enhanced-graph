@@ -1109,42 +1109,25 @@ export class OfficialGraphEnhancer {
    * `setData` stores each link on its source node as `forward[targetId]`, so the
    * object is reachable without touching anything private to the render loop.
    */
-  /** Edge keys of the focused route, for {@link forceLitEdges} to resolve. */
+  /**
+   * Edge keys of the focused route, in OUR id space.
+   *
+   * `forceLitEdges` maps them to official ids and graphics every frame, so this
+   * does not depend on how far the built-in graph has loaded.
+   */
   private collectLitEdges(renderer: OfficialRenderer): Set<string> {
-    const { graph } = this.deps.getData();
-    const resolve = this.resolverFor(graph);
-    const lookup = renderer.nodeLookup ?? {};
-    const officialIdOf = new Map<string, string>();
-    for (const officialId of Object.keys(lookup)) {
-      const ours = resolve(officialId);
-      if (ours) officialIdOf.set(ours.id, officialId);
-    }
+    // Keys in OUR id space, deliberately built without reading nodeLookup.
+    //
+    // It used to map our ids to official ones here, which made the result depend
+    // on how much of the built-in graph had loaded at that instant: two runs of
+    // the same diagnostic on the same focused pair produced 31 and then 35 keys,
+    // and the edges dropped in the first case never came back. Mapping happens in
+    // `forceLitEdges` instead, every frame, against the lookup as it is then.
     const out = new Set<string>();
     for (const [a, b] of this.focusEdgePairs(renderer)) {
-      const from = officialIdOf.get(a);
-      const to = officialIdOf.get(b);
-      if (!from || !to) continue;
-      // The key is recorded whether or not a graphics object exists right now.
-      // Whether the built-in graph has drawn the edge is a rendering question,
-      // and answering it here is what made the result depend on rebuild timing.
-      //
-      // Built from the OFFICIAL ids, not ours: `forceLitEdges` resolves these
-      // against `renderer.nodeLookup`, which is keyed by official id. Mixing the
-      // two id spaces there silently matched nothing.
-      out.add(edgeKey(from, to));
-      // Both directions. `setData` stores a link on ONE endpoint as
-      // `forward[other]`, and which endpoint that is has nothing to do with the
-      // order a route happens to walk it. Looking only at `from.forward[to]`
-      // silently skipped every edge the route traversed the other way, which is
-      // why a focused pair lit only a handful of its edges.
-      const forward = lookup[from] as
-        | { forward?: Record<string, { line?: { alpha: number } }> }
-        | undefined;
-      const backward = lookup[to] as
-        | { forward?: Record<string, { line?: { alpha: number } }> }
-        | undefined;
-      const link = forward?.forward?.[to] ?? backward?.forward?.[from];
-      void link;
+      // Whether the built-in graph has drawn this edge, and under which ids, is
+      // a rendering question answered at apply time.
+      out.add(edgeKey(a, b));
     }
     return out;
   }
@@ -1194,11 +1177,21 @@ export class OfficialGraphEnhancer {
     // matched almost nothing.
     const litLines = new Set<object>();
     const lookup = renderer.nodeLookup ?? {};
+    const { graph } = this.deps.getData();
+    const resolve = this.resolverFor(graph);
+    const officialIdOf = new Map<string, string>();
+    for (const officialId of Object.keys(lookup)) {
+      const ours = resolve(officialId);
+      if (ours) officialIdOf.set(ours.id, officialId);
+    }
     for (const key of lit) {
       const [a, b] = edgeKeyEndpoints(key);
+      const from = officialIdOf.get(a);
+      const to = officialIdOf.get(b);
+      if (!from || !to) continue;
       const link =
-        (lookup[a] as { forward?: Record<string, { line?: object }> } | undefined)?.forward?.[b] ??
-        (lookup[b] as { forward?: Record<string, { line?: object }> } | undefined)?.forward?.[a];
+        (lookup[from] as { forward?: Record<string, { line?: object }> } | undefined)?.forward?.[to] ??
+        (lookup[to] as { forward?: Record<string, { line?: object }> } | undefined)?.forward?.[from];
       if (link?.line) litLines.add(link.line);
     }
 
