@@ -68,7 +68,7 @@ export const GRAPH_MENU_SOURCE = "graph-context-menu";
  * route reads as a route because everything else recedes, not because the route
  * itself can get any brighter.
  */
-const FOCUS_NODE_DIM = 0.06;
+const FOCUS_NODE_DIM = 0.03;
 /**
  * Alpha multiplier applied to every edge while something is focused.
  *
@@ -79,7 +79,14 @@ const FOCUS_NODE_DIM = 0.06;
  * enough to compete with the lit path; at 0.05 the lit edges are the only ones
  * with any presence, and the shape of the route is what the eye follows.
  */
-export const FOCUS_EDGE_DRAWN = 0.05;
+export const FOCUS_EDGE_DRAWN = 0.02;
+/**
+ * Breathing space between a node's own radius and the focus ring, in CSS pixels.
+ *
+ * Constant on purpose: it is a gap, not part of the node, so it must not scale
+ * with the zoom the way the ring itself does.
+ */
+export const RING_PADDING = 3;
 /** Shown in the line-colour picker while the theme's own colour is in use. */
 const LINE_COLOR_FALLBACK = "#888888";
 /**
@@ -1226,7 +1233,16 @@ export class OfficialGraphEnhancer {
       points.push({
         x: (node.x * scale + panX) / dpr,
         y: (node.y * scale + panY) / dpr,
-        radius: size * nodeScale + 3,
+        // The radius has to be scaled exactly like the position. It used to be
+        // `size * nodeScale + 3`, which left the ring a fixed number of pixels
+        // while the node it encircles grew and shrank with the zoom — so zooming
+        // in put the ring inside the node and zooming out left it floating well
+        // outside. `zoom` here is the graph's own scale; `nodeScale` is the size
+        // setting, and the two are independent.
+        //
+        // The `+ RING_PADDING` stays outside the division: it is a constant
+        // breathing space in CSS pixels, not part of the node.
+        radius: (size * nodeScale * scale) / dpr + RING_PADDING,
       });
     }
     attachment.markers.draw(points, this.markerPalette());

@@ -17,7 +17,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // browser harness uses, so the view code runs unmodified.
 import "../harness/dom-polyfill";
 
-import { FOCUS_EDGE_DRAWN, GRAPH_MENU_SOURCE, SAFETY_NET_MS } from "../src/integrate/official-graph";
+import { RING_PADDING, FOCUS_EDGE_DRAWN, GRAPH_MENU_SOURCE, SAFETY_NET_MS } from "../src/integrate/official-graph";
 import { OfficialMarkerLayer } from "../src/integrate/official-markers";
 import { t } from "../src/i18n";
 import { typeColor } from "../src/view/palette";
@@ -988,7 +988,17 @@ describe("focus on the built-in graph", () => {
       expect(points).toHaveLength(1);
       expect(points[0].x).toBeCloseTo((10 * 2 + 100) / (window.devicePixelRatio || 1), 6);
       expect(points[0].y).toBeCloseTo((20 * 2 + 50) / (window.devicePixelRatio || 1), 6);
-      expect(points[0].radius).toBeGreaterThan(0);
+      // The radius is scaled exactly like the position. Asserting only that it
+      // was positive let a ring that ignored the zoom pass: it stayed a fixed
+      // number of pixels while the node grew, so zooming in sank the ring inside
+      // the node and zooming out left it floating outside.
+      //
+      // The fake node has no `getSize` (so the fallback of 6 applies) and the
+      // fake renderer sets no `nodeScale` (so 1 applies).
+      const dpr = window.devicePixelRatio || 1;
+      const radiusAt = (zoom: number): number => (6 * 1 * zoom) / dpr + RING_PADDING;
+      expect(points[0].radius).toBeCloseTo(radiusAt(h.renderer.scale), 6);
+      expect(points[0].radius).toBeGreaterThan(radiusAt(1));
     } finally {
       draw.mockRestore();
     }
