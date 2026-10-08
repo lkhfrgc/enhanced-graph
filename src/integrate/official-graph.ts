@@ -213,6 +213,16 @@ interface Attachment {
    */
   lastInsights: GraphInsights | null;
   /**
+   * How many notes were focused when the panel was last drawn.
+   *
+   * The focus-range control only exists while two or more are focused, and the
+   * panel was previously repainted only when the insights changed. Focusing a
+   * second note therefore left the control missing until something unrelated
+   * caused a repaint — the control looked like it appeared and disappeared at
+   * random.
+   */
+  lastFocusCount: number;
+  /**
    * The payload of the last `setData` call. Kept so that changing a filter can
    * re-apply it: the built-in engine has no idea our filter changed and would
    * otherwise not push new data until the vault does.
@@ -409,8 +419,10 @@ export class OfficialGraphEnhancer {
       // insights arrive afterwards. Nothing else re-rendered the panel on that
       // transition, so it stayed blank until an unrelated action (switching the
       // colour mode) forced a refresh.
-      if (attachment.lastInsights !== insights) {
+      const focusCount = this.focusIds.get(attachment.renderer)?.size ?? 0;
+      if (attachment.lastInsights !== insights || attachment.lastFocusCount !== focusCount) {
         attachment.lastInsights = insights;
+        attachment.lastFocusCount = focusCount;
         attachment.panel.render();
       }
     }
@@ -447,6 +459,7 @@ export class OfficialGraphEnhancer {
         lastData: null,
         /** The insights the panel currently shows; see `tick()`. */
         lastInsights: null,
+      lastFocusCount: 0,
         originalEdgeColor: {},
       };
 
