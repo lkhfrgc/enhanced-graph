@@ -37,6 +37,11 @@ const GRAVITY_RANGE = { min: 0.16, max: 2.56, step: 0.02 } as const;
 
 /** Label font size in pixels; wide enough to read a dense graph or a screenshot. */
 const LABEL_SIZE_RANGE = { min: 8, max: 28, step: 1 } as const;
+/**
+ * Label opacity, as a multiplier: the slider shows 0…100%, and `sliderRow` reads a
+ * percent slider as hundredths, so the stored value is the 0–1 the renderer wants.
+ */
+const LABEL_OPACITY_RANGE = { min: 0, max: 1, step: 0.05 } as const;
 /** Range of each end of the edge width ramp. Wide on purpose: 0.2 … 12. */
 const EDGE_WIDTH_RANGE = {
   min: EDGE_WIDTH_SCALE_RANGE.min,
@@ -61,8 +66,11 @@ export interface AppearanceOptions {
   /** Whether labels are dropped as their node shrinks below a size threshold. */
   readonly autoHideLabels: boolean;
   readonly labelSize: number;
-  /** `null` follows the theme. */
-  readonly labelColor: string | null;
+  /**
+   * Label opacity, 0–1. The colour is not a setting: white on the light theme,
+   * black on the dark one — see `themePalette`.
+   */
+  readonly labelOpacity: number;
   readonly onColorMode: (mode: ColorMode) => void;
   readonly onCustomNodeColor: (color: string) => void;
   /** `null` clears the override and returns the type to the palette. */
@@ -79,7 +87,7 @@ export interface AppearanceOptions {
   readonly onToggleLabels: (value: boolean) => void;
   readonly onAutoHideLabels: (value: boolean) => void;
   readonly onLabelSize: (value: number) => void;
-  readonly onLabelColor: (value: string | null) => void;
+  readonly onLabelOpacity: (value: number) => void;
 }
 
 /** Renders the appearance body after whatever the caller already put there. */
@@ -124,16 +132,13 @@ function renderLabels(section: HTMLElement, options: AppearanceOptions): void {
     { unit: "px", number: true, onPreview: options.onLabelSize },
   );
 
-  colourRow(
+  sliderRow(
     section,
-    t("appearance.labelColor"),
-    options.labelColor ?? t("appearance.themeColour"),
-    (color) => options.onLabelColor(color),
-    {
-      allowTheme: true,
-      onTheme: () => options.onLabelColor(null),
-      isTheme: options.labelColor === null,
-    },
+    t("appearance.labelOpacity"),
+    LABEL_OPACITY_RANGE,
+    options.labelOpacity,
+    options.onLabelOpacity,
+    { unit: "%", number: true, onPreview: options.onLabelOpacity },
   );
 
   const hint = section.createDiv({ cls: "enhanced-graph-hint" });

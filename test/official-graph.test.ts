@@ -194,6 +194,9 @@ interface Harness {
   rebuilds: number;
   weights: { directLink: number; sourceOverlap: number; commonNeighbor: number; coCitation: number };
   hiddenTags: string[];
+  tagFilterMode: "exclude" | "include";
+  /** Knowledge clusters the user has excluded, by id. */
+  hiddenCommunities: number[];
   hideStructural: boolean;
   hideIsolated: boolean;
   leaf: unknown;
@@ -235,6 +238,8 @@ function setup(
     rebuilds: 0,
     weights: { directLink: 3, sourceOverlap: 4, commonNeighbor: 1.5, coCitation: 1 },
     hiddenTags: [],
+    tagFilterMode: "exclude",
+    hiddenCommunities: [],
     hideStructural: false,
     hideIsolated: false,
     leaf,
@@ -251,19 +256,12 @@ function setup(
     onSetMode: (mode) => {
       state.mode = mode;
     },
-    onRebuild: () => {
-      state.rebuilds += 1;
-    },
     getWeights: () => state.weights,
-    onSetWeight: (key, value) => {
-      state.weights = { ...state.weights, [key]: value };
-    },
-    onResetWeights: () => {
-      state.weights = { directLink: 3, sourceOverlap: 4, commonNeighbor: 1.5, coCitation: 1 };
-    },
     getVisibility: () => ({
       hiddenTypes: new Set(state.hiddenTypes as never[]),
+      hiddenCommunities: new Set(state.hiddenCommunities),
       hiddenTags: new Set(state.hiddenTags),
+      tagFilterMode: state.tagFilterMode,
       hideStructural: state.hideStructural,
       hideIsolated: state.hideIsolated,
     }),
@@ -307,6 +305,10 @@ function setup(
     },
     onOpenNode: (nodeId) => {
       state.opened.push(nodeId);
+    },
+    getTagFilterMode: () => state.tagFilterMode,
+    onSetTagFilterMode: (mode) => {
+      state.tagFilterMode = mode;
     },
   });
   return state;
@@ -425,13 +427,12 @@ describe("OfficialGraphEnhancer colouring", () => {
       getMode: () => mode,
       getDismissed: () => [],
       onSetMode: () => {},
-      onRebuild: () => {},
       getWeights: () => ({ directLink: 3, sourceOverlap: 4, commonNeighbor: 1.5, coCitation: 1 }),
-      onSetWeight: () => {},
-      onResetWeights: () => {},
       getVisibility: () => ({
         hiddenTypes: new Set(),
+        hiddenCommunities: new Set(),
         hiddenTags: new Set(),
+        tagFilterMode: "exclude",
         hideStructural: false,
         hideIsolated: false,
       }),
@@ -448,6 +449,8 @@ describe("OfficialGraphEnhancer colouring", () => {
       onToggleType: () => {},
       onDismiss: () => {},
       onOpenNode: () => {},
+      getTagFilterMode: () => "exclude" as const,
+      onSetTagFilterMode: () => {},
     });
     enhancer.start();
     expect(renderer.nodeLookup["a.md"].color?.rgb).toBe(hexToRgbInt(communityColor(1)));
@@ -500,13 +503,12 @@ describe("OfficialGraphEnhancer hover", () => {
       getMode: () => "community",
       getDismissed: () => [],
       onSetMode: () => {},
-      onRebuild: () => {},
       getWeights: () => ({ directLink: 3, sourceOverlap: 4, commonNeighbor: 1.5, coCitation: 1 }),
-      onSetWeight: () => {},
-      onResetWeights: () => {},
       getVisibility: () => ({
         hiddenTypes: new Set(),
+        hiddenCommunities: new Set(),
         hiddenTags: new Set(),
+        tagFilterMode: "exclude",
         hideStructural: false,
         hideIsolated: false,
       }),
@@ -523,6 +525,8 @@ describe("OfficialGraphEnhancer hover", () => {
       onToggleType: () => {},
       onDismiss: () => {},
       onOpenNode: () => {},
+      getTagFilterMode: () => "exclude" as const,
+      onSetTagFilterMode: () => {},
     });
     enhancer.start();
 
@@ -652,13 +656,12 @@ describe("OfficialGraphEnhancer panel and lifecycle", () => {
       getMode: () => "community",
       getDismissed: () => [],
       onSetMode: () => {},
-      onRebuild: () => {},
       getWeights: () => ({ directLink: 3, sourceOverlap: 4, commonNeighbor: 1.5, coCitation: 1 }),
-      onSetWeight: () => {},
-      onResetWeights: () => {},
       getVisibility: () => ({
         hiddenTypes: new Set(),
+        hiddenCommunities: new Set(),
         hiddenTags: new Set(),
+        tagFilterMode: "exclude",
         hideStructural: false,
         hideIsolated: false,
       }),
@@ -675,6 +678,8 @@ describe("OfficialGraphEnhancer panel and lifecycle", () => {
       onToggleType: () => {},
       onDismiss: () => {},
       onOpenNode: () => {},
+      getTagFilterMode: () => "exclude" as const,
+      onSetTagFilterMode: () => {},
     });
     enhancer.start();
     expect(renderer.containerEl.querySelectorAll(".enhanced-graph-official-panel")).toHaveLength(1);
@@ -736,13 +741,12 @@ describe("degradation", () => {
       getMode: () => "community",
       getDismissed: () => [],
       onSetMode: () => {},
-      onRebuild: () => {},
       getWeights: () => ({ directLink: 3, sourceOverlap: 4, commonNeighbor: 1.5, coCitation: 1 }),
-      onSetWeight: () => {},
-      onResetWeights: () => {},
       getVisibility: () => ({
         hiddenTypes: new Set(),
+        hiddenCommunities: new Set(),
         hiddenTags: new Set(),
+        tagFilterMode: "exclude",
         hideStructural: false,
         hideIsolated: false,
       }),
@@ -759,6 +763,8 @@ describe("degradation", () => {
       onToggleType: () => {},
       onDismiss: () => {},
       onOpenNode: () => {},
+      getTagFilterMode: () => "exclude" as const,
+      onSetTagFilterMode: () => {},
     });
 
     expect(() => {
@@ -779,13 +785,12 @@ describe("degradation", () => {
       getMode: () => "community",
       getDismissed: () => [],
       onSetMode: () => {},
-      onRebuild: () => {},
       getWeights: () => ({ directLink: 3, sourceOverlap: 4, commonNeighbor: 1.5, coCitation: 1 }),
-      onSetWeight: () => {},
-      onResetWeights: () => {},
       getVisibility: () => ({
         hiddenTypes: new Set(),
+        hiddenCommunities: new Set(),
         hiddenTags: new Set(),
+        tagFilterMode: "exclude",
         hideStructural: false,
         hideIsolated: false,
       }),
@@ -802,6 +807,8 @@ describe("degradation", () => {
       onToggleType: () => {},
       onDismiss: () => {},
       onOpenNode: () => {},
+      getTagFilterMode: () => "exclude" as const,
+      onSetTagFilterMode: () => {},
     });
 
     expect(() => enhancer.start()).not.toThrow();
@@ -1274,6 +1281,50 @@ describe("colour options on the built-in graph", () => {
     h.enhancer.start();
     expect(h.renderer.colors.line.rgb).toBe(0x888888);
   });
+
+  /**
+   * The reported bug: switching the theme left the built-in graph's edges the
+   * wrong ink — near-white on a white page, near-black on a black one — until the
+   * graph was closed and reopened.
+   *
+   * Switching the theme makes the built-in graph rewrite its own shared edge
+   * colours. The plugin used to write a copy it had taken at attach time back over
+   * them on the very next refresh, undoing the theme. Nothing but a refresh in
+   * between is needed to reproduce it, so this drives exactly that.
+   */
+  it("does not put its own copy back over the theme's line colour after a theme switch", () => {
+    const h = setup([{ id: "a.md" }], [makeNode({ id: "a" })]);
+    h.enhancer.start();
+    const atAttach = h.renderer.colors.line.rgb;
+
+    // The theme switch: the built-in graph repaints its own colours.
+    h.renderer.colors.line.rgb = 0x0a141c;
+    h.renderer.colors.lineHighlight.rgb = 0x0a141c;
+    h.enhancer.refresh();
+
+    expect(h.renderer.colors.line.rgb).toBe(0x0a141c);
+    expect(h.renderer.colors.lineHighlight.rgb).toBe(0x0a141c);
+    expect(h.renderer.colors.line.rgb).not.toBe(atAttach);
+  });
+
+  it("clears a chosen line colour back to the theme in force at the time", () => {
+    const h = setup([{ id: "a.md" }], [makeNode({ id: "a" })]);
+    h.enhancer.start();
+
+    // The theme moves to the light one while nothing is chosen...
+    h.renderer.colors.line.rgb = 0xf4f8fa;
+    h.enhancer.refresh();
+
+    // ...then a colour is chosen, and cleared again.
+    h.lineColor = "#123456";
+    h.enhancer.refresh();
+    expect(h.renderer.colors.line.rgb).toBe(hexToRgbInt("#123456"));
+
+    h.lineColor = null;
+    h.enhancer.refresh();
+    // The light theme's ink, not the one captured when the plugin attached.
+    expect(h.renderer.colors.line.rgb).toBe(0xf4f8fa);
+  });
 });
 
 describe("the built-in graph panel", () => {
@@ -1349,6 +1400,27 @@ describe("the built-in graph panel", () => {
     expect(panel.querySelectorAll(".enhanced-graph-colour-row").length).toBeGreaterThan(0);
     // One row per page type, plus the line colour.
     expect(panel.querySelectorAll(".enhanced-graph-colour-row")).toHaveLength(2);
+  });
+
+  it("marks the line colour as the theme's own until one is chosen", () => {
+    const h = setup([{ id: "a.md" }], [makeNode({ id: "a" })], "type");
+    h.enhancer.start();
+    const panel = panelOf(h);
+    openPanel(h, t("toolbar.appearance"));
+    // The line row is the last one: the type rows come first.
+    const themeButton = (): Element | null => {
+      const rows = panel.querySelectorAll(".enhanced-graph-colour-row");
+      return rows[rows.length - 1]?.querySelector(".enhanced-graph-link") ?? null;
+    };
+    const following = (): boolean => themeButton()?.classList.contains("is-active") ?? false;
+
+    // Nothing chosen: the built-in graph's own theme colour is in charge, and the
+    // panel says so rather than showing a colour as if it had been picked.
+    expect(following()).toBe(true);
+
+    h.lineColor = "#123456";
+    h.enhancer.refresh();
+    expect(following()).toBe(false);
   });
 
   it("does not destroy the colour picker while it is being used", () => {
@@ -1443,27 +1515,15 @@ describe("the built-in graph's toolbar", () => {
     expect(buttonSaying(bar, t("toolbar.colorByType"))).toBeTruthy();
     expect(buttonSaying(bar, t("toolbar.insights"))).toBeTruthy();
     expect(buttonSaying(bar, t("toolbar.appearance"))).toBeTruthy();
-    // Every panel the standalone view has is ported now, so every toggle is here.
     expect(buttonSaying(bar, t("toolbar.filter"))).toBeTruthy();
-    expect(buttonSaying(bar, t("toolbar.weights"))).toBeTruthy();
+
+    // And nothing that does not belong here. Weights are tuned in the settings tab
+    // and in the standalone view, and the built-in graph keeps itself in step with
+    // the vault — so neither a weights toggle nor a rebuild button is offered.
+    expect(buttonSaying(bar, t("toolbar.weights"))).toBeUndefined();
+    expect(bar.querySelector(`[aria-label="${t("toolbar.rebuild")}"]`)).toBeNull();
   });
 
-  it("opens the weights panel and writes the shared coefficients", () => {
-    const h = setup([{ id: "a.md" }], [makeNode({ id: "a" })]);
-    h.enhancer.start();
-    buttonSaying(toolbarOf(h), t("toolbar.weights"))?.dispatchEvent(
-      new MouseEvent("click", { bubbles: true }),
-    );
-    const panel = h.renderer.containerEl.querySelector<HTMLElement>(".enhanced-graph-official-panel")!;
-    const rows = Array.from(panel.querySelectorAll<HTMLElement>(".enhanced-graph-stepper"));
-    expect(rows.length).toBeGreaterThanOrEqual(4);
-
-    const field = rows[0].querySelector<HTMLInputElement>("input[type=number]")!;
-    field.value = "5";
-    field.dispatchEvent(new Event("change", { bubbles: true }));
-    // The same setting the settings tab and the standalone view read.
-    expect(h.weights.directLink).toBe(5);
-  });
   it("opens the filters panel, which drives the shared filter state", () => {
     const h = setup(
       [{ id: "a.md" }, { id: "b.md" }],
@@ -1524,6 +1584,8 @@ describe("the built-in graph's toolbar", () => {
       new MouseEvent("click", { bubbles: true }),
     );
     const panel = h.renderer.containerEl.querySelector<HTMLElement>(".enhanced-graph-official-panel")!;
+    // The groups switch like tabs, so the tags are behind their own button.
+    selectTab(panel, t("filter.tags"));
 
     // Re-queried every time: the panel replaces its body whenever it re-renders,
     // so a list captured once goes stale exactly when it matters.
@@ -1562,12 +1624,12 @@ describe("the built-in graph's toolbar", () => {
       await settle();
     };
 
-    // Three unchecks in a row, each focusing its box the way a real click does.
+    // Three ticks in a row, each focusing its box the way a real click does.
     // The settings write and the deferred re-render follow inside the fixture.
     for (const tag of ["alpha", "beta", "gamma"]) {
       const box = boxFor(tag);
       box.focus();
-      box.checked = false;
+      box.checked = true;
       box.dispatchEvent(new Event("change", { bubbles: true }));
       await settle();
     }
@@ -1575,7 +1637,7 @@ describe("the built-in graph's toolbar", () => {
     expect(document.activeElement).toBe(boxFor("gamma"));
     expect([...h.hiddenTags].sort()).toEqual(["alpha", "beta", "gamma"]);
 
-    // One press of 全部恢复. It has to land, and it has to be enough.
+    // One press of 全清. It has to land, and it has to be enough.
     const restore = Array.from(panel.querySelectorAll("button")).find((candidate) =>
       (candidate.textContent ?? "").includes(t("filter.clearTags")),
     );
@@ -1583,7 +1645,46 @@ describe("the built-in graph's toolbar", () => {
     await press(restore!);
 
     expect(h.hiddenTags).toEqual([]);
-    expect(tagBoxes().filter((box) => !box.checked)).toHaveLength(0);
+    expect(tagBoxes().filter((box) => box.checked)).toHaveLength(0);
+  });
+
+  it("ticks every listed tag with 全选, and filters by inclusion on request", async () => {
+    const h = setup(
+      [{ id: "a.md" }, { id: "b.md" }, { id: "c.md" }],
+      [
+        makeNode({ id: "a", tags: ["alpha"] }),
+        makeNode({ id: "b", tags: ["beta"] }),
+        makeNode({ id: "c", tags: ["gamma"] }),
+      ],
+    );
+    h.enhancer.start();
+    buttonSaying(toolbarOf(h), t("toolbar.filter"))?.dispatchEvent(
+      new MouseEvent("click", { bubbles: true }),
+    );
+    const panel = h.renderer.containerEl.querySelector<HTMLElement>(".enhanced-graph-official-panel")!;
+    selectTab(panel, t("filter.tags"));
+    const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+    const panelButton = (label: string): HTMLButtonElement =>
+      Array.from(panel.querySelectorAll("button")).find((candidate) =>
+        (candidate.textContent ?? "").includes(label),
+      )!;
+
+    // 全选 ticks everything the list is showing, in one go.
+    panelButton(t("filter.selectAllTags")).dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await settle();
+    expect([...h.hiddenTags].sort()).toEqual(["alpha", "beta", "gamma"]);
+
+    // Switched to inclusion, the same ticks mean "keep only these" — one mode, one
+    // selection, read the other way round.
+    panelButton(t("filter.tagModeInclude")).dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await settle();
+    expect(h.tagFilterMode).toBe("include");
+
+    // And back to exclusion, where the ticks are the tags being hidden.
+    panelButton(t("filter.tagModeExclude")).dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await settle();
+    expect(h.tagFilterMode).toBe("exclude");
+    expect([...h.hiddenTags].sort()).toEqual(["alpha", "beta", "gamma"]);
   });
 
   it("hides a filtered type from the built-in graph itself", () => {
@@ -1924,6 +2025,49 @@ describe("the built-in graph's toolbar", () => {
     // Rebuilding would have thrown focus out on every keystroke.
     expect(bar.querySelector(".enhanced-graph-search input")).toBe(input);
   });
+  it("switches the insights groups by tab in the built-in panel", () => {
+    const h = setup(
+      [{ id: "a.md" }, { id: "b.md" }],
+      [makeNode({ id: "a" }), makeNode({ id: "b" })],
+    );
+    h.insights = {
+      connections: [
+        {
+          key: "a:::b",
+          source: { id: "a", label: "A", type: "concept", community: 0 } as never,
+          target: { id: "b", label: "B", type: "entity", community: 1 } as never,
+          score: 9,
+          weight: 4,
+          reasons: ["cross-community"],
+          contributions: { "cross-community": 4 },
+        },
+      ],
+      gaps: [
+        {
+          key: "gap:isolated:2 个孤立页面:a,b",
+          type: "isolated",
+          title: "2 个孤立页面",
+          description: "A、B",
+          suggestion: "补充链接。",
+          nodeIds: ["a", "b"],
+        },
+      ],
+    };
+    h.enhancer.start();
+    const panel = h.renderer.containerEl.querySelector<HTMLElement>(".enhanced-graph-official-panel")!;
+    const cardCount = (): number => panel.querySelectorAll(".enhanced-graph-card").length;
+
+    // Opens on the connections, and only that group's card is drawn.
+    expect(panel.querySelector('[data-section="connections"]')).not.toBeNull();
+    expect(panel.querySelector('[data-section="gaps"]')).toBeNull();
+    expect(cardCount()).toBe(1);
+
+    selectTab(panel, t("insights.gaps"));
+    expect(panel.querySelector('[data-section="gaps"]')).not.toBeNull();
+    expect(panel.querySelector('[data-section="connections"]')).toBeNull();
+    expect(cardCount()).toBe(1);
+  });
+
   it("opens the colours panel from the appearance toggle", () => {
     const h = setup([{ id: "a.md" }], [makeNode({ id: "a" })], "type");
     h.enhancer.start();
@@ -1962,6 +2106,37 @@ describe("the built-in graph's toolbar", () => {
       expect(points).toHaveLength(1);
       expect(points[0].x).toBeCloseTo((10 * 2 + 100) / dpr, 6);
       expect(points[0].y).toBeCloseTo((20 * 2 + 50) / dpr, 6);
+    } finally {
+      draw.mockRestore();
+    }
+  });
+
+  it("keeps the search marks on their nodes when the canvas moves", async () => {
+    const draw = vi.spyOn(OfficialMarkerLayer.prototype, "draw").mockImplementation(() => {});
+    try {
+      const h = setup(
+        [{ id: "a.md" }, { id: "b.md" }],
+        [makeNode({ id: "a", label: "alpha" }), makeNode({ id: "b", label: "beta" })],
+      );
+      h.enhancer.start();
+      const input = toolbarOf(h).querySelector<HTMLInputElement>(".enhanced-graph-search input");
+      input!.value = "alpha";
+      input!.dispatchEvent(new Event("input", { bubbles: true }));
+
+      const dpr = window.devicePixelRatio || 1;
+      const lastPoint = (): { x: number; y: number } => {
+        const calls = draw.mock.calls;
+        return (calls[calls.length - 1]?.[0] ?? [])[0];
+      };
+      expect(lastPoint().x).toBeCloseTo((10 * 2 + 100) / dpr, 6);
+
+      // The user pans the canvas. Nothing else changes: no focus is set, and the
+      // query is untouched. The marks are drawn in SCREEN space, so a redraw is
+      // the only thing that can keep them on their nodes.
+      h.renderer.panX = 220;
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+      expect(lastPoint().x).toBeCloseTo((10 * 2 + 220) / dpr, 6);
     } finally {
       draw.mockRestore();
     }
@@ -2024,10 +2199,148 @@ describe("the built-in graph's legend", () => {
     h.enhancer.start();
     expect(legendOf(h).classList.contains("is-hidden")).toBe(true);
   });
+
+  it("excludes a knowledge cluster from the filters panel, and restores it there", async () => {
+    const h = setup(
+      [{ id: "a.md" }, { id: "b.md" }],
+      [makeNode({ id: "a", community: 0 }), makeNode({ id: "b", community: 1 })],
+      "community",
+    );
+    h.enhancer.start();
+    const payload = { nodes: { "a.md": { type: "concept" }, "b.md": { type: "concept" } } };
+    h.renderer.setData(payload);
+    expect(Object.keys(received(h).nodes)).toEqual(["a.md", "b.md"]);
+
+    pressToolbar(h, t("toolbar.filter"));
+    const panel = h.renderer.containerEl.querySelector<HTMLElement>(".enhanced-graph-official-panel")!;
+    selectTab(panel, t("filter.clusters"));
+    const clusterSection = (): HTMLElement => {
+      const section = panel.querySelector<HTMLElement>('[data-section="clusters"]');
+      if (!section) throw new Error("no cluster group in the panel");
+      return section;
+    };
+    const clusterBoxes = (): HTMLInputElement[] =>
+      Array.from(clusterSection().querySelectorAll<HTMLInputElement>("input[type=checkbox]"));
+    const showAllOf = (): HTMLButtonElement => {
+      const button = Array.from(clusterSection().querySelectorAll("button")).find((candidate) =>
+        (candidate.textContent ?? "").includes(t("legend.showAll")),
+      );
+      if (!button) throw new Error("no show-all button");
+      return button;
+    };
+    // The settings write is awaited before the views are re-rendered, exactly as
+    // `main.ts` does it, so a switch is followed by a tick rather than a repaint.
+    const settle = async (): Promise<void> => {
+      await Promise.resolve();
+      await Promise.resolve();
+    };
+
+    // One row per cluster, all of them on, and the button that clears them sits
+    // there from the start — inert until there is something to undo.
+    expect(clusterBoxes()).toHaveLength(h.graph.communities.length);
+    expect(clusterBoxes().every((box) => box.checked)).toBe(true);
+    expect(showAllOf().disabled).toBe(true);
+
+    // Unticking the first cluster takes every member of it off the graph, and the
+    // panel is where that happens — the legend's cards are not controls.
+    clusterBoxes()[0].checked = false;
+    clusterBoxes()[0].dispatchEvent(new Event("change", { bubbles: true }));
+    await settle();
+    expect(h.hiddenCommunities).toEqual([0]);
+    // The button wakes up immediately, without waiting for a repaint: the panel is
+    // not redrawn while its own checkbox has focus.
+    expect(showAllOf().disabled).toBe(false);
+    h.enhancer.refresh();
+    h.renderer.setData(payload);
+    expect(Object.keys(received(h).nodes)).toEqual(["b.md"]);
+
+    // And "show all" puts it back.
+    showAllOf().dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await settle();
+    expect(h.hiddenCommunities).toEqual([]);
+    expect(showAllOf().disabled).toBe(true);
+    h.renderer.setData(payload);
+    expect(Object.keys(received(h).nodes)).toEqual(["a.md", "b.md"]);
+  });
+
+  /**
+   * The cards say what the colours and clusters mean, and they are also controls:
+   * a click excludes or restores that type or cluster, and the header's "show all"
+   * puts the group back. They write the same shared visibility the filters panel
+   * does, so the two can never disagree about what is on screen.
+   */
+  it("excludes and restores a cluster by clicking its card in the built-in graph", async () => {
+    const community = setup(
+      [{ id: "a.md" }, { id: "b.md" }],
+      [makeNode({ id: "a", community: 0 }), makeNode({ id: "b", community: 1 })],
+      "community",
+    );
+    community.enhancer.start();
+    const rows = (): HTMLElement[] =>
+      Array.from(legendOf(community).querySelectorAll<HTMLElement>(".enhanced-graph-legend-row"));
+    expect(rows()).toHaveLength(2);
+    expect(rows()[0].classList.contains("is-interactive")).toBe(true);
+
+    // The row stays in place, shaded, so it can be clicked straight back.
+    rows()[0].dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(community.hiddenCommunities).toEqual([0]);
+    expect(rows()[0].classList.contains("is-hidden-cluster")).toBe(true);
+
+    rows()[0].dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(community.hiddenCommunities).toEqual([]);
+
+    // "Show all" is always there, and disabled while there is nothing to restore.
+    const showAll = (): HTMLButtonElement =>
+      legendOf(community).querySelector<HTMLButtonElement>("button")!;
+    expect(showAll().disabled).toBe(true);
+    rows()[0].dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(showAll().disabled).toBe(false);
+    showAll().dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(community.hiddenCommunities).toEqual([]);
+  });
+
+  it("excludes and restores a page type by clicking its card in the built-in graph", async () => {
+    const types = setup(
+      [{ id: "a.md" }, { id: "b.md" }],
+      [makeNode({ id: "a", type: "concept" }), makeNode({ id: "b", type: "entity" })],
+      "type",
+    );
+    types.enhancer.start();
+    const rowFor = (label: string): HTMLElement =>
+      Array.from(legendOf(types).querySelectorAll<HTMLElement>(".enhanced-graph-legend-row")).find(
+        (row) => row.textContent?.includes(label),
+      )!;
+
+    rowFor(t("type.concept")).dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(types.hiddenTypes).toEqual(["concept"]);
+
+    rowFor(t("type.concept")).dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(types.hiddenTypes).toEqual([]);
+  });
 });
 /** The payload the built-in renderer was actually handed. */
 function received(h: Harness): { nodes: Record<string, unknown> } {
   return h.renderer.lastData as { nodes: Record<string, unknown> };
+}
+
+/**
+ * Clicks the panel tab whose label contains `label`.
+ *
+ * The filter and insight groups switch like tabs, so a control that used to sit
+ * under a heading of its own now needs its button pressed first.
+ */
+function selectTab(panel: HTMLElement, label: string): void {
+  const tab = Array.from(
+    panel.querySelectorAll<HTMLButtonElement>(".enhanced-graph-panel-tabs button"),
+  ).find((candidate) => (candidate.textContent ?? "").includes(label));
+  if (!tab) throw new Error(`no panel tab saying ${label}`);
+  tab.dispatchEvent(new MouseEvent("click", { bubbles: true }));
 }
 
 function zeroSignals() {

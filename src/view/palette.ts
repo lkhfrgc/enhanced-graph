@@ -306,7 +306,6 @@ export interface GraphThemePalette {
   /** Weak→strong edge ramp; inverted between the two themes. */
   readonly edgeRamp: EdgeRamp;
   readonly label: string;
-  readonly labelOutline: string;
   readonly hoverLabelText: string;
   readonly hoverLabelBackground: string;
   readonly hoverLabelBorder: string;
@@ -342,8 +341,12 @@ export function themePalette(isDark: boolean): GraphThemePalette {
         // Dim ink → near-white: the stronger the link, the brighter it burns
         // against the dark canvas.
         edgeRamp: { weak: "#3c4b57", strong: "#f4f8fa" },
-        label: "#dde5ea",
-        labelOutline: "rgba(6,14,20,0.85)",
+        // White ink on the dark theme, black on the light one — the theme decides
+        // the colour, and the appearance panel's opacity slider decides how loudly
+        // the labels sit on top of it. Labels are drawn INSIDE the node by sigma,
+        // so what they read against is the node's fill; a saturated mid-tone takes
+        // either ink, which is what leaves opacity as the thing worth tuning.
+        label: "#ffffff",
         hoverLabelText: "#f4f8fa",
         hoverLabelBackground: "rgba(10,20,28,0.94)",
         hoverLabelBorder: "rgba(169,183,193,0.36)",
@@ -366,8 +369,8 @@ export function themePalette(isDark: boolean): GraphThemePalette {
         // Inverted: on a white page "stronger" has to mean *darker*, so the
         // ramp runs mid-gray → near-black.
         edgeRamp: { weak: "#8fa0ad", strong: "#0a141c" },
-        label: "#131f29",
-        labelOutline: "rgba(255,255,255,0.9)",
+        // Black here; see the note on the dark theme's `label`.
+        label: "#000000",
         hoverLabelText: "#0a141c",
         // A light-theme overlay is white; there is no other value for it. The
         // neutral ramp around it is what changed.

@@ -106,10 +106,10 @@ export class EnhancedGraphView extends ItemView {
   private showLabels = true;
   private panelMode: PanelMode = "insights";
   private showDismissed = false;
-  /** Insight sections the user folded away; see `InsightSection`. */
-  private collapsedSections: ReadonlySet<InsightSection> = new Set();
-  /** Filter groups the user folded away, in this view's filters tab. */
-  private collapsedFilters: ReadonlySet<FilterSection> = new Set();
+  /** Card group the user is looking at; see `InsightSection`. */
+  private insightSection: InsightSection = "connections";
+  /** Filter group the user is looking at, in this view's filters tab. */
+  private filterSection: FilterSection = "types";
 
   private highlightNodes: ReadonlySet<string> = new Set<string>();
   private highlightEdges: ReadonlySet<string> = new Set<string>();
@@ -343,7 +343,12 @@ export class EnhancedGraphView extends ItemView {
   private visibilityFilters(): VisibilityFilters {
     return {
       hiddenTypes: this.hiddenTypes,
+      // Clusters live in the settings rather than in view state: the same
+      // knowledge cluster has to disappear from the built-in graph too, and the
+      // two views share nothing else about what is on screen.
+      hiddenCommunities: new Set(this.plugin.settings.hiddenCommunities),
       hiddenTags: this.hiddenTags,
+      tagFilterMode: this.plugin.settings.tagFilterMode,
       hideStructural: this.plugin.settings.hideStructural,
       hideIsolated: this.plugin.settings.hideIsolated,
     };
@@ -392,7 +397,7 @@ export class EnhancedGraphView extends ItemView {
       edgeStrongWidth: this.plugin.settings.edgeStrongWidth,
       autoHideLabels: this.plugin.settings.autoHideLabels,
       labelSize: this.plugin.settings.labelSize,
-      labelColor: this.plugin.settings.labelColor,
+      labelOpacity: this.plugin.settings.labelOpacity,
       customNodeColor: this.plugin.settings.customNodeColor,
       typeColorOverrides: this.plugin.settings.typeColorOverrides,
       communityColorOverrides: this.plugin.settings.communityColorOverrides,
@@ -795,8 +800,44 @@ export class EnhancedGraphView extends ItemView {
         void this.applyGraphData();
         this.renderLegend();
       },
-      onFocusNodes: (nodeIds) => this.highlightNodeIds(nodeIds),
+      hiddenCommunities: new Set(this.plugin.settings.hiddenCommunities),
+      onToggleCommunity: (id) => void this.toggleCommunity(id),
+      onShowAllCommunities: () => void this.showAllCommunities(),
     });
+  }
+
+  /**
+   * Persist a cluster change and redraw everything that shows it.
+   *
+   * Clusters are stored in the settings rather than in view state, like the
+   * context menu's "hide this type": the same cluster has to disappear from the
+   * built-in graph too, and both legends read the same list.
+   */
+  private async saveCommunities(): Promise<void> {
+    await this.plugin.saveSettings();
+    await this.applyGraphData();
+    this.renderPanel();
+    this.renderLegend();
+  }
+
+  /**
+   * Exclude a knowledge cluster, or bring it back.
+   *
+   * Written to the settings, like the context menu's "hide this type": a cluster
+   * is a property of the analysis, not of this view, and the built-in graph reads
+   * the very same list through `isNodeVisible`.
+   */
+  private async toggleCommunity(id: number): Promise<void> {
+    const hidden = this.plugin.settings.hiddenCommunities;
+    const at = hidden.indexOf(id);
+    if (at === -1) hidden.push(id);
+    else hidden.splice(at, 1);
+    await this.saveCommunities();
+  }
+
+  private async showAllCommunities(): Promise<void> {
+    this.plugin.settings.hiddenCommunities = [];
+    await this.saveCommunities();
   }
 
   // -------------------------------------------------------------------------
@@ -900,9 +941,9 @@ export class EnhancedGraphView extends ItemView {
         void this.applyGraphData();
         this.renderLegend();
       },
-      onToggleTag: (tag, visible) => {
-        if (visible) this.hiddenTags.delete(tag);
-        else this.hiddenTags.add(tag);
+      onToggleTag: (tag, selected) => {
+        if (selected) this.hiddenTags.add(tag);
+        else this.hiddenTags.delete(tag);
         void this.applyGraphData();
         this.renderLegend();
       },
@@ -911,17 +952,42 @@ export class EnhancedGraphView extends ItemView {
         void this.applyGraphData();
         this.renderLegend();
       },
+      tagFilterMode: this.plugin.settings.tagFilterMode,
+      onSelectAllTags: (tags) => {
+        for (const tag of tags) if (tag.length > 0) this.hiddenTags.add(tag);
+        void this.applyGraphData();
+        this.renderLegend();
+      },
+      onSetTagFilterMode: (mode) => {
+        this.plugin.settings.tagFilterMode = mode;
+        void this.plugin.saveSettings().then(() => this.applyGraphData());
+        this.renderPanel();
+        this.renderLegend();
+      },
+      communities: this.graph.communities,
+      // A fresh copy per render: this panel is rebuilt after every switch, unlike
+      // the built-in graph's (which defers while a control has focus and so gets a
+      // live view instead).
+      hiddenCommunities: new Set(this.plugin.settings.hiddenCommunities),
+      onToggleCommunity: (id, visible) => {
+        const hidden = this.plugin.settings.hiddenCommunities;
+        const at = hidden.indexOf(id);
+        if (visible && at !== -1) hidden.splice(at, 1);
+        else if (!visible && at === -1) hidden.push(id);
+        void this.saveCommunities();
+      },
+      onClearCommunities: () => {
+        this.plugin.settings.hiddenCommunities = [];
+        void this.saveCommunities();
+      },
       onToggleIsolated: async (value) => {
         this.plugin.settings.hideIsolated = value;
         await this.plugin.saveSettings();
         await this.applyGraphData();
       },
-      collapsedSections: this.collapsedFilters,
-      onToggleSection: (section) => {
-        const next = new Set(this.collapsedFilters);
-        if (next.has(section)) next.delete(section);
-        else next.add(section);
-        this.collapsedFilters = next;
+      activeSection: this.filterSection,
+      onSelectSection: (section) => {
+        this.filterSection = section;
         el.empty();
         this.renderFilters(el);
       },
@@ -956,7 +1022,7 @@ export class EnhancedGraphView extends ItemView {
       showLabels: this.showLabels,
       autoHideLabels: this.plugin.settings.autoHideLabels,
       labelSize: this.plugin.settings.labelSize,
-      labelColor: this.plugin.settings.labelColor,
+      labelOpacity: this.plugin.settings.labelOpacity,
       onColorMode: (mode) => void this.setColorMode(mode),
       onNodeScale: async (value) => {
         this.plugin.settings.nodeScale = value;
@@ -982,7 +1048,7 @@ export class EnhancedGraphView extends ItemView {
       onEdgeStrongWidth: (width) => void this.setEdgeStyle({ edgeStrongWidth: width }),
       onAutoHideLabels: (value) => void this.setLabelLook({ autoHideLabels: value }),
       onLabelSize: (value) => void this.setLabelLook({ labelSize: value }),
-      onLabelColor: (value) => void this.setLabelLook({ labelColor: value }),
+      onLabelOpacity: (value) => void this.setLabelLook({ labelOpacity: value }),
       onToggleLabels: (value) => {
         this.showLabels = value;
         // The view keeps its own copy for re-renders, but the setting is the
@@ -1089,12 +1155,9 @@ export class EnhancedGraphView extends ItemView {
         this.showDismissed = !this.showDismissed;
         this.renderPanel();
       },
-      collapsedSections: this.collapsedSections,
-      onToggleSection: (section) => {
-        const next = new Set(this.collapsedSections);
-        if (next.has(section)) next.delete(section);
-        else next.add(section);
-        this.collapsedSections = next;
+      activeSection: this.insightSection,
+      onSelectSection: (section) => {
+        this.insightSection = section;
         this.renderPanel();
       },
     });

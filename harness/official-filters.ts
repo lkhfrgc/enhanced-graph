@@ -20,9 +20,11 @@ import type { GraphInsights } from "../src/core/insights";
 import { OfficialGraphEnhancer } from "../src/integrate/official-graph";
 import type { GraphNode, PageType, WikiGraph } from "../src/types";
 
-const TAGS = ["alpha", "beta", "gamma", "delta", "epsilon", "zeta"];
+// Enough tags for the tag list to reach its own scroll cap, so the tags tab has
+// more content than the panel can ever show.
+const TAGS = Array.from({ length: 30 }, (_, index) => `tag-${String(index + 1).padStart(2, "0")}`);
 
-function makeNode(id: string, tags: string[]): GraphNode {
+function makeNode(id: string, tags: string[], community: number): GraphNode {
   return {
     id,
     label: id,
@@ -32,22 +34,54 @@ function makeNode(id: string, tags: string[]): GraphNode {
     linkCount: 3,
     inLinks: 2,
     outLinks: 1,
-    community: 0,
+    community,
     sources: [],
     tags,
     isStructural: false,
   };
 }
 
-const nodes = TAGS.map((tag, index) => makeNode(tag, [tag, TAGS[(index + 1) % TAGS.length]]));
+// Two clusters, so the filters panel has more than one row to switch — and so the
+// legend has something to explain. The panel is where they are filtered; the
+// legend's cards are read-only.
+const nodes = TAGS.map((tag, index) => makeNode(tag, [tag, TAGS[(index + 1) % TAGS.length]], index % 2));
 const graph: WikiGraph = {
   nodes,
   edges: [],
-  communities: [],
+  communities: [0, 1].map((id) => {
+    const members = nodes.filter((node) => node.community === id);
+    return {
+      id,
+      nodeCount: members.length,
+      intraEdges: 0,
+      cohesion: 0.5,
+      meanIntraDegree: 0,
+      topNodes: members.map((node) => node.label),
+      isSparse: false,
+      nodeIds: members.map((node) => node.id),
+    };
+  }),
   nodeIndex: new Map(nodes.map((node) => [node.id, node])),
   builtAt: 1,
 };
-const insights: GraphInsights = { connections: [], gaps: [] };
+const insights: GraphInsights = {
+  // Enough cards that the insights tab is taller than the panel can be: the
+  // ceiling is only measurable when something actually reaches it.
+  connections: Array.from({ length: 6 }, (_, index) => {
+    const left = nodes[index * 2];
+    const right = nodes[index * 2 + 1];
+    return {
+      key: `${left.id}:::${right.id}`,
+      source: left,
+      target: right,
+      score: 9 - index,
+      weight: 4,
+      reasons: ["cross-community"],
+      contributions: { "cross-community": 4 },
+    };
+  }),
+  gaps: [],
+};
 
 interface FakeOfficialNode {
   id: string;
@@ -107,7 +141,9 @@ class FakeOfficialRenderer {
 /** The plugin's settings, in the shape `main.ts` reads and writes them. */
 const settings = {
   hiddenTags: [] as string[],
+  tagFilterMode: "exclude" as "exclude" | "include",
   hiddenTypes: [] as string[],
+  hiddenCommunities: [] as number[],
   hideIsolated: false,
   hideStructural: false,
 };
@@ -139,10 +175,18 @@ enhancer = new OfficialGraphEnhancer({
   // problem, and a shared object here would hide the stale copy it used to keep.
   getVisibility: () => ({
     hiddenTypes: new Set(settings.hiddenTypes as never[]),
+    hiddenCommunities: new Set(settings.hiddenCommunities),
     hiddenTags: new Set(settings.hiddenTags),
+    tagFilterMode: settings.tagFilterMode,
     hideStructural: settings.hideStructural,
     hideIsolated: settings.hideIsolated,
   }),
+  getTagFilterMode: () => settings.tagFilterMode,
+  onSetTagFilterMode: async (mode) => {
+    settings.tagFilterMode = mode;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    enhancer?.refresh();
+  },
   onSetVisibility: async (patch) => {
     Object.assign(settings, patch);
     // `main.ts` awaits the settings write and only then re-renders the views. The
@@ -157,10 +201,7 @@ enhancer = new OfficialGraphEnhancer({
   onSetLineColor: () => undefined,
   getLineColor: () => null,
   onSetMode: () => undefined,
-  onRebuild: () => undefined,
   getWeights: () => ({ directLink: 3, sourceOverlap: 4, commonNeighbor: 1.5, coCitation: 1 }),
-  onSetWeight: () => undefined,
-  onResetWeights: () => undefined,
   getFocusIntermediates: () => 0,
   onSetFocusIntermediates: () => undefined,
   getHiddenTypes: () => settings.hiddenTypes,
@@ -172,10 +213,16 @@ enhancer.start();
 interface OfficialFiltersApi {
   settings: typeof settings;
   enhancer: OfficialGraphEnhancer;
+  /** How many distinct tags the fixture's graph carries. */
+  tagCount: number;
+  /** The stand-in renderer, so a check can move its camera. */
+  renderer: FakeOfficialRenderer;
 }
 
 (window as unknown as { __OFFICIAL_FILTERS__: OfficialFiltersApi }).__OFFICIAL_FILTERS__ = {
   settings,
   enhancer,
+  tagCount: TAGS.length,
+  renderer,
 };
 (window as unknown as { __OFFICIAL_FILTERS_READY__: boolean }).__OFFICIAL_FILTERS_READY__ = true;

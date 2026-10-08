@@ -215,32 +215,20 @@ export default class EnhancedGraphPlugin extends Plugin implements PluginHost, S
         this.applyOfficialGraphMode();
       },
       getWeights: () => this.settings.weights,
-      onSetWeight: async (key, value) => {
-        this.settings.weights[key] = value;
-        await this.saveSettings();
-        // Every edge score depends on these, so the graph has to be rebuilt
-        // rather than repainted.
-        this.requestGraphRebuild();
-      },
-      onResetWeights: async () => {
-        this.settings.weights = { ...DEFAULT_RELEVANCE_WEIGHTS };
-        // Repaint from the in-memory settings BEFORE awaiting the write. The
-        // panel reads `settings.weights`, so everything it needs is already
-        // there; waiting for the disk made the button feel inert, and on a real
-        // vault that write can take longer than a frame — long enough that the
-        // old numbers were still on screen by the time anyone looked.
-        this.refreshViews();
-        await this.saveSettings();
-        // Re-scoring is a separate, debounced step.
-        this.requestGraphRebuild();
-      },
-      onRebuild: () => this.requestGraphRebuild(),
       getVisibility: () => ({
         hiddenTypes: new Set(this.settings.hiddenTypes as never[]),
+        hiddenCommunities: new Set(this.settings.hiddenCommunities),
         hiddenTags: new Set(this.settings.hiddenTags),
+        tagFilterMode: this.settings.tagFilterMode,
         hideStructural: this.settings.hideStructural,
         hideIsolated: this.settings.hideIsolated,
       }),
+      getTagFilterMode: () => this.settings.tagFilterMode,
+      onSetTagFilterMode: async (mode) => {
+        this.settings.tagFilterMode = mode;
+        await this.saveSettings();
+        this.refreshViews();
+      },
       onSetVisibility: async (patch) => {
         Object.assign(this.settings, patch);
         await this.saveSettings();
@@ -262,11 +250,14 @@ export default class EnhancedGraphPlugin extends Plugin implements PluginHost, S
         this.refreshViews();
       },
       onSetLineColor: async (color) => {
-        this.settings.edgeStrongColor = color;
+        // The built-in graph's own line colour. NOT `edgeStrongColor`: that is one
+        // end of the standalone view's ramp, and driving this graph from it meant a
+        // dark ramp end painted near-black edges over the light theme.
+        this.settings.officialLineColor = color;
         await this.saveSettings();
         this.refreshViews();
       },
-      getLineColor: () => this.settings.edgeStrongColor,
+      getLineColor: () => this.settings.officialLineColor,
 
       getFocusIntermediates: () => this.settings.focusMaxIntermediates,
       onSetFocusIntermediates: async (intermediates) => {

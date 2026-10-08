@@ -108,6 +108,7 @@ describe("mergeSettings: upgrading an older file", () => {
       "communityColorOverrides",
       "showLabels",
       "hiddenTags",
+      "hiddenCommunities",
     ] as const) {
       expect(settings[key], key).not.toBeUndefined();
     }
@@ -118,5 +119,29 @@ describe("mergeSettings: upgrading an older file", () => {
     const before = JSON.parse(JSON.stringify(legacy));
     mergeSettings(legacy);
     expect(legacy).toEqual(before);
+  });
+});
+
+describe("mergeSettings: the excluded clusters", () => {
+  it("keeps an excluded cluster across a save and load", () => {
+    // The legend's cluster rows write this list, so it has to survive a restart
+    // the way the hidden types do.
+    const settings = roundTrip({ ...DEFAULT_SETTINGS, hiddenCommunities: [1, 3] });
+    expect(settings.hiddenCommunities).toEqual([1, 3]);
+  });
+
+  it("excludes nothing by default", () => {
+    expect(mergeSettings({}).hiddenCommunities).toEqual([]);
+  });
+
+  it("gives the built-in graph its own line colour, following the theme by default", () => {
+    // Its own key, not the standalone view's `edgeStrongColor`: that one is one end
+    // of the standalone ramp, and sharing it repainted the built-in graph's edges
+    // with a flat colour whenever the ramp was tuned.
+    expect(mergeSettings({}).officialLineColor).toBeNull();
+    expect(mergeSettings({ edgeStrongColor: "#3b3b3b" }).officialLineColor).toBeNull();
+    const settings = roundTrip({ ...DEFAULT_SETTINGS, officialLineColor: "#123456" });
+    expect(settings.officialLineColor).toBe("#123456");
+    expect(roundTrip({ ...DEFAULT_SETTINGS, officialLineColor: null }).officialLineColor).toBeNull();
   });
 });

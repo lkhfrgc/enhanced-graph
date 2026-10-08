@@ -111,8 +111,10 @@ export interface RendererOptions {
   autoHideLabels: boolean;
   /** Label font size in pixels. */
   labelSize: number;
-  /** Label colour; `null` follows the theme. */
-  labelColor: string | null;
+  /**
+   * Label opacity, 0–1. The colour is the theme's; see `themePalette`.
+   */
+  labelOpacity: number;
   /** Node colour used when `colorMode` is `"custom"`. */
   customNodeColor: string;
   /** Per-page-type colour overrides, keyed by page type. */
@@ -123,6 +125,16 @@ export interface RendererOptions {
 
 /** The label face, matching sigma's own default minus the weight v4 stopped taking. */
 const LABEL_FAMILY = "Arial, sans-serif";
+
+/**
+ * How far the camera may zoom out.
+ *
+ * Kept generous because node and label sizes are screen-referenced and so do not
+ * shrink with the camera; this only bounds how far the LAYOUT may be zoomed out.
+ * Named because the label grid's allowance is derived from it: sigma thins labels
+ * by `labelDensity / ratio²`, so this is the worst ratio that has to fit.
+ */
+const MAX_CAMERA_RATIO = 60;
 
 export interface HighlightState {
   /** Nodes emphasised by an insight card or the search box. */
@@ -164,7 +176,7 @@ export class GraphRenderer {
     edgeStrongWidth: DEFAULT_EDGE_WIDTHS.strongWidth,
     autoHideLabels: true,
     labelSize: 12,
-    labelColor: null,
+    labelOpacity: 1,
     customNodeColor: "#60a5fa",
     typeColorOverrides: {},
     communityColorOverrides: {},
@@ -206,7 +218,6 @@ export class GraphRenderer {
       return;
     }
 
-    const labels = labelTuning(options.nodeCount);
     const move = movePerformanceFlags(options.nodeCount);
     // v4 nests every renderer setting under `settings` (v3 took them at the top
     // level). `labelColor` and `labelSize` are gone from here entirely — they are
@@ -219,8 +230,8 @@ export class GraphRenderer {
         hideLabelsOnMove: move.hideLabelsOnMove,
         renderLabels: options.showLabels,
         enableEdgeEvents: true,
-        labelDensity: labels.density,
-        labelRenderedSizeThreshold: options.autoHideLabels ? labels.threshold : 0,
+        labelDensity: this.densityFor(options),
+        labelRenderedSizeThreshold: this.thresholdFor(options),
         stagePadding: 40,
         // Raised well above sigma's default of 3: that default counts mousemove
         // events, and an ordinary click with a real hand produces several, so the
@@ -238,7 +249,7 @@ export class GraphRenderer {
         // Kept generous because node and label sizes are screen-referenced and so
         // do not shrink with the camera; this only bounds how far the LAYOUT may
         // be zoomed out.
-        maxCameraRatio: 60,
+        maxCameraRatio: MAX_CAMERA_RATIO,
         // Obsidian reshapes the leaf constantly (sidebars, tab switches); sigma
         // must tolerate a transient 0×0 container instead of throwing.
         allowInvalidContainer: true,
@@ -428,18 +439,17 @@ export class GraphRenderer {
     // Label look is cheap to change: a sigma setting plus a redraw, no rebuild.
     const labelLookChanged =
       next.labelSize !== this.options.labelSize ||
-      next.labelColor !== this.options.labelColor ||
+      next.labelOpacity !== this.options.labelOpacity ||
       next.autoHideLabels !== this.options.autoHideLabels;
     this.options = next;
     if (labelsChanged) this.sigma?.setSetting("renderLabels", next.showLabels);
     if (colorChanged) this.applyColorMode();
     if (labelLookChanged) this.sigma?.setSettings(this.labelSettings(next));
     if (sizeChanged) {
-      // Label density AND the hide-on-move behaviour both depend on graph size.
-      const labels = labelTuning(next.nodeCount);
+      // Label culling AND the hide-on-move behaviour both depend on graph size.
       const move = movePerformanceFlags(next.nodeCount);
       this.sigma?.setSettings({
-        labelDensity: labels.density,
+        labelDensity: this.densityFor(next),
         labelRenderedSizeThreshold: this.thresholdFor(next),
         hideEdgesOnMove: move.hideEdgesOnMove,
         hideLabelsOnMove: move.hideLabelsOnMove,
@@ -457,12 +467,30 @@ export class GraphRenderer {
    */
   private labelSettings(options: RendererOptions): Record<string, unknown> {
     return {
+      labelDensity: this.densityFor(options),
       labelRenderedSizeThreshold: this.thresholdFor(options),
     };
   }
 
   private thresholdFor(options: RendererOptions): number {
     return options.autoHideLabels ? labelTuning(options.nodeCount).threshold : 0;
+  }
+
+  /**
+   * Sigma's grid allowance for labels, written as the density it asks for.
+   *
+   * The grid keeps `ceil(labelDensity / ratio²)` labels per cell, so one density
+   * thins the labels out as the camera zooms away. That IS "hide labels when
+   * zooming out" — and it is why switching that off cannot be a matter of the size
+   * threshold alone: with the tuned density left in place the grid went on culling
+   * labels, so at any real zoom-out the switch looked inert.
+   *
+   * Off therefore asks for a cell large enough to hold the whole graph at the
+   * furthest zoom the camera is allowed, which no cell can exceed.
+   */
+  private densityFor(options: RendererOptions): number {
+    if (options.autoHideLabels) return labelTuning(options.nodeCount).density;
+    return options.nodeCount * MAX_CAMERA_RATIO * MAX_CAMERA_RATIO;
   }
 
   /** Recolour every node without rebuilding the layout. */
@@ -518,7 +546,10 @@ export class GraphRenderer {
     attributes: GraphNodeAttributes,
   ): Partial<NodeDisplayData> {
     const result: Partial<NodeDisplayData> = {
-      labelColor: this.options.labelColor ?? this.palette.label,
+      // The theme's label colour at the user's opacity. `hexToRgba` rather than a
+      // separate alpha field: sigma draws the label with a plain canvas fill, and
+      // an rgba() string is the only place the opacity can travel.
+      labelColor: hexToRgba(this.palette.label, this.options.labelOpacity),
       labelSize: this.options.labelSize,
       // `labelFont` carries the face and weight ONLY — no size. sigma parses it
       // with `parseFontString`, which extracts the weight/style keywords and

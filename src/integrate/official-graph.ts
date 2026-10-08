@@ -28,7 +28,7 @@ import { edgeKey, edgeKeyEndpoints } from "../core/graph-keys";
 import { findConnectingPaths } from "../core/paths";
 import { type FilterSection, renderFilters } from "../view/graph-filters";
 import { renderWeights } from "../view/graph-weights";
-import { filterNodes, type VisibilityFilters } from "../view/visibility";
+import { filterNodes, type TagFilterMode, type VisibilityFilters } from "../view/visibility";
 import type { GraphNode, OfficialGraphMode, RelevanceWeights, WikiGraph } from "../types";
 import { t } from "../i18n";
 import { countUndismissed } from "../view/insights-panel";
@@ -164,11 +164,8 @@ export interface OfficialGraphDeps {
   readonly onSetLineColor: (color: string | null) => Promise<void> | void;
   /** Toolbar actions. */
   readonly onSetMode: (mode: OfficialGraphMode) => Promise<void> | void;
-  readonly onRebuild: () => void;
-  /** Relevance coefficients, shared with the standalone view and the settings tab. */
+  /** Relevance coefficients, read for the scoring the graph itself displays. */
   readonly getWeights: () => RelevanceWeights;
-  readonly onSetWeight: (key: keyof RelevanceWeights, value: number) => Promise<void> | void;
-  readonly onResetWeights: () => Promise<void> | void;
   /** Chosen line colour, or null to keep the theme's. */
   readonly getLineColor: () => string | null;
   /** Hop budget for routes between focused notes; shared with the standalone view. */
@@ -178,6 +175,9 @@ export interface OfficialGraphDeps {
   readonly getHiddenTypes: () => readonly string[];
   /** Hide or show a page type, from the graph's own context menu. */
   readonly onToggleType: (pageType: string) => Promise<void> | void;
+  /** Whether the ticked tags are hidden or kept; shared with the standalone view. */
+  readonly getTagFilterMode: () => TagFilterMode;
+  readonly onSetTagFilterMode: (mode: TagFilterMode) => Promise<void> | void;
 }
 
 interface Attachment {
@@ -230,6 +230,16 @@ interface Attachment {
   lastData: unknown;
   /** Theme edge colours, stashed before overriding so they can be restored. */
   originalEdgeColor: { line?: OfficialColor; lineHighlight?: OfficialColor };
+  /**
+   * The line colour the plugin has written into the graph's shared edge colours,
+   * or `null` while it has written none.
+   *
+   * With no colour chosen, those objects belong to the built-in graph and the
+   * theme rewrites them; the plugin must leave them alone. This is what tells the
+   * two states apart, so clearing a chosen colour still puts the theme's back
+   * while a plain theme switch is not undone.
+   */
+  ownedLineColor: string | null;
 }
 
 export class OfficialGraphEnhancer {
@@ -264,11 +274,12 @@ export class OfficialGraphEnhancer {
    * together and lets the bright nodes carry the shape of the route.
    */
   private readonly focusIds = new Map<OfficialRenderer, Set<string>>();
-  private focusTicker: number | null = null;
+  /** Keeps the marker canvas in step with the camera; see `marksAreDrawn`. */
+  private markerTicker: number | null = null;
   /** Re-applies the focus the moment the window becomes visible again. */
   private visibilityHandler: (() => void) | null = null;
-  /** Filter groups the user folded away, in the built-in graph's panel. */
-  private collapsedFilters: ReadonlySet<FilterSection> = new Set();
+  /** Filter group the user is looking at, in the built-in graph's panel. */
+  private filterSection: FilterSection = "types";
   /**
    * Edges of the focused route, as `edgeKey` strings rather than link graphics.
    *
@@ -306,7 +317,7 @@ export class OfficialGraphEnhancer {
       // frame that may not come.
       this.visibilityHandler = () => {
         if (typeof document !== "undefined" && document.hidden) return;
-        this.reapplyFocus();
+        this.reapplyMarks();
       };
       document.addEventListener("visibilitychange", this.visibilityHandler);
       window.addEventListener("focus", this.visibilityHandler);
@@ -463,6 +474,7 @@ export class OfficialGraphEnhancer {
         lastInsights: null,
       lastFocusCount: 0,
         originalEdgeColor: {},
+        ownedLineColor: null,
       };
 
       // Toolbar first. Both live in the overlay, which is a flex COLUMN, so DOM
@@ -507,7 +519,7 @@ export class OfficialGraphEnhancer {
         delete (renderer as RendererWithMarker)[WRAPPED_SET_DATA];
       }
       this.focusIds.delete(renderer);
-      if (this.focusIds.size === 0) this.stopFocusTicker();
+      this.syncMarkerTicker();
       if (renderer.highlightNode) renderer.highlightNode = null;
       renderer.changed?.();
     } catch (error) {
@@ -629,6 +641,8 @@ export class OfficialGraphEnhancer {
     renderFilters(el, {
       graph,
       hiddenTypes: hiddenTypes as never,
+      communities: graph.communities,
+      hiddenCommunities: liveSet(() => this.deps.getVisibility().hiddenCommunities),
       hiddenTags: liveSet(() => this.deps.getVisibility().hiddenTags),
       hideIsolated: filters.hideIsolated,
       hideStructural: filters.hideStructural,
@@ -638,18 +652,25 @@ export class OfficialGraphEnhancer {
         else next.add(type);
         void this.deps.onSetVisibility({ hiddenTypes: [...next] });
       },
-      onToggleTag: (tag, visible) => {
+      onToggleCommunity: (id, visible) => {
+        const next = new Set(this.deps.getVisibility().hiddenCommunities);
+        if (visible) next.delete(id);
+        else next.add(id);
+        void this.deps.onSetVisibility({ hiddenCommunities: [...next] });
+      },
+      onClearCommunities: () => void this.deps.onSetVisibility({ hiddenCommunities: [] }),
+      onToggleTag: (tag, selected) => {
         const next = new Set(this.deps.getVisibility().hiddenTags);
-        if (visible) next.delete(tag);
-        else next.add(tag);
+        if (selected) next.add(tag);
+        else next.delete(tag);
         void this.deps.onSetVisibility({ hiddenTags: [...next] });
       },
-      // Tags only. The button lives in the tag group and undoes what that group
+      // Tags only. The buttons live in the tag group and act on what that group
       // did; the hidden-type and visibility switches are separate decisions the
       // user made elsewhere, and clearing them here would silently overrule them.
       //
       // Redrawn once the write lands: the boxes are ticked in place as well, but
-      // a tag that was pinned to the top because it was hidden has to move back
+      // a tag that was pinned to the top because it was selected has to move back
       // into its place in the list, and only a redraw does that.
       onClearTags: () => {
         void Promise.resolve(this.deps.onSetVisibility({ hiddenTags: [] })).then(() => {
@@ -657,15 +678,27 @@ export class OfficialGraphEnhancer {
           this.renderFiltersBody(el);
         });
       },
+      onSelectAllTags: (tags) => {
+        const next = new Set(this.deps.getVisibility().hiddenTags);
+        for (const tag of tags) if (tag.length > 0) next.add(tag);
+        void Promise.resolve(this.deps.onSetVisibility({ hiddenTags: [...next] })).then(() => {
+          el.empty();
+          this.renderFiltersBody(el);
+        });
+      },
+      tagFilterMode: this.deps.getTagFilterMode(),
+      onSetTagFilterMode: (mode) => {
+        void Promise.resolve(this.deps.onSetTagFilterMode(mode)).then(() => {
+          el.empty();
+          this.renderFiltersBody(el);
+        });
+      },
       onToggleIsolated: (value) => void this.deps.onSetVisibility({ hideIsolated: value }),
       // Repaints just this body rather than the whole panel: the element is in hand,
       // and the tag search text lives at module level so it survives.
-      collapsedSections: this.collapsedFilters,
-      onToggleSection: (section) => {
-        const next = new Set(this.collapsedFilters);
-        if (next.has(section)) next.delete(section);
-        else next.add(section);
-        this.collapsedFilters = next;
+      activeSection: this.filterSection,
+      onSelectSection: (section) => {
+        this.filterSection = section;
         el.empty();
         this.renderFiltersBody(el);
       },
@@ -677,6 +710,12 @@ export class OfficialGraphEnhancer {
    *
    * Hidden while colouring is off: there is nothing to explain then, and an empty
    * box in the corner is worse than none.
+   *
+   * The rows are controls, exactly as they are in the standalone view: a click
+   * excludes or restores that type or cluster, and the header carries a "show all"
+   * for the group on screen. Both views write the same visibility settings, so the
+   * legend is a shortcut to the same switches the filters panel offers — not a
+   * second, competing filter.
    */
   private legendOptions(): ConstructorParameters<typeof OfficialLegend>[1] extends () => infer R
     ? R
@@ -690,37 +729,28 @@ export class OfficialGraphEnhancer {
       colorMode: mode === "community" ? "community" : mode === "type" ? "type" : "custom",
       customNodeColor: "#888888",
       typeColorOverrides: this.deps.getTypeColors(),
+      // Read through the live filters, so a row that is currently excluded is
+      // drawn as excluded — the legend explains the state, it does not set it.
       hiddenTypes: filters.hiddenTypes,
+      hiddenCommunities: filters.hiddenCommunities,
+      // The rows are controls too. They write the same shared visibility the
+      // filters panel does, so a click here and a tick there are one setting, and
+      // the header's "show all" clears the group the legend is currently showing.
       onToggleType: (type) => {
-        // Read now, not from the copy this legend was drawn with: the legend is
-        // not rebuilt between two clicks either, and a stale base would drop the
-        // type switched off a moment earlier.
         const next = new Set(this.deps.getVisibility().hiddenTypes);
         if (next.has(type)) next.delete(type);
         else next.add(type);
         void this.deps.onSetVisibility({ hiddenTypes: [...next] });
       },
       onShowAllTypes: () => void this.deps.onSetVisibility({ hiddenTypes: [] }),
-      onFocusNodes: (nodeIds) => {
-        for (const attachment of this.attachments.values()) {
-          this.focusNodes(attachment.renderer, nodeIds);
-          return;
-        }
+      onToggleCommunity: (id) => {
+        const next = new Set(this.deps.getVisibility().hiddenCommunities);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        void this.deps.onSetVisibility({ hiddenCommunities: [...next] });
       },
+      onShowAllCommunities: () => void this.deps.onSetVisibility({ hiddenCommunities: [] }),
     };
-  }
-  /**
-   * The weights body, drawn by the standalone view's own renderer.
-   *
-   * A change here re-scores every pair in the vault, so it asks for a rebuild
-   * rather than pretending the graph can be repainted into the new shape.
-   */
-  private renderWeightsBody(el: HTMLElement): void {
-    renderWeights(el, {
-      weights: this.deps.getWeights(),
-      onChange: (key, value) => this.deps.onSetWeight(key, value),
-      onReset: () => this.deps.onResetWeights(),
-    });
   }
 
   /** Change the colouring mode, then re-colour with it. */
@@ -745,16 +775,19 @@ export class OfficialGraphEnhancer {
       },
       onSearch: (query) => {
         this.searchQuery = query.trim().toLowerCase();
-        // Marked, not filtered. Redrawing here rather than waiting for a tick,
-        // because the focus ticker only runs while something is focused.
+        // Marked, not filtered. Drawn here as well as on the ticker so the marks
+        // appear on the keystroke; the ticker is what keeps them on their nodes
+        // once the canvas is panned or zoomed — the marks live in screen space,
+        // and nothing else redraws them.
         for (const attachment of this.attachments.values()) {
           if (attachment.renderer !== renderer) continue;
           this.drawMarkers(attachment.renderer);
-          return;
+          break;
         }
+        this.syncMarkerTicker();
       },
       onPanel: (mode) => {
-        if (mode !== "insights" && mode !== "filters" && mode !== "appearance" && mode !== "weights") return;
+        if (mode !== "insights" && mode !== "filters" && mode !== "appearance") return;
         this.panelMode = this.panelMode === mode ? "none" : mode;
         for (const attachment of this.attachments.values()) {
           if (attachment.renderer !== renderer) continue;
@@ -763,15 +796,14 @@ export class OfficialGraphEnhancer {
               ? "colors"
               : this.panelMode === "filters"
                 ? "filters"
-                : this.panelMode === "weights"
-                  ? "weights"
-                  : "insights";
+                : "insights";
           attachment.panel.showTab(tab, this.panelMode !== "none");
           attachment.toolbar.render();
           return;
         }
       },
-      onRebuild: () => this.deps.onRebuild(),
+      // The panels this graph actually has, and no rebuild button either: see
+      // `OfficialToolbar`'s panel list and `ToolbarOptions.onRebuild`.
       onZoomIn: () => this.zoomBy(renderer, 1.3),
       onZoomOut: () => this.zoomBy(renderer, 1 / 1.3),
       onFit: () => renderer.zoomTo?.(1),
@@ -1022,7 +1054,7 @@ export class OfficialGraphEnhancer {
         set.add(graphNode.id);
         this.focusIds.set(renderer, set);
         this.assertFocus(renderer);
-        this.startFocusTicker();
+        this.syncMarkerTicker();
         return;
       }
       this.reportFocusFailure(nodeId, "no attached built-in graph holds this node");
@@ -1060,7 +1092,7 @@ export class OfficialGraphEnhancer {
     }
     this.focusIds.set(renderer, new Set(ids));
     this.assertFocus(renderer);
-    this.startFocusTicker();
+    this.syncMarkerTicker();
   }
 
   /**
@@ -1116,10 +1148,9 @@ export class OfficialGraphEnhancer {
       this.applyColors(attachment);
       this.applyLineColor(attachment);
       this.refreshLitEdges(renderer);
-      // The ticker stops below without drawing again, so the rings have to be
-      // wiped here — otherwise they stay on the canvas with nothing left to
-      // remove them.
-      attachment.markers.draw([], [], this.markerPalette());
+      // Redrawn rather than wiped: the focus's dots are only some of what this
+      // layer carries, and a search's marks have to survive a focus change.
+      this.drawMarkers(renderer);
       attachment.panel.render();
       renderer.changed?.();
       return;
@@ -1127,27 +1158,54 @@ export class OfficialGraphEnhancer {
   }
 
   /**
-   * Apply the chosen line colour, or put the theme's back.
+   * Apply the chosen line colour, or leave the theme's alone.
    *
    * The built-in graph paints every edge from these two shared objects, so a
    * single colour is all it can express — there is no weight ramp to drive the
    * way the standalone view does.
    *
-   * Alphas are restored too: the focus dims edges per link, not through these.
+   * With nothing chosen, these objects are NOT ours to write. They are the
+   * built-in graph's own, and the theme rewrites them when the user switches
+   * between light and dark: writing a stashed copy back on the next refresh put
+   * the previous theme's ink on the new theme's canvas — near-white edges on a
+   * white page, near-black ones on a black one — and it stayed that way until the
+   * graph was closed and reopened, which is what re-read them. Reading them here
+   * instead of writing keeps the stash current, so choosing a colour and then
+   * clearing it still lands on the theme that is on screen at the time.
    */
   private applyLineColor(attachment: Attachment): void {
     const colors = attachment.renderer.colors;
     if (!colors) return;
-    const chosen = this.deps.getLineColor();
+    const chosen = this.deps.getLineColor() ?? null;
+    const owned = attachment.ownedLineColor !== null;
     for (const key of ["line", "lineHighlight"] as const) {
       const color = colors[key];
       if (!color) continue;
-      const stashed = attachment.originalEdgeColor[key];
-      const original = stashed ?? { a: color.a, rgb: color.rgb };
-      if (!stashed) attachment.originalEdgeColor[key] = original;
-      color.a = original.a;
-      color.rgb = chosen ? hexToRgbInt(chosen) : original.rgb;
+      if (!chosen) {
+        if (owned) {
+          // The colour was just cleared: put the theme's back.
+          const themed = attachment.originalEdgeColor[key];
+          if (themed) {
+            color.a = themed.a;
+            color.rgb = themed.rgb;
+          }
+        } else {
+          // Never touched by us. Read where the theme has it — a theme switch
+          // rewrites this object, and writing an older copy back here is what left
+          // the edges the wrong ink until the graph was reopened. Reading also
+          // keeps the stash current for a colour chosen later.
+          attachment.originalEdgeColor[key] = { a: color.a, rgb: color.rgb };
+        }
+        continue;
+      }
+      if (!owned) {
+        // First write over the theme's own value: keep it, so clearing the colour
+        // can put it back.
+        attachment.originalEdgeColor[key] = { a: color.a, rgb: color.rgb };
+      }
+      color.rgb = hexToRgbInt(chosen);
     }
+    attachment.ownedLineColor = chosen;
   }
 
   /**
@@ -1243,6 +1301,10 @@ export class OfficialGraphEnhancer {
 
   /** Put the theme's own line colour back, whatever the setting now says. */
   private restoreLineColor(attachment: Attachment): void {
+    // Nothing of ours to undo: the graph's own objects were never written to, and
+    // the theme owns whatever they hold now.
+    if (attachment.ownedLineColor === null) return;
+    attachment.ownedLineColor = null;
     const colors = attachment.renderer.colors;
     if (!colors) return;
     for (const key of ["line", "lineHighlight"] as const) {
@@ -1334,57 +1396,85 @@ export class OfficialGraphEnhancer {
    * the focus set we just painted.
    */
   /**
-   * Re-apply the focus highlight immediately.
+   * Re-apply the focus highlight and the search marks immediately.
    *
    * Called when the window becomes visible again. The ticker alone is not enough
    * because it runs on requestAnimationFrame, which does not fire while hidden —
    * and a repaint in that time drops the edge highlight while the node dimming
    * survives.
    */
-  private reapplyFocus(): void {
-    if (this.focusIds.size === 0) return;
-    for (const [renderer, ids] of this.focusIds) {
-      if (ids.size === 0) continue;
+  private reapplyMarks(): void {
+    if (!this.marksAreDrawn()) return;
+    for (const attachment of this.attachments.values()) {
+      const focused = this.focusIds.get(attachment.renderer);
       try {
-        this.forceLitEdges(renderer);
-        this.drawMarkers(renderer);
+        if (focused && focused.size > 0) this.forceLitEdges(attachment.renderer);
+        this.drawMarkers(attachment.renderer);
       } catch {
         /* the renderer is gone; the next sync drops it */
       }
     }
-    this.startFocusTicker();
+    this.syncMarkerTicker();
   }
 
-  private startFocusTicker(): void {
-    if (this.focusTicker !== null) return;
+  /**
+   * Whether anything has to be kept in step with the canvas from frame to frame.
+   *
+   * The marks are drawn onto a canvas of our own, in screen space, so they only
+   * stay on their nodes if they are redrawn as the camera moves. Two things put
+   * marks on screen — a focus and a search — and a search is a state of its own:
+   * this used to be decided by the focus alone, so the search's marks were drawn
+   * once when the query changed and then stayed exactly where they were put while
+   * the graph moved under them.
+   */
+  private marksAreDrawn(): boolean {
+    return this.attachments.size > 0 && (this.hasFocus() || this.searchQuery !== "");
+  }
+
+  /** Keep the marker ticker running exactly while there is something to keep in step. */
+  private syncMarkerTicker(): void {
+    if (this.marksAreDrawn()) this.startMarkerTicker();
+    else this.stopMarkerTicker();
+  }
+
+  private startMarkerTicker(): void {
+    if (this.markerTicker !== null) return;
     if (typeof window === "undefined") return;
     const tick = (): void => {
-      if (this.focusIds.size === 0) {
-        this.stopFocusTicker();
+      if (!this.marksAreDrawn()) {
+        this.stopMarkerTicker();
         return;
       }
-      for (const [renderer, ids] of this.focusIds) {
-        if (ids.size === 0) continue;
+      // Every attached graph, not just the focused ones: a search marks its
+      // matches in all of them.
+      for (const attachment of this.attachments.values()) {
+        const renderer = attachment.renderer;
+        const focused = this.focusIds.get(renderer);
         try {
-          if (renderer.highlightNode) {
-            renderer.highlightNode = null;
-            renderer.changed?.();
+          if (focused && focused.size > 0) {
+            // The renderer's own single-node highlight is kept out of the way
+            // while a focus is active: hovering would otherwise re-dim everything
+            // through `ZU` and undo the focus set we just painted.
+            if (renderer.highlightNode) {
+              renderer.highlightNode = null;
+              renderer.changed?.();
+            }
+            this.forceLitEdges(renderer);
           }
+          this.drawMarkers(renderer);
         } catch {
           /* the renderer is already gone */
         }
-        this.forceLitEdges(renderer);
-        this.drawMarkers(renderer);
       }
-      this.focusTicker = window.requestAnimationFrame(tick);
+      this.markerTicker = window.requestAnimationFrame(tick);
     };
-    this.focusTicker = window.requestAnimationFrame(tick);
+    this.markerTicker = window.requestAnimationFrame(tick);
   }
 
-  private stopFocusTicker(): void {
-    if (this.focusTicker === null) return;
-    window.cancelAnimationFrame(this.focusTicker);
-    this.focusTicker = null;
+  private stopMarkerTicker(): void {
+    if (this.markerTicker === null) return;
+    window.cancelAnimationFrame(this.markerTicker);
+    this.markerTicker = null;
   }
 
   /**
@@ -1512,7 +1602,7 @@ export class OfficialGraphEnhancer {
   private clearFocusRenderer(renderer: OfficialRenderer): void {
     this.focusIds.delete(renderer);
     this.litEdges.delete(renderer);
-    if (this.focusIds.size === 0) this.stopFocusTicker();
+    this.syncMarkerTicker();
     // Snap the edges back rather than waiting for the lerp to converge.
     this.releaseEdges(renderer);
     for (const attachment of this.attachments.values()) {
@@ -1520,10 +1610,11 @@ export class OfficialGraphEnhancer {
       this.applyColors(attachment);
       this.applyLineColor(attachment);
       this.refreshLitEdges(renderer);
-      // The ticker stops below without drawing again, so the rings have to be
-      // wiped here — otherwise they stay on the canvas with nothing left to
-      // remove them.
-      attachment.markers.draw([], [], this.markerPalette());
+      // Redrawn rather than wiped: a search's marks are on this layer too, and
+      // clearing them here would take them off the screen until the next frame
+      // put them back — or for good, if no focus is left to keep the ticker
+      // running.
+      this.drawMarkers(renderer);
       attachment.panel.render();
       renderer.changed?.();
       return;
@@ -1531,9 +1622,9 @@ export class OfficialGraphEnhancer {
   }
 
   private clearAllFocus(): void {
-    this.stopFocusTicker();
     for (const renderer of [...this.focusIds.keys()]) this.clearFocusRenderer(renderer);
     this.focusIds.clear();
+    this.syncMarkerTicker();
   }
   /**
    * Move the renderer's notion of the pointer onto this node.
@@ -1582,6 +1673,7 @@ export class OfficialGraphEnhancer {
     const filters = this.deps.getVisibility();
     const anyHidden =
       filters.hiddenTypes.size > 0 ||
+      filters.hiddenCommunities.size > 0 ||
       filters.hiddenTags.size > 0 ||
       filters.hideStructural ||
       filters.hideIsolated;
@@ -1656,6 +1748,7 @@ export class OfficialGraphEnhancer {
         else void this.deps.onSetCommunityColor(Number(key), color);
       },
       lineColor: () => this.deps.getLineColor() ?? LINE_COLOR_FALLBACK,
+      isLineColorThemed: () => (this.deps.getLineColor() ?? null) === null,
       onSetLineColor: (color) => void this.deps.onSetLineColor(color),
       intermediates: () => this.deps.getFocusIntermediates(),
       onSetIntermediates: (intermediates) => {
@@ -1665,7 +1758,6 @@ export class OfficialGraphEnhancer {
       },
       onDismiss: (key, nodeIds) => void this.deps.onDismiss(key, nodeIds),
       renderFilters: (el) => this.renderFiltersBody(el),
-      renderWeights: (el) => this.renderWeightsBody(el),
     };
   }
 

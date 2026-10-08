@@ -27,6 +27,7 @@ import type {
   WikiGraph,
 } from "../types";
 import { t } from "../i18n";
+import { tabRow } from "./controls";
 
 /** Icon renderer; matches Obsidian's `setIcon(el, iconId)` signature. */
 export type SetIconImpl = (el: HTMLElement, icon: string) => void;
@@ -45,17 +46,18 @@ export interface InsightsPanelOptions {
   readonly onDismiss: (key: string, nodeIds: readonly string[]) => void;
   readonly onToggleShowDismissed: () => void;
   /**
-   * Which insight sections are collapsed.
+   * Which group of cards is on screen, and how to switch.
    *
    * Held by the caller rather than here: this function runs on every repaint, so
    * state kept inside it would be forgotten the moment anything else redraws the
-   * panel — the section would spring open again on its own.
+   * panel — the tab would jump back on its own.
    *
-   * Optional along with {@link onToggleSection}: with neither, the headings stay
-   * plain labels, which is what a caller that has no panel state to keep wants.
+   * Optional: with no {@link onSelectSection} every group is drawn one after
+   * another under its own plain heading, which is what a caller with no panel
+   * state to keep wants. A group with nothing in it gets no tab either way.
    */
-  readonly collapsedSections?: ReadonlySet<InsightSection>;
-  readonly onToggleSection?: (section: InsightSection) => void;
+  readonly activeSection?: InsightSection;
+  readonly onSelectSection?: (section: InsightSection) => void;
   /**
    * Icon renderer override, defaulting to Obsidian's `setIcon`.
    *
@@ -65,41 +67,17 @@ export interface InsightsPanelOptions {
   readonly setIconImpl?: SetIconImpl;
 }
 
-/** The two insight groups, each of which can be folded away. */
+/** The two insight groups, one of which is on screen at a time. */
 export type InsightSection = "connections" | "gaps";
 
-/**
- * The clickable section header. Returns the element the icon is drawn into.
- *
- * A button rather than a plain heading: the whole title is the target, which is
- * what makes it read as something to press rather than a label that happens to be
- * clickable, and it carries `aria-expanded` for the same reason.
- */
-function sectionTitle(
-  section: HTMLElement,
-  options: InsightsPanelOptions,
-  which: InsightSection,
-): HTMLElement {
-  const collapsed = options.collapsedSections?.has(which) ?? false;
-  const toggle = options.onToggleSection;
-  if (!toggle) {
-    const plain = section.createDiv({ cls: "enhanced-graph-section-title" });
-    const plainIcon = plain.createSpan({
-      cls: which === "connections" ? "enhanced-graph-icon-connection" : "enhanced-graph-icon-gap",
-    });
-    plain.createSpan({ text: t(which === "connections" ? "insights.connections" : "insights.gaps") });
-    return plainIcon;
-  }
-  const title = section.createEl("button", { cls: "enhanced-graph-section-title is-toggle" });
-  title.setAttribute("aria-expanded", String(!collapsed));
-  const icon = title.createSpan({
-    cls: which === "connections" ? "enhanced-graph-icon-connection" : "enhanced-graph-icon-gap",
-  });
-  title.createSpan({ text: t(which === "connections" ? "insights.connections" : "insights.gaps") });
-  const chevron = title.createSpan({ cls: "enhanced-graph-section-chevron" });
-  chevron.setAttribute("data-chevron", collapsed ? "right" : "down");
-  title.addEventListener("click", () => toggle(which));
-  return icon;
+/** One group's cards, and how the panel should label its tab. */
+interface InsightGroup {
+  readonly id: InsightSection;
+  readonly label: string;
+  /** Obsidian icon name, drawn next to the label in the no-switcher fallback. */
+  readonly icon: string;
+  readonly count: number;
+  readonly render: (section: HTMLElement) => void;
 }
 
 /**
@@ -110,6 +88,12 @@ function sectionTitle(
  * into the same element, so emptying it would take the title and the close
  * button with it. A caller that re-renders into a reused element clears it
  * itself (or hands in a fresh one).
+ *
+ * The groups switch like tabs rather than folding open and shut: one button per
+ * group, and the cards of the chosen one below it. Folding left the panel showing
+ * whichever groups happened to be open, so the two lists competed for the same
+ * space and the panel's height moved under the pointer every time one was
+ * toggled.
  */
 export function renderInsightsPanel(container: HTMLElement, options: InsightsPanelOptions): void {
   const setIconImpl = options.setIconImpl ?? setIcon;
@@ -132,26 +116,62 @@ export function renderInsightsPanel(container: HTMLElement, options: InsightsPan
     clear.addEventListener("click", () => options.onToggleFocus([], []));
   }
 
-  if (connections.length > 0) {
-    const section = container.createDiv({ cls: "enhanced-graph-section" });
-    const collapsed = options.collapsedSections?.has("connections") ?? false;
-    if (collapsed) section.addClass("is-collapsed");
-    setIconImpl(sectionTitle(section, options, "connections"), "link-2");
-    if (!collapsed) {
-      for (const connection of connections) {
-        renderConnectionCard(section, connection, dismissed.has(connection.key), options, setIconImpl);
-      }
-    }
+  const everyGroup: InsightGroup[] = [
+    {
+      id: "connections",
+      label: t("insights.connections"),
+      icon: "link-2",
+      count: connections.length,
+      render: (section) => {
+        for (const connection of connections) {
+          renderConnectionCard(section, connection, dismissed.has(connection.key), options, setIconImpl);
+        }
+      },
+    },
+    {
+      id: "gaps",
+      label: t("insights.gaps"),
+      icon: "alert-triangle",
+      count: gaps.length,
+      render: (section) => {
+        for (const gap of gaps) renderGapCard(section, gap, options, setIconImpl);
+      },
+    },
+  ];
+  // A group with nothing in it gets no tab: a button that opens an empty list is
+  // worse than no button.
+  const groups = everyGroup.filter((group) => group.count > 0);
+
+  const select = options.onSelectSection;
+  // A group that is gone (or was never chosen) falls back to the first one that
+  // has something in it, so the panel can never come up empty-handed.
+  const active = groups.some((group) => group.id === options.activeSection)
+    ? (options.activeSection as InsightSection)
+    : groups[0]?.id;
+  // Even a lone group gets its button: it is what says which list is on screen.
+  if (select) {
+    tabRow(
+      container,
+      groups.map((group) => ({ id: group.id, label: `${group.label} (${group.count})` })),
+      active as InsightSection,
+      select,
+    );
   }
 
-  if (gaps.length > 0) {
+  for (const group of groups) {
+    if (select && group.id !== active) continue;
     const section = container.createDiv({ cls: "enhanced-graph-section" });
-    const collapsed = options.collapsedSections?.has("gaps") ?? false;
-    if (collapsed) section.addClass("is-collapsed");
-    setIconImpl(sectionTitle(section, options, "gaps"), "alert-triangle");
-    if (!collapsed) {
-      for (const gap of gaps) renderGapCard(section, gap, options, setIconImpl);
+    section.setAttribute("data-section", group.id);
+    if (!select) {
+      // No switcher: every group is drawn, each under its own plain heading.
+      const heading = section.createDiv({ cls: "enhanced-graph-section-title" });
+      const icon = heading.createSpan({
+        cls: group.id === "connections" ? "enhanced-graph-icon-connection" : "enhanced-graph-icon-gap",
+      });
+      heading.createSpan({ text: group.label });
+      setIconImpl(icon, group.icon);
     }
+    group.render(section);
   }
 
   // The count is the difference between "everything the analysis found" and

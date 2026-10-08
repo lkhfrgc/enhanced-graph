@@ -33,6 +33,37 @@ function check(name, pass, detail = "") {
   console.log(`  ${pass ? "PASS" : "FAIL"}  ${name}${detail ? `: ${detail}` : ""}`);
 }
 
+/** Switch the standalone view's colouring mode from its toolbar. */
+async function switchColourMode(page, label) {
+  await page.evaluate(async (text) => {
+    const button = [...document.querySelectorAll(".enhanced-graph-toolbar .enhanced-graph-button")].find(
+      (candidate) => candidate.textContent?.includes(text),
+    );
+    if (!button) throw new Error(`no colour mode button saying ${text}`);
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  }, label);
+  await page.waitForTimeout(300);
+}
+
+/**
+ * Press one of the side panel's section tabs.
+ *
+ * The insights groups and the filter groups switch like tabs rather than folding
+ * open and shut, so a check that wants the tag list (or the gap cards) has to
+ * press its button first — and a check that does not is checking the wrong thing.
+ */
+async function selectPanelTab(page, label) {
+  await page.evaluate((text) => {
+    const tab = [...document.querySelectorAll(".enhanced-graph-panel-tabs button")].find((el) =>
+      (el.textContent ?? "").includes(text),
+    );
+    if (!tab) throw new Error(`no panel tab saying ${text}`);
+    tab.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  }, label);
+  await page.waitForTimeout(250);
+}
+
 function startServer() {
   const server = http.createServer((request, response) => {
     const url = new URL(request.url ?? "/", "http://localhost");
@@ -274,7 +305,174 @@ async function main() {
       communityView.distinctColors >= Math.min(2, communityView.communities),
       `${communityView.distinctColors} distinct node colours`,
     );
+
+    // The cluster rows are the filter control: pressing one takes that whole
+    // knowledge cluster off the graph, pressing it again brings it back. Driven
+    // with the real pointer, and the row is expected to stay in the list — it is
+    // the only way back.
+    const clusterFilter = await (async () => {
+      const visibleCount = () => page.evaluate(() => window.__HARNESS__.visibleNodeIds().length);
+      const expectedDrop = await page.evaluate(() => {
+        const community = window.__HARNESS__.snapshot.graph.communities[0];
+        const shown = new Set(window.__HARNESS__.visibleNodeIds());
+        return community.nodeIds.filter((id) => shown.has(id)).length;
+      });
+      const before = await visibleCount();
+      const rows = page.locator(".enhanced-graph-legend-row");
+      await rows.nth(0).click();
+      await page.waitForTimeout(500);
+      const afterHiding = await visibleCount();
+      const marked = await page.evaluate(() => ({
+        hiddenRows: document.querySelectorAll(".enhanced-graph-legend-row.is-hidden-cluster").length,
+        rows: document.querySelectorAll(".enhanced-graph-legend-row").length,
+        showAll: [...document.querySelectorAll(".enhanced-graph-legend-header button")].some((el) =>
+          (el.textContent ?? "").includes("显示全部"),
+        ),
+        stored: window.__HARNESS__.settings.hiddenCommunities.slice(),
+      }));
+
+      await rows.nth(0).click();
+      await page.waitForTimeout(500);
+      return {
+        expectedDrop,
+        before,
+        afterHiding,
+        afterRestore: await visibleCount(),
+        storedAfterRestore: await page.evaluate(
+          () => window.__HARNESS__.settings.hiddenCommunities.slice(),
+        ),
+        ...marked,
+      };
+    })();
+    check(
+      "clicking a cluster row excludes that cluster, and clicking it again restores it",
+      clusterFilter.expectedDrop > 0 &&
+        clusterFilter.afterHiding === clusterFilter.before - clusterFilter.expectedDrop &&
+        clusterFilter.afterRestore === clusterFilter.before &&
+        clusterFilter.storedAfterRestore.length === 0,
+      `${clusterFilter.before} → ${clusterFilter.afterHiding} (−${clusterFilter.expectedDrop}) → ${clusterFilter.afterRestore} nodes`,
+    );
+    check(
+      "an excluded cluster's row stays, marked, with a way back",
+      clusterFilter.hiddenRows === 1 &&
+        clusterFilter.rows === communityView.communities &&
+        clusterFilter.showAll,
+      `${clusterFilter.hiddenRows} row marked hidden of ${clusterFilter.rows}, ` +
+        `stored [${clusterFilter.stored.join(", ")}], show-all offered: ${clusterFilter.showAll}`,
+    );
     await page.screenshot({ path: path.join(shotsDir, "02-community-mode-dark.png") });
+
+    // The type rows are the same control in type mode, and the header's "show all"
+    // is the one-press way back for whichever group is on screen — always there,
+    // disabled while there is nothing to restore.
+    await switchColourMode(page, "按类型着色");
+    const typeFilter = await (async () => {
+      const visibleCount = () => page.evaluate(() => window.__HARNESS__.visibleNodeIds().length);
+      const showAll = page.locator(".enhanced-graph-legend-header button", { hasText: "显示全部" });
+      const disabledBefore = await showAll.isDisabled();
+      const before = await visibleCount();
+      const rows = page.locator(".enhanced-graph-legend-row");
+      const rowCount = await rows.count();
+      const firstName = await page.evaluate(
+        () => document.querySelector(".enhanced-graph-legend-label")?.textContent ?? "",
+      );
+
+      await rows.nth(0).click();
+      await page.waitForTimeout(500);
+      const hidden = await visibleCount();
+      const marked = await page.evaluate(() => ({
+        rows: document.querySelectorAll(".enhanced-graph-legend-row.is-hidden-type").length,
+        stored: window.__HARNESS__.settings.hiddenTypes.slice(),
+      }));
+      const enabledWhileHidden = !(await showAll.isDisabled());
+
+      await showAll.click();
+      await page.waitForTimeout(500);
+      return {
+        rowCount,
+        firstName,
+        before,
+        hidden,
+        marked,
+        disabledBefore,
+        enabledWhileHidden,
+        afterShowAll: await visibleCount(),
+        storedAfterRestore: await page.evaluate(
+          () => window.__HARNESS__.settings.hiddenTypes.slice(),
+        ),
+      };
+    })();
+    check(
+      "clicking a type row excludes that type, and the header's 显示全部 brings it back",
+      typeFilter.rowCount >= 5 &&
+        typeFilter.hidden < typeFilter.before &&
+        typeFilter.marked.rows === 1 &&
+        typeFilter.disabledBefore === true &&
+        typeFilter.enabledWhileHidden &&
+        typeFilter.afterShowAll === typeFilter.before &&
+        typeFilter.storedAfterRestore.length === 0,
+      `"${typeFilter.firstName}": ${typeFilter.before} → ${typeFilter.hidden} → ` +
+        `${typeFilter.afterShowAll} nodes; show-all disabled ${typeFilter.disabledBefore} → ` +
+        `${!typeFilter.enabledWhileHidden}`,
+    );
+
+    // --- 5c. nothing scrolls back to the top when a row is clicked ----------
+    // Clicking a row re-renders the legend (the row has to come back shaded) and
+    // the panel (the graph changed), and rebuilding a scrolling box scrolls it
+    // back to the top — under the pointer that just clicked. Measured in a short
+    // window, so both boxes really do scroll.
+    const scrollKeep = await (async () => {
+      await page.setViewportSize({ width: 1440, height: 460 });
+      await page.waitForTimeout(500);
+      const before = await page.evaluate(() => {
+        const body = document.querySelector(".enhanced-graph-legend-body");
+        const panel = document.querySelector(".enhanced-graph-panel");
+        if (body) body.scrollTop = body.scrollHeight;
+        if (panel) panel.scrollTop = panel.scrollHeight;
+        return {
+          bodyScrolls: body ? body.scrollHeight > body.clientHeight : false,
+          panelScrolls: panel ? panel.scrollHeight > panel.clientHeight : false,
+          body: body?.scrollTop ?? 0,
+          panel: panel?.scrollTop ?? 0,
+          bodyShape: body ? `${body.scrollHeight}/${body.clientHeight}` : "none",
+          rows: document.querySelectorAll(".enhanced-graph-legend-row").length,
+        };
+      });
+      // The LAST row: at this scroll position it is the visible one, so the real
+      // pointer has no reason to scroll the list before clicking — Playwright
+      // scrolls a target into view, which on its own would move the position this
+      // check is about.
+      await page.locator(".enhanced-graph-legend-row").last().click();
+      const immediate = await page.evaluate(
+        () => document.querySelector(".enhanced-graph-legend-body")?.scrollTop ?? -1,
+      );
+      await page.waitForTimeout(600);
+      const after = await page.evaluate(() => {
+        const body = document.querySelector(".enhanced-graph-legend-body");
+        return {
+          body: body?.scrollTop ?? 0,
+          panel: document.querySelector(".enhanced-graph-panel")?.scrollTop ?? 0,
+          bodyShape: body ? `${body.scrollHeight}/${body.clientHeight}` : "none",
+          rows: document.querySelectorAll(".enhanced-graph-legend-row").length,
+        };
+      });
+      // Put the row back, and restore the window the rest of the run expects.
+      await page.locator(".enhanced-graph-legend-row").last().click();
+      await page.waitForTimeout(500);
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await page.waitForTimeout(400);
+      return { ...before, after, immediate };
+    })();
+    check(
+      "clicking a row leaves the legend and the panel scrolled where they were",
+      scrollKeep.bodyScrolls &&
+        scrollKeep.body > 0 &&
+        scrollKeep.after.body === scrollKeep.body &&
+        (!scrollKeep.panelScrolls || scrollKeep.after.panel === scrollKeep.panel),
+      `legend body ${scrollKeep.body} → ${scrollKeep.immediate} (right after the click) → ${scrollKeep.after.body} ` +
+        `(${scrollKeep.bodyShape} → ${scrollKeep.after.bodyShape}, rows ${scrollKeep.rows} → ${scrollKeep.after.rows}); ` +
+        `panel ${scrollKeep.panel} → ${scrollKeep.after.panel} (scrolls: ${scrollKeep.panelScrolls})`,
+    );
 
     // --- 6. hover: neighbours stay, others dim, score tooltip --------------
     const hoverTarget = await page.evaluate(() => {
@@ -357,21 +555,34 @@ async function main() {
     );
 
     // --- 8. insights panel + click-to-highlight ---------------------------
-    const panel = await page.evaluate(() => {
-      const cards = [...document.querySelectorAll(".enhanced-graph-card")];
-      return {
-        count: cards.length,
-        titles: cards.map((card) => card.querySelector(".enhanced-graph-card-title")?.textContent ?? ""),
-        sections: [...document.querySelectorAll(".enhanced-graph-section-title")].map((el) => el.textContent ?? ""),
-
-      };
-    });
+    // One button per group, and the cards of the chosen one below it.
+    const insightTabs = await page.evaluate(() =>
+      [...document.querySelectorAll(".enhanced-graph-panel-tabs button")].map((el) => el.textContent ?? ""),
+    );
+    const connectionCards = await page.evaluate(
+      () => document.querySelectorAll(".enhanced-graph-card").length,
+    );
+    await selectPanelTab(page, "知识空白");
+    const gapCards = await page.evaluate(() => ({
+      count: document.querySelectorAll(".enhanced-graph-card").length,
+      gaps: document.querySelectorAll(".enhanced-graph-card").length,
+    }));
+    // Back to the first group: the checks below click a connection card.
+    await selectPanelTab(page, "惊奇连接");
+    const panel = {
+      count: connectionCards + gapCards.count,
+      titles: [],
+      sections: insightTabs,
+    };
     check(
-      "insights panel renders connection and gap cards",
-      panel.count >= 4 &&
-        panel.sections.some((text) => text.includes("惊奇连接")) &&
-        panel.sections.some((text) => text.includes("知识空白")),
-      `${panel.count} cards, sections: ${panel.sections.join(" / ")}`,
+      "insights panel switches between connection and gap cards by tab",
+      insightTabs.length >= 2 &&
+        insightTabs.some((text) => text.includes("惊奇连接")) &&
+        insightTabs.some((text) => text.includes("知识空白")) &&
+        connectionCards >= 1 &&
+        gapCards.count >= 1 &&
+        panel.count >= 4,
+      `tabs: ${insightTabs.join(" / ")}; ${connectionCards} connection + ${gapCards.count} gap cards`,
     );
 
     // Regression guard: the panel header lives in the SAME element the insight
@@ -397,7 +608,7 @@ async function main() {
         header.isFirstChild &&
         header.text.includes("图谱洞察") &&
         header.hasClose &&
-        header.cardsAfterHeader >= 4,
+        header.cardsAfterHeader >= 1,
       `header="${header.text}" first=${header.isFirstChild} children=${header.panelChildren}`,
     );
 
@@ -565,16 +776,20 @@ async function main() {
     check(
       "appearance panel exposes both ends of the edge ramp, node size and colours",
       appearance.title.includes("外观") &&
-        // node size, edge weak/strong width, gravity, label size
-        appearance.sliders === 5 &&
-        appearance.numberFields === 5 &&
+        // node size, edge weak/strong width, gravity, label size, label opacity
+        appearance.sliders === 6 &&
+        appearance.numberFields === 6 &&
         appearance.edgePickers === 2 &&
         appearance.edgeRanges === 2 &&
         appearance.edgeNumbers === 2 &&
         appearance.modes.length === 3 &&
         // one row per page type
         appearance.typeRows === 11 &&
-        appearance.hexFields >= 14,
+        // 11 per-type rows + one colour per edge end. The label colour is gone from
+        // this count because it is no longer a colour: the theme decides it and the
+        // slider above sets its opacity.
+        appearance.hexFields >= 13 &&
+        appearance.hexFields === appearance.colourPickers,
       `"${appearance.title}": ${appearance.sliders} sliders / ${appearance.numberFields} number fields / ` +
         `${appearance.hexFields} hex fields; edge section has ${appearance.edgePickers} pickers, ` +
         `${appearance.edgeRanges} widths; ${appearance.typeRows} per-type rows; ` +
@@ -1031,16 +1246,86 @@ async function main() {
     // the 2D label canvas. It was never evidence of anything: at the zoom where
     // the threshold bites, the label-density grid is already the binding
     // constraint, so the count was identical whether culling was on or off.
+    //
+    // Which is the other half of the bug that comment was circling: sigma culls
+    // labels twice — the size threshold above, and a grid that keeps only
+    // `ceil(labelDensity / ratio²)` labels per cell. Lifting the threshold alone
+    // left the grid hiding labels as the user zoomed out, so the switch looked
+    // inert once the graph was zoomed out at all.
+    //
+    // Read as settings rather than as drawn labels, for the reason in the comment
+    // above: sigma v4 decides the grid at render time and paints into the WebGL
+    // pass, so there is no pixel count to take. What is checkable is that the grid
+    // can no longer be the binding constraint — at the furthest zoom the view
+    // allows, one label per node has to fit.
+    const labelZoom = await page.evaluate(async () => {
+      const renderer = window.__HARNESS__.view.renderer;
+      const sigma = renderer.instance;
+      const settle = () => new Promise((resolve) => setTimeout(resolve, 500));
+      const box = (needle) =>
+        [...document.querySelectorAll(".enhanced-graph-checkbox")]
+          .find((row) => row.textContent?.includes(needle))
+          ?.querySelector("input") ?? null;
+      const read = () => {
+        let total = 0;
+        sigma.getGraph().forEachNode((id) => {
+          if (sigma.getNodeDisplayData(id)?.label) total += 1;
+        });
+        return {
+          total,
+          density: sigma.getSetting("labelDensity"),
+          threshold: sigma.getSetting("labelRenderedSizeThreshold"),
+          maxRatio: sigma.getSetting("maxCameraRatio"),
+        };
+      };
+      const setSwitch = async (input, value) => {
+        if (input.checked === value) return;
+        input.checked = value;
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+        await settle();
+      };
+
+      const labels = box("显示标签");
+      if (labels) await setSwitch(labels, true);
+      const autoHide = box("缩小时自动隐藏标签");
+      if (!autoHide) return { error: "no auto-hide switch" };
+      const wasOn = autoHide.checked;
+
+      await setSwitch(autoHide, false);
+      const off = read();
+      await setSwitch(autoHide, true);
+      const on = read();
+      await setSwitch(autoHide, wasOn);
+      return { off, on, wasOn };
+    });
+    /** Sigma's own rule: labels allowed per grid cell at a given camera ratio. */
+    const labelsPerCell = (state) => Math.ceil(state.density / (state.maxRatio * state.maxRatio));
+    check(
+      "auto-hide OFF lifts the label grid too, so zooming out cannot cull labels",
+      !labelZoom.error &&
+        labelZoom.off.total > 10 &&
+        labelZoom.off.threshold === 0 &&
+        labelsPerCell(labelZoom.off) >= labelZoom.off.total,
+      labelZoom.error
+        ? labelZoom.error
+        : `threshold ${labelZoom.off.threshold}, density ${labelZoom.off.density} → ` +
+          `${labelsPerCell(labelZoom.off)} labels per cell at camera ratio ` +
+          `${labelZoom.off.maxRatio}, for ${labelZoom.off.total} nodes`,
+    );
+    check(
+      "auto-hide ON still culls: the threshold is back and the grid stays tight",
+      !labelZoom.error &&
+        labelZoom.on.threshold > 0 &&
+        labelsPerCell(labelZoom.on) < labelZoom.on.total,
+      labelZoom.error
+        ? labelZoom.error
+        : `threshold ${labelZoom.on.threshold}, density ${labelZoom.on.density} → ` +
+          `${labelsPerCell(labelZoom.on)} labels per cell, for ${labelZoom.on.total} nodes`,
+    );
+
     const labelLook = await page.evaluate(async () => {
       const sigma = window.__HARNESS__.view.renderer.instance;
-      const sizeRow = [...document.querySelectorAll(".enhanced-graph-slider")].find((row) =>
-        row.textContent?.includes("标签字号"),
-      );
-      const field = sizeRow?.querySelector("input[type=number]");
-      if (!field) return { error: "no label size field" };
-      field.value = "26";
-      field.dispatchEvent(new Event("change", { bubbles: true }));
-      await new Promise((resolve) => setTimeout(resolve, 400));
+      const settle = () => new Promise((resolve) => setTimeout(resolve, 350));
       // v4 has no `labelSize`/`labelColor` SETTING any more — they are per-node
       // display fields, emitted by the reducer. Read them off a node.
       const readNode = () => {
@@ -1049,36 +1334,74 @@ async function main() {
         const d = id ? sigma.getNodeDisplayData(id) : null;
         return d ? { size: d.labelSize, colour: String(d.labelColor ?? "") } : null;
       };
+      const sliderField = (label) =>
+        [...document.querySelectorAll(".enhanced-graph-slider")]
+          .find((row) => row.textContent?.includes(label))
+          ?.querySelector("input[type=number]") ?? null;
+      const setTheme = async (theme) => {
+        window.__HARNESS__.setTheme(theme);
+        window.dispatchEvent(new Event("css-change"));
+        window.__HARNESS__.view.refresh();
+        await settle();
+      };
+
+      const sizeField = sliderField("标签字号");
+      if (!sizeField) return { error: "no label size field" };
+      sizeField.value = "26";
+      sizeField.dispatchEvent(new Event("change", { bubbles: true }));
+      await settle();
       const afterSize = readNode()?.size;
 
-      const picker = [...document.querySelectorAll(".enhanced-graph-colour-row")]
-        .find((row) => row.textContent?.includes("标签颜色"))
-        ?.querySelector(".enhanced-graph-colour");
-      if (!picker) return { error: "no label colour picker" };
-      const beforeColour = JSON.stringify(readNode()?.colour ?? "");
-      picker.value = "#ff0000";
-      picker.dispatchEvent(new Event("input", { bubbles: true }));
-      await new Promise((resolve) => setTimeout(resolve, 400));
+      // The colour is the theme's, not a colour of its own: black on the light
+      // theme, white on the dark one.
+      await setTheme("light");
+      const lightColour = readNode()?.colour ?? "";
+      await setTheme("dark");
+      const darkColour = readNode()?.colour ?? "";
+
+      // Opacity is what the user tunes. 50% has to reach the colour sigma draws
+      // with, not just the settings file.
+      const opacityField = sliderField("标签不透明度");
+      if (!opacityField) return { error: "no label opacity field" };
+      opacityField.value = "50";
+      opacityField.dispatchEvent(new Event("change", { bubbles: true }));
+      await settle();
+      const faded = readNode()?.colour ?? "";
+
+      // Back to full, so the rest of the run sees labels as it found them.
+      opacityField.value = "100";
+      opacityField.dispatchEvent(new Event("change", { bubbles: true }));
+      await settle();
       return {
         afterSize,
         storedSize: window.__HARNESS__.settings.labelSize,
-        beforeColour,
-        afterColour: JSON.stringify(readNode()?.colour ?? ""),
-        storedColour: window.__HARNESS__.settings.labelColor,
+        lightColour,
+        darkColour,
+        faded,
+        storedOpacity: window.__HARNESS__.settings.labelOpacity,
+        restored: readNode()?.colour ?? "",
       };
     });
     check(
-      "label size and label colour reach the renderer",
+      "labels are black on the light theme and white on the dark one",
       !labelLook.error &&
         labelLook.afterSize === 26 &&
         labelLook.storedSize === 26 &&
-        labelLook.afterColour !== labelLook.beforeColour &&
-        labelLook.afterColour.toLowerCase().includes("ff0000") &&
-        labelLook.storedColour === "#ff0000",
+        labelLook.lightColour.includes("0,0,0") &&
+        labelLook.darkColour.includes("255,255,255"),
       labelLook.error
         ? labelLook.error
-        : `labelSize → ${labelLook.afterSize}; labelColor ${labelLook.beforeColour} → ` +
-          `${labelLook.afterColour} (stored ${labelLook.storedColour})`,
+        : `labelSize → ${labelLook.afterSize}; light ${labelLook.lightColour}, dark ${labelLook.darkColour}`,
+    );
+    check(
+      "the label slider sets opacity, and it reaches the colour sigma draws with",
+      !labelLook.error &&
+        labelLook.faded.includes("0.5") &&
+        labelLook.storedOpacity === 1 &&
+        labelLook.restored === labelLook.darkColour,
+      labelLook.error
+        ? labelLook.error
+        : `at 50% ${labelLook.faded}, back at 100% ${labelLook.restored} (stored ${labelLook.storedOpacity})`,
     );
 
     // Gravity is configured in percent (16%…256%) and must follow the drag, not
@@ -1377,13 +1700,22 @@ async function main() {
     await page.waitForTimeout(250);
 
     // --- 11. tag filtering -------------------------------------------------
-    // Tags are the second filter axis, alongside page types.
+    // Tags are the second filter axis, alongside page types, and now sit behind
+    // their own tab.
+    await selectPanelTab(page, "标签");
     const tagSection = await page.evaluate(() => {
       const list = document.querySelector(".enhanced-graph-tag-list");
       const rows = [...(list?.querySelectorAll(".enhanced-graph-checkbox") ?? [])];
+      // Every distinct tag in the graph, counted here rather than assumed: the
+      // list is drawn in full, so the two numbers have to match.
+      const allTags = new Set();
+      for (const node of window.__HARNESS__.snapshot.graph.nodes) {
+        for (const tag of node.tags ?? []) if (tag.length > 0) allTags.add(tag);
+      }
       return {
         present: Boolean(list),
         rowCount: rows.length,
+        expectedRows: allTags.size,
         hasSearch: Boolean(document.querySelector(".enhanced-graph-tag-search")),
         firstName: rows[0]?.querySelector(".enhanced-graph-tag-name")?.textContent ?? "",
         firstCount: Number(rows[0]?.querySelector(".enhanced-graph-legend-count")?.textContent ?? "0"),
@@ -1396,9 +1728,13 @@ async function main() {
       };
     });
     check(
-      "filters panel lists tags, most-used first, behind a search box",
-      tagSection.present && tagSection.rowCount > 0 && tagSection.hasSearch && tagSection.sorted,
-      `${tagSection.rowCount} tag rows, search=${tagSection.hasSearch}, ` +
+      "filters panel lists EVERY tag, most-used first, behind a search box",
+      tagSection.present &&
+        tagSection.rowCount > 0 &&
+        tagSection.rowCount === tagSection.expectedRows &&
+        tagSection.hasSearch &&
+        tagSection.sorted,
+      `${tagSection.rowCount}/${tagSection.expectedRows} tag rows, search=${tagSection.hasSearch}, ` +
         `first="${tagSection.firstName}" (${tagSection.firstCount}), sorted=${tagSection.sorted}`,
     );
 
@@ -2505,6 +2841,9 @@ async function main() {
     // pins the fix that connection lookups run against the VISIBLE graph: a
     // route through a hidden node used to be reported as a connection and
     // highlighted nothing at all.
+    // The type rows live behind their own tab, and the tag checks left the panel
+    // on the tags one.
+    await selectPanelTab(page, "页面类型");
     const unreachable = await page.evaluate(async () => {
       const checkbox = [...document.querySelectorAll(".enhanced-graph-checkbox")]
         .find((row) => row.textContent?.includes("方法论"))

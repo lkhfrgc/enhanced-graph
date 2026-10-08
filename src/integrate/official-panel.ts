@@ -29,7 +29,7 @@ const FOCUS_INTERMEDIATE_CHOICES = [0, 1, 2, 3] as const;
 export type ColorTab = "type" | "community";
 
 /** The panel is two views: the insights it exists for, and the colours. */
-export type PanelTab = "insights" | "colors" | "filters" | "weights";
+export type PanelTab = "insights" | "colors" | "filters";
 
 export interface OfficialPanelOptions {
   readonly graph: () => WikiGraph;
@@ -55,10 +55,11 @@ export interface OfficialPanelOptions {
   readonly onSelectColorTab: (tab: ColorTab) => void;
   readonly onSetColor: (tab: ColorTab, key: string, color: string | null) => void;
   readonly lineColor: () => string;
+  /** True while the lines are the built-in graph's own, following the theme. */
+  readonly isLineColorThemed: () => boolean;
   readonly onSetLineColor: (color: string | null) => void;
   /** Draws the filters body, which the standalone view renders with the same code. */
   readonly renderFilters: (el: HTMLElement) => void;
-  readonly renderWeights: (el: HTMLElement) => void;
 }
 
 export class OfficialSidePanel {
@@ -82,8 +83,8 @@ export class OfficialSidePanel {
   private pressed = false;
   /** The node ids the insights cards should mark as active. */
   private activeNodeIds: ReadonlySet<string> = new Set();
-  /** Insight sections the user folded away; see `InsightSection`. */
-  private collapsedSections: ReadonlySet<InsightSection> = new Set();
+  /** Card group the user is looking at; see `InsightSection`. */
+  private insightSection: InsightSection = "connections";
 
   constructor(
     private readonly container: HTMLElement,
@@ -166,7 +167,7 @@ export class OfficialSidePanel {
         t("appearance.edgeColor"),
         this.options.lineColor(),
         (value) => this.options.onSetLineColor(value),
-        { allowTheme: true, onTheme: () => this.options.onSetLineColor(null), isTheme: false },
+        { allowTheme: true, onTheme: () => this.options.onSetLineColor(null), isTheme: this.options.isLineColorThemed() },
       );
     }
 
@@ -226,12 +227,6 @@ export class OfficialSidePanel {
     // No collapse or close button: the toolbar owns which view is open, and the
     // enhancement as a whole is turned off from the settings tab.
     header.createSpan({ text: t("official.panelTitle") });
-    if (this.tab === "weights") {
-      const weights = panel.createDiv({ cls: "enhanced-graph-official-weights" });
-      this.options.renderWeights(weights);
-      return;
-    }
-
     if (this.tab === "filters") {
       const body = panel.createDiv({ cls: "enhanced-graph-official-filters" });
       this.options.renderFilters(body);
@@ -276,13 +271,10 @@ export class OfficialSidePanel {
       onDismiss: (key, nodeIds) => void this.options.onDismiss(key, nodeIds),
       onToggleShowDismissed: () => this.render(),
       // Kept on the panel, not in the renderer: the renderer runs on every repaint
-      // and would forget which sections the user folded away.
-      collapsedSections: this.collapsedSections,
-      onToggleSection: (section) => {
-        const next = new Set(this.collapsedSections);
-        if (next.has(section)) next.delete(section);
-        else next.add(section);
-        this.collapsedSections = next;
+      // and would forget which group the user was looking at.
+      activeSection: this.insightSection,
+      onSelectSection: (section) => {
+        this.insightSection = section;
         this.render();
       },
     });

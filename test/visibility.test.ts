@@ -55,6 +55,15 @@ describe("isNodeVisible", () => {
     expect(isNodeVisible(target, filters({ hiddenTypes: new Set(["concept" as PageType]) }))).toBe(true);
   });
 
+  it("hides every page of an excluded knowledge cluster", () => {
+    // The legend's cluster rows write this list: a cluster is a set of pages, so
+    // excluding one has to take all of its members off the graph at once.
+    const member = node("a", { community: 2 });
+    expect(isNodeVisible(member, filters({ hiddenCommunities: new Set([2]) }))).toBe(false);
+    expect(isNodeVisible(member, filters({ hiddenCommunities: new Set([1, 3]) }))).toBe(true);
+    expect(isNodeVisible(member, NO_FILTERS)).toBe(true);
+  });
+
   it("hides a page carrying a hidden tag", () => {
     const target = node("a", { tags: ["rag", "retrieval"] });
     expect(isNodeVisible(target, filters({ hiddenTags: new Set(["rag"]) }))).toBe(false);

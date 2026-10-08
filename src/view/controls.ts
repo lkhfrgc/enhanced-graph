@@ -24,6 +24,39 @@ export function checkboxRow(
   return row;
 }
 
+/** One tab: the id the caller recognises, and the label on its button. */
+export interface TabEntry<T extends string> {
+  readonly id: T;
+  readonly label: string;
+}
+
+/**
+ * The panels' section switcher: one button per group, the active one marked, and
+ * clicking another reports it.
+ *
+ * The same button the appearance panel uses for its colour mode, so the panels in
+ * one column switch their content the same way. It is allowed to wrap — four
+ * labels do not fit on one line in a side panel.
+ */
+export function tabRow<T extends string>(
+  parent: HTMLElement,
+  tabs: readonly TabEntry<T>[],
+  activeId: T,
+  onSelect: (id: T) => void,
+): HTMLElement {
+  const row = parent.createDiv({ cls: "enhanced-graph-panel-tabs" });
+  for (const tab of tabs) {
+    const active = tab.id === activeId;
+    const button = row.createEl("button", {
+      cls: `enhanced-graph-button${active ? " is-active" : ""}`,
+      text: tab.label,
+      attr: { "aria-pressed": String(active) },
+    });
+    button.addEventListener("click", () => onSelect(tab.id));
+  }
+  return row;
+}
+
 export interface SliderRange {
   readonly min: number;
   readonly max: number;

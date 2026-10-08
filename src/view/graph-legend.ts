@@ -6,9 +6,15 @@
  * the container it is handed, holds no state between renders and derives
  * everything it shows from `LegendOptions`.
  *
- * The legend doubles as the type filter — double-clicking a row hides that page
- * type — so the type rows are wired to `onToggleType` rather than to any state
- * of their own.
+ * A row is a control when the host hands over the matching gesture, and only
+ * then: it is marked interactive, gets a title saying what a click does, and a
+ * click excludes or restores that type or cluster. Both views pass the gestures —
+ * the standalone view and the built-in graph read and write the same settings, so
+ * the same click means the same thing in either. The header carries an
+ * always-present "show all" for the group on screen, disabled while nothing is
+ * hidden.
+ *
+ * The rows are read-only only for a host that passes no gestures at all.
  */
 
 import { setIcon } from "obsidian";
@@ -17,7 +23,23 @@ import { t } from "../i18n";
 import { PAGE_TYPES, type ColorMode, type PageType, type WikiGraph } from "../types";
 import { communityColor, nodeColorForMode } from "./palette";
 
-export interface LegendOptions {
+/** The colour a row's dot takes while its subject is excluded. */
+const HIDDEN_DOT = "#94a3b8";
+
+/**
+ * The gestures a host may offer, all optional.
+ *
+ * Omitted means "this legend is a key, not a control": no handler is bound, the
+ * row is not marked interactive, and no "show all" is drawn.
+ */
+export interface LegendGestures {
+  readonly onToggleType?: (type: PageType) => void;
+  readonly onShowAllTypes?: () => void;
+  readonly onToggleCommunity?: (id: number) => void;
+  readonly onShowAllCommunities?: () => void;
+}
+
+export interface LegendOptions extends LegendGestures {
   readonly graph: WikiGraph;
   readonly colorMode: ColorMode;
   /** Used for the swatches when `colorMode` is `"custom"`. */
@@ -25,13 +47,17 @@ export interface LegendOptions {
   /** Per-type colour overrides, so the swatches match the canvas. */
   readonly typeColorOverrides: Readonly<Record<string, string>>;
   readonly hiddenTypes: ReadonlySet<PageType>;
-  readonly onToggleType: (type: PageType) => void;
-  readonly onShowAllTypes: () => void;
-  readonly onFocusNodes: (nodeIds: readonly string[]) => void;
+  /** Clusters the user has excluded, by id. */
+  readonly hiddenCommunities: ReadonlySet<number>;
 }
 
 export function renderLegend(container: HTMLElement, options: LegendOptions): void {
-  const { graph, colorMode, hiddenTypes } = options;
+  const { graph, colorMode, hiddenTypes, hiddenCommunities } = options;
+  // The body is the box that scrolls, and it is rebuilt on every render: clicking
+  // a row re-renders so the row can come back shaded. Emptying the container takes
+  // the body — and its scroll position — with it, which scrolled the list back to
+  // the top under the pointer that had just clicked. Carried across the rebuild.
+  const scrolled = container.querySelector<HTMLElement>(".enhanced-graph-legend-body")?.scrollTop ?? 0;
   container.empty();
   if (graph.nodes.length === 0) {
     container.addClass("is-hidden");
@@ -47,14 +73,26 @@ export function renderLegend(container: HTMLElement, options: LegendOptions): vo
     text: colorMode === "community" ? t("legend.communities") : t("legend.types"),
   });
 
-  if (colorMode === "type" && hiddenTypes.size > 0) {
+  const byCommunity = colorMode === "community";
+  const hiddenCount = byCommunity ? hiddenCommunities.size : hiddenTypes.size;
+  // Only a host that offers the gesture gets the control — and when it does, the
+  // control is ALWAYS there, disabled while there is nothing to undo: the header
+  // keeps its shape instead of growing one the moment something is hidden.
+  const clear = byCommunity ? options.onShowAllCommunities : options.onShowAllTypes;
+  if (clear) {
     const showAll = header.createEl("button", { cls: "enhanced-graph-link", text: t("legend.showAll") });
-    showAll.addEventListener("click", () => options.onShowAllTypes());
+    showAll.disabled = hiddenCount === 0;
+    showAll.addEventListener("click", () => {
+      if (hiddenCount === 0) return;
+      clear();
+    });
   }
 
   const body = container.createDiv({ cls: "enhanced-graph-legend-body" });
-  if (colorMode !== "community") renderTypeRows(body, options);
+  if (!byCommunity) renderTypeRows(body, options);
   else renderCommunityRows(body, options);
+  // Only once the rows are in: before that there is nothing to scroll through.
+  if (scrolled > 0) body.scrollTop = scrolled;
 }
 
 /** One row per page type actually present, with its node count. */
@@ -63,10 +101,12 @@ function renderTypeRows(body: HTMLElement, options: LegendOptions): void {
   const counts = typeCounts(graph);
   for (const type of PAGE_TYPES.filter((candidate) => (counts.get(candidate) ?? 0) > 0)) {
     const hidden = hiddenTypes.has(type);
-    const row = body.createDiv({ cls: `enhanced-graph-legend-row${hidden ? " is-hidden-type" : ""}` });
+    const row = body.createDiv({
+      cls: `enhanced-graph-legend-row${hidden ? " is-hidden-type" : ""}`,
+    });
     const dot = row.createSpan({ cls: "enhanced-graph-legend-dot" });
     dot.style.backgroundColor = hidden
-      ? "#94a3b8"
+      ? HIDDEN_DOT
       : nodeColorForMode({
           colorMode: options.colorMode,
           pageType: type,
@@ -76,17 +116,33 @@ function renderTypeRows(body: HTMLElement, options: LegendOptions): void {
         });
     row.createSpan({ cls: "enhanced-graph-legend-label", text: t(`type.${type}` as never) });
     row.createSpan({ cls: "enhanced-graph-legend-count", text: String(counts.get(type) ?? 0) });
-    row.title = t("legend.hint");
-    row.addEventListener("dblclick", () => options.onToggleType(type));
+    const toggle = options.onToggleType;
+    if (toggle) {
+      row.addClass("is-interactive");
+      row.title = t("legend.hint");
+      // A click, like the cluster rows: one gesture for both groups, and the
+      // hidden row stays in place (shaded) so it can be clicked straight back.
+      row.addEventListener("click", () => toggle(type));
+    }
   }
 }
 
-/** One row per Louvain community: core node, member count, cohesion. */
+/**
+ * One row per Louvain community: core node, member count, cohesion.
+ *
+ * The cards say which cluster is which — and, when one has been excluded, that it
+ * is the reason some pages are missing. Switching a cluster off is the filters
+ * panel's job; a host that still wants a shortcut here passes one (the standalone
+ * view does), and only then is the row marked and bound.
+ */
 function renderCommunityRows(body: HTMLElement, options: LegendOptions): void {
   for (const community of options.graph.communities) {
-    const row = body.createDiv({ cls: "enhanced-graph-legend-row" });
+    const hidden = options.hiddenCommunities.has(community.id);
+    const row = body.createDiv({
+      cls: `enhanced-graph-legend-row${hidden ? " is-hidden-cluster" : ""}`,
+    });
     const dot = row.createSpan({ cls: "enhanced-graph-legend-dot" });
-    dot.style.backgroundColor = communityColor(community.id);
+    dot.style.backgroundColor = hidden ? HIDDEN_DOT : communityColor(community.id);
 
     const label = row.createSpan({
       cls: "enhanced-graph-legend-label",
@@ -104,7 +160,12 @@ function renderCommunityRows(body: HTMLElement, options: LegendOptions): void {
     });
     if (community.isSparse) setIcon(cohesion.createSpan({ cls: "enhanced-graph-legend-warn" }), "alert-triangle");
 
-    row.addEventListener("click", () => options.onFocusNodes(community.nodeIds));
+    const toggle = options.onToggleCommunity;
+    if (toggle) {
+      row.addClass("is-interactive");
+      row.title = t("legend.hintCluster");
+      row.addEventListener("click", () => toggle(community.id));
+    }
   }
 }
 

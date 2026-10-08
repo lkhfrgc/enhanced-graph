@@ -22,7 +22,6 @@ export interface OfficialToolbarOptions {
   readonly onColorMode: (mode: ColorMode) => void;
   readonly onSearch: (query: string) => void;
   readonly onPanel: (mode: PanelMode) => void;
-  readonly onRebuild: () => void;
   readonly onZoomIn: () => void;
   readonly onZoomOut: () => void;
   readonly onFit: () => void;
@@ -31,8 +30,12 @@ export interface OfficialToolbarOptions {
 /**
  * Only panels the built-in graph actually has. A toggle that opens nothing is
  * worse than no toggle, so this list is what the port has reached.
+ *
+ * Weights are not on it: the coefficients are the analysis' own, tuned in the
+ * settings tab and in the standalone view, and offering them here as well meant a
+ * second copy of the same four numbers inside a graph they describe.
  */
-const AVAILABLE_PANELS: readonly PanelMode[] = ["insights", "filters", "appearance", "weights"];
+const AVAILABLE_PANELS: readonly PanelMode[] = ["insights", "filters", "appearance"];
 
 export class OfficialToolbar {
   private readonly el: HTMLElement;
@@ -87,7 +90,8 @@ export class OfficialToolbar {
       onColorMode: options.onColorMode,
       onSearch: options.onSearch,
       onPanel: options.onPanel,
-      onRebuild: options.onRebuild,
+      // No `onRebuild`: the built-in graph keeps itself in step with the vault, so
+      // the toolbar draws no rebuild button here.
       onZoomIn: options.onZoomIn,
       onZoomOut: options.onZoomOut,
       onFit: options.onFit,

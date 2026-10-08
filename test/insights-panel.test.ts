@@ -852,52 +852,54 @@ describe("renderInsightsPanel / structure", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Collapsible sections
+// Section tabs
 // ---------------------------------------------------------------------------
 
-describe("collapsible insight sections", () => {
+describe("insight section tabs", () => {
   const populated = { connections: [makeConnection(GRAPH.nodes[0], GRAPH.nodes[1])], gaps: [makeGap()] };
 
-  it("makes each section heading a button that reports its state", () => {
-    const sections: string[] = [];
+  it("switches the cards with a button per group, and reports the choice", () => {
+    const chosen: string[] = [];
     const fixture = render({
       insights: populated,
-      collapsedSections: new Set(),
-      onToggleSection: (section) => sections.push(section),
+      activeSection: "connections",
+      onSelectSection: (section) => chosen.push(section),
     });
 
-    const headings = byClass(fixture.container, "enhanced-graph-section-title", "is-toggle");
-    expect(headings.length).toBe(2);
-    for (const heading of headings) expect(heading.attributes.get("aria-expanded")).toBe("true");
+    const tabs = byClass(fixture.container, "enhanced-graph-button");
+    expect(tabs.map((tab) => tab.textContent)).toEqual(["惊奇连接 (1)", "知识空白 (1)"]);
+    expect(tabs[0].hasClass("is-active")).toBe(true);
+    expect(tabs[1].hasClass("is-active")).toBe(false);
 
-    headings[0].click();
-    expect(sections).toEqual(["connections"]);
-    headings[1].click();
-    expect(sections).toEqual(["connections", "gaps"]);
+    tabs[0].click();
+    tabs[1].click();
+    expect(chosen).toEqual(["connections", "gaps"]);
   });
 
-  it("hides a collapsed section's cards but keeps its heading", () => {
-    const open = render({ insights: populated });
-    expect(open.cards().length).toBeGreaterThan(0);
+  it("draws only the chosen group's cards", () => {
+    const fixture = render({ insights: populated, activeSection: "gaps", onSelectSection: () => {} });
+    expect(fixture.cards()).toHaveLength(1);
+    // The gap's card, not the connection's.
+    expect(fixture.cards()[0].textContent).toContain("孤立");
+  });
 
-    const folded = render({
-      insights: populated,
-      collapsedSections: new Set(["connections", "gaps"] as const),
-      onToggleSection: () => {},
+  it("offers no tab for an empty group, and falls back to one that has cards", () => {
+    const fixture = render({
+      insights: { connections: [], gaps: [makeGap()] },
+      activeSection: "connections",
+      onSelectSection: () => {},
     });
-    // Both headings survive, so either section can be opened again.
-    expect(byClass(folded.container, "enhanced-graph-section-title").length).toBe(2);
-    expect(folded.cards()).toEqual([]);
-    for (const heading of byClass(folded.container, "enhanced-graph-section-title", "is-toggle")) {
-      expect(heading.attributes.get("aria-expanded")).toBe("false");
-    }
+    // A button that opens an empty list is worse than no button.
+    expect(byClass(fixture.container, "enhanced-graph-button").map((tab) => tab.textContent)).toEqual([
+      "知识空白 (1)",
+    ]);
+    expect(fixture.cards()).toHaveLength(1);
   });
 
-  it("falls back to a plain heading when no toggle handler is given", () => {
+  it("draws every group under its own heading when no switcher is given", () => {
     const fixture = render({ insights: populated });
-    expect(byClass(fixture.container, "enhanced-graph-section-title", "is-toggle")).toEqual([]);
-    expect(byClass(fixture.container, "enhanced-graph-section-title").length).toBe(2);
-    // And the cards are all still rendered, as before this change.
-    expect(fixture.cards().length).toBeGreaterThan(0);
+    expect(byClass(fixture.container, "enhanced-graph-button")).toEqual([]);
+    expect(byClass(fixture.container, "enhanced-graph-section-title")).toHaveLength(2);
+    expect(fixture.cards()).toHaveLength(2);
   });
 });

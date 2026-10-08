@@ -25,7 +25,15 @@ export interface ToolbarOptions {
   readonly onColorMode: (mode: ColorMode) => void;
   readonly onSearch: (query: string) => void;
   readonly onPanel: (mode: PanelMode) => void;
-  readonly onRebuild: () => void;
+  /**
+   * Rebuild the graph from the vault.
+   *
+   * Optional: a host that keeps itself in step passes nothing and gets no button.
+   * The built-in graph is such a host — the plugin rebuilds when the vault
+   * changes, and everything the enhancement draws it takes from that same build —
+   * so the button would only offer to do again what is already being done.
+   */
+  readonly onRebuild?: () => void;
   /** Zoom controls live here too. */
   /**
    * Which panel toggles to render. Defaults to all of them.
@@ -99,7 +107,9 @@ export function renderToolbar(container: HTMLElement, options: ToolbarOptions): 
       options.onPanel("weights"),
     );
   }
-  makeIconButton(right, "refresh-cw", t("toolbar.rebuild"), options.onRebuild);
+  if (options.onRebuild) {
+    makeIconButton(right, "refresh-cw", t("toolbar.rebuild"), options.onRebuild);
+  }
 }
 
 /** Renders the floating zoom buttons (empties the container first). */

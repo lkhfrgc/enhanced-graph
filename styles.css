@@ -72,6 +72,15 @@
   white-space: nowrap;
 }
 
+/* The panels' own section switcher. Same button as the appearance panel's colour
+   mode, allowed to wrap: four labels do not fit on one line in a side panel. */
+.enhanced-graph-panel-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
 .enhanced-graph-button:hover {
   color: var(--text-normal);
   background: var(--background-modifier-hover);
@@ -165,6 +174,17 @@
 .enhanced-graph-link:hover {
   color: var(--text-accent);
   background: transparent;
+}
+
+/* Always in the header, and inert until there is something to undo. */
+.enhanced-graph-link:disabled {
+  color: var(--text-faint);
+  opacity: 0.5;
+  cursor: default;
+}
+
+.enhanced-graph-link:disabled:hover {
+  color: var(--text-faint);
 }
 
 .enhanced-graph-link svg {
@@ -276,11 +296,19 @@
   cursor: default;
 }
 
-.enhanced-graph-legend-row:hover {
+/* Only a row that actually does something reacts to the pointer: the built-in
+   graph's legend is a key, and a hover highlight on a card that cannot be
+   clicked invites a click that does nothing. */
+.enhanced-graph-legend-row.is-interactive {
+  cursor: pointer;
+}
+
+.enhanced-graph-legend-row.is-interactive:hover {
   background: var(--background-modifier-hover);
 }
 
-.enhanced-graph-legend-row.is-hidden-type {
+.enhanced-graph-legend-row.is-hidden-type,
+.enhanced-graph-legend-row.is-hidden-cluster {
   opacity: 0.45;
 }
 
@@ -406,69 +434,6 @@
   letter-spacing: 0.04em;
   color: var(--text-faint);
   margin-top: 4px;
-}
-
-/* The heading doubles as the fold control, so it has to undo the button chrome
-   Obsidian gives a `button` and look exactly like the plain heading it replaces —
-   otherwise the two sections would be styled differently depending on whether the
-   caller passed a toggle handler. */
-.enhanced-graph-section-title.is-toggle {
-  width: 100%;
-  padding: 2px 4px;
-  margin-left: -4px;
-  border: none;
-  border-radius: var(--radius-s, 4px);
-  background: transparent;
-  box-shadow: none;
-  cursor: pointer;
-  font: inherit;
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--text-faint);
-  text-align: left;
-}
-
-.enhanced-graph-section-title.is-toggle:hover {
-  background: var(--background-modifier-hover);
-  color: var(--text-muted);
-}
-
-/* The chevron sits at the far end, away from the label, so the label does not
-   move when it flips. Drawn with a rotating glyph rather than two icons. */
-.enhanced-graph-section-chevron {
-  margin-left: auto;
-  opacity: 0.7;
-  transition: transform 120ms ease;
-}
-
-.enhanced-graph-section-chevron[data-chevron="down"]::before {
-  content: "▾";
-}
-
-.enhanced-graph-section-chevron[data-chevron="right"]::before {
-  content: "▸";
-}
-
-/* A heading that shares its line with another control — the tag group's "show
-   all" button. The fold control takes the space and the other control keeps its
-   own, which is why the toggle inside a row must not be full width. */
-.enhanced-graph-section-title-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 4px;
-}
-
-.enhanced-graph-section-title-row .enhanced-graph-section-title {
-  margin-top: 0;
-  flex: 1 1 auto;
-  width: auto;
-}
-
-.enhanced-graph-section-title-row > .enhanced-graph-link {
-  flex: 0 0 auto;
 }
 
 .enhanced-graph-section-title svg {
@@ -635,14 +600,16 @@
   white-space: nowrap;
 }
 
-/* A vault can carry hundreds of tags; cap the list so the rest of the panel
-   stays reachable, and let the search box do the narrowing. */
+/* The list is as long as its rows, and the panel scrolls — not this box.
+   It used to stop at a fixed 190px with its own scrollbar, which left the tags
+   tab visibly shorter than the panel it sits in: with a long list the insight
+   cards filled the panel while the tags could not, so the panel's own ceiling
+   was reached by one tab and never by the other. The search box does the
+   narrowing; the row count is capped in `graph-filters` before it is drawn. */
 .enhanced-graph-tag-list {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  max-height: 190px;
-  overflow-y: auto;
   padding-right: 2px;
 }
 
@@ -652,8 +619,7 @@
   white-space: nowrap;
 }
 
-.enhanced-graph-tag-empty,
-.enhanced-graph-tag-more {
+.enhanced-graph-tag-empty {
   font-size: 11px;
   color: var(--text-faint);
   padding: 4px 2px;
@@ -1101,9 +1067,13 @@
   /* `min-height: 0` lets it scroll inside the column instead of pushing the
      overlay past the view. */
   min-height: 0;
-  /* Shrinks to fit the space the overlay leaves above the legend, and scrolls
-     inside it. `max-height: none` because the reserved strip is what keeps the two
-     apart now; a percentage here measured from the wrong origin. */
+  /* As long as its content, and never longer than the space the overlay leaves
+     above the legend — the same ceiling for every tab, which is the point.
+     `flex-grow: 0` so a short tab stays short rather than padding the panel out
+     to full height; `flex-shrink: 1` with `min-height: 0` so a long one stops at
+     that ceiling and scrolls inside it. `max-height: none` because the reserved
+     strip is what holds the ceiling; a percentage here measured from the wrong
+     origin. */
   flex: 0 1 auto;
   max-height: none;
   display: flex;

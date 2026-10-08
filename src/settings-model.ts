@@ -21,8 +21,22 @@ export interface EnhancedGraphSettings {
   excludeFolders: string[];
   /** Page types hidden from the graph. */
   hiddenTypes: string[];
-  /** Tags hidden from the graph; a page carrying any of them is hidden. */
+  /**
+   * Knowledge clusters (Louvain communities) hidden from the graph, by id.
+   *
+   * Ids, not names: a cluster has no name of its own — the legend labels it with
+   * its core node — and the ids are what the analysis produces.
+   */
+  hiddenCommunities: number[];
+  /** Tags the tag filter acts on; see `tagFilterMode` for what that means. */
   hiddenTags: string[];
+  /**
+   * Whether the ticked tags are the ones to hide, or the only ones to keep.
+   *
+   * Default `"exclude"` keeps the meaning every existing settings file already
+   * has: the list is the tags being hidden.
+   */
+  tagFilterMode: "exclude" | "include";
   hideIsolated: boolean;
   hideStructural: boolean;
   showLabels: boolean;
@@ -46,8 +60,14 @@ export interface EnhancedGraphSettings {
   autoHideLabels: boolean;
   /** Label font size in pixels. */
   labelSize: number;
-  /** Label colour; `null` follows the theme. */
-  labelColor: string | null;
+  /**
+   * Label opacity, 0–1.
+   *
+   * The colour itself is not a setting: labels are white on the light theme and
+   * black on the dark one, which is what reads against a node fill. Opacity is
+   * what is left to tune — how loudly the labels sit on top of the graph.
+   */
+  labelOpacity: number;
   focusMaxIntermediates: number;
   /** Node colour used when `colorMode` is `"custom"`. */
   customNodeColor: string;
@@ -57,6 +77,16 @@ export interface EnhancedGraphSettings {
   communityColorOverrides: Record<string, string>;
   /** How far to layer onto Obsidian's built-in graph view. */
   officialGraphMode: OfficialGraphMode;
+  /**
+   * Line colour for the built-in graph's enhancement, or `null` to leave the
+   * built-in graph's own theme colour alone.
+   *
+   * Its own setting, not the standalone view's strong-edge colour: that one is one
+   * end of the standalone view's weak→strong ramp, so sharing it meant tuning the
+   * ramp silently repainted the built-in graph's edges with a flat colour — a dark
+   * ramp end left near-black lines on the light theme.
+   */
+  officialLineColor: string | null;
   /** Reuse the built-in graph's worker-computed layout when available. */
   reuseOfficialLayout: boolean;
   /** Layout positions, persisted so the graph never jumps between sessions. */
@@ -70,7 +100,9 @@ export const DEFAULT_SETTINGS: EnhancedGraphSettings = {
   weights: { ...DEFAULT_RELEVANCE_WEIGHTS },
   excludeFolders: [],
   hiddenTypes: [],
+  hiddenCommunities: [],
   hiddenTags: [],
+  tagFilterMode: "exclude",
   hideIsolated: false,
   hideStructural: true,
   showLabels: true,
@@ -83,12 +115,13 @@ export const DEFAULT_SETTINGS: EnhancedGraphSettings = {
   edgeStrongWidth: DEFAULT_EDGE_WIDTHS.strongWidth,
   autoHideLabels: true,
   labelSize: 12,
-  labelColor: null,
+  labelOpacity: 1,
   focusMaxIntermediates: 0,
   customNodeColor: "#60a5fa",
   typeColorOverrides: {},
   communityColorOverrides: {},
   officialGraphMode: "off",
+  officialLineColor: null,
   reuseOfficialLayout: true,
   positions: {},
   dismissedInsights: [],
@@ -105,8 +138,11 @@ export function mergeSettings(raw: unknown): EnhancedGraphSettings {
     dismissedInsights: source.dismissedInsights ?? [],
     excludeFolders: source.excludeFolders ?? [],
     hiddenTypes: source.hiddenTypes ?? [],
+    hiddenCommunities: source.hiddenCommunities ?? [],
     hiddenTags: source.hiddenTags ?? [],
+    tagFilterMode: source.tagFilterMode ?? DEFAULT_SETTINGS.tagFilterMode,
     officialGraphMode: source.officialGraphMode ?? DEFAULT_SETTINGS.officialGraphMode,
+    officialLineColor: source.officialLineColor ?? DEFAULT_SETTINGS.officialLineColor,
     reuseOfficialLayout: source.reuseOfficialLayout ?? DEFAULT_SETTINGS.reuseOfficialLayout,
     edgeWeakColor: source.edgeWeakColor ?? DEFAULT_SETTINGS.edgeWeakColor,
     edgeStrongColor: source.edgeStrongColor ?? DEFAULT_SETTINGS.edgeStrongColor,
@@ -114,7 +150,7 @@ export function mergeSettings(raw: unknown): EnhancedGraphSettings {
     edgeStrongWidth: source.edgeStrongWidth ?? DEFAULT_SETTINGS.edgeStrongWidth,
     autoHideLabels: source.autoHideLabels ?? DEFAULT_SETTINGS.autoHideLabels,
     labelSize: source.labelSize ?? DEFAULT_SETTINGS.labelSize,
-    labelColor: source.labelColor ?? DEFAULT_SETTINGS.labelColor,
+    labelOpacity: source.labelOpacity ?? DEFAULT_SETTINGS.labelOpacity,
     focusMaxIntermediates: source.focusMaxIntermediates ?? DEFAULT_SETTINGS.focusMaxIntermediates,
     customNodeColor: source.customNodeColor ?? DEFAULT_SETTINGS.customNodeColor,
     typeColorOverrides: source.typeColorOverrides ?? {},
