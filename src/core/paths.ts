@@ -109,6 +109,72 @@ export function distancesFrom(
  *
  * Returns `null` when either node is unknown or the two are not connected.
  */
+/**
+ * Every node and edge on a SIMPLE path from `from` to `to` of at most `span` hops.
+ *
+ * Needed because the distance condition above describes WALKS, not paths. The two
+ * agree while `span` equals the shortest distance — a shortest route cannot
+ * revisit a node — and diverge as soon as the budget is widened: in `s - x - t`
+ * with a dead-end `x - y`, edge `x-y` satisfies `d(s,x) + 1 + d(y,t) = 4 <= 4`,
+ * yet every walk that uses it must come back through `x`. It is on no path.
+ *
+ * Edges are recorded only once the walk has actually reached `to`, so a route
+ * that dies in a dead end contributes nothing.
+ *
+ * The `backward` distances prune hard: from `next`, `to` must still be reachable
+ * within the remaining budget. `STEPS_LIMIT` bounds the work regardless — a path
+ * budget is small (four hops covers three intermediates) but a hub node's degree
+ * is not, and an unbounded enumeration would be a worse bug than the one this
+ * replaces.
+ */
+function simplePathSet(
+  adjacency: ReadonlyMap<string, ReadonlySet<string>>,
+  backward: ReadonlyMap<string, number>,
+  from: string,
+  to: string,
+  span: number,
+): { nodes: Set<string>; edges: Set<string>; complete: boolean } {
+  const nodes = new Set<string>([from]);
+  const edges = new Set<string>();
+  const stack: string[] = [from];
+  const visited = new Set<string>([from]);
+  let steps = 0;
+  let complete = true;
+
+  const walk = (at: string, used: number): void => {
+    if (!complete) return;
+    if (at === to) {
+      for (let i = 0; i + 1 < stack.length; i += 1) {
+        edges.add(edgeKey(stack[i], stack[i + 1]));
+        nodes.add(stack[i + 1]);
+      }
+      return;
+    }
+    if (used >= span) return;
+    for (const next of adjacency.get(at) ?? []) {
+      if (steps >= STEPS_LIMIT) {
+        complete = false;
+        return;
+      }
+      if (visited.has(next)) continue;
+      const remaining = backward.get(next);
+      if (remaining === undefined || used + 1 + remaining > span) continue;
+      steps += 1;
+      visited.add(next);
+      stack.push(next);
+      walk(next, used + 1);
+      stack.pop();
+      visited.delete(next);
+    }
+  };
+
+  walk(from, 0);
+  return { nodes, edges, complete };
+}
+
+/** Enumeration budget, so a dense graph cannot stall the render. */
+const STEPS_LIMIT = 200_000;
+
 export function findConnectingPaths(
   graph: WikiGraph,
   from: string,
@@ -132,27 +198,64 @@ export function findConnectingPaths(
 
   const backward = distancesFrom(adjacency, to);
 
-  const nodes: string[] = [];
+  // Shortest-path subgraph: exact for the distance condition, and what
+  // `routeCount` is defined over.
+  const shortestNodes: string[] = [];
   for (const [id, ahead] of forward) {
     const behind = backward.get(id);
-    if (behind !== undefined && ahead + behind <= span) nodes.push(id);
+    if (behind !== undefined && ahead + behind <= total) shortestNodes.push(id);
   }
-  nodes.sort((a, b) => (forward.get(a) ?? 0) - (forward.get(b) ?? 0) || (a < b ? -1 : a > b ? 1 : 0));
-  const onPath = new Set(nodes);
+  const onShortest = new Set(shortestNodes);
 
-  const edges: string[] = [];
-  for (const edge of graph.edges) {
-    if (edge.source === edge.target) continue;
-    if (!onPath.has(edge.source) || !onPath.has(edge.target)) continue;
-    const forwardSource = forward.get(edge.source);
-    const backwardTarget = backward.get(edge.target);
-    const forwardTarget = forward.get(edge.target);
-    const backwardSource = backward.get(edge.source);
-    const withinBudget =
-      (forwardSource !== undefined && backwardTarget !== undefined && forwardSource + 1 + backwardTarget <= span) ||
-      (forwardTarget !== undefined && backwardSource !== undefined && forwardTarget + 1 + backwardSource <= span);
-    if (withinBudget) edges.push(edgeKey(edge.source, edge.target));
+  let nodes: string[];
+  let edges: string[];
+  if (span === total) {
+    // Budget equals the shortest distance, so the condition is exact here and
+    // costs two BFS passes instead of an enumeration.
+    nodes = [...shortestNodes];
+    edges = [];
+    for (const edge of graph.edges) {
+      if (edge.source === edge.target) continue;
+      if (!onShortest.has(edge.source) || !onShortest.has(edge.target)) continue;
+      const a = forward.get(edge.source);
+      const b = backward.get(edge.target);
+      const c = forward.get(edge.target);
+      const d = backward.get(edge.source);
+      if (
+        (a !== undefined && b !== undefined && a + 1 + b <= span) ||
+        (c !== undefined && d !== undefined && c + 1 + d <= span)
+      ) {
+        edges.push(edgeKey(edge.source, edge.target));
+      }
+    }
+  } else {
+    // Widened budget: enumerate the simple paths. See `simplePathSet`.
+    const result = simplePathSet(adjacency, backward, from, to, span);
+    nodes = [...result.nodes];
+    edges = [...result.edges];
+    if (!result.complete) {
+      // The enumeration hit its budget. Fall back to the condition, which
+      // over-includes rather than dropping the highlight entirely — a wrong edge
+      // is a smaller failure than a route that does not light up at all.
+      for (const id of shortestNodes) if (!result.nodes.has(id)) nodes.push(id);
+      for (const edge of graph.edges) {
+        if (edge.source === edge.target) continue;
+        if (!result.nodes.has(edge.source) || !result.nodes.has(edge.target)) continue;
+        const a = forward.get(edge.source);
+        const b = backward.get(edge.target);
+        const c = forward.get(edge.target);
+        const d = backward.get(edge.source);
+        if (
+          (a !== undefined && b !== undefined && a + 1 + b <= span) ||
+          (c !== undefined && d !== undefined && c + 1 + d <= span)
+        ) {
+          edges.push(edgeKey(edge.source, edge.target));
+        }
+      }
+    }
   }
+
+  nodes.sort((a, b) => (forward.get(a) ?? 0) - (forward.get(b) ?? 0) || (a < b ? -1 : a > b ? 1 : 0));
   edges.sort();
 
   return {
@@ -162,7 +265,7 @@ export function findConnectingPaths(
     span,
     nodes,
     edges,
-    routeCount: countRoutes(adjacency, forward, onPath, from, to, total),
+    routeCount: countRoutes(adjacency, forward, onShortest, from, to, total),
   };
 }
 

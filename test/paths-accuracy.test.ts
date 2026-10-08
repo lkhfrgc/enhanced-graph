@@ -61,13 +61,10 @@ function simplePathsWithin(
 const keyOf = (a: string, b: string): string => (a < b ? `${a}:::${b}` : `${b}:::${a}`);
 
 describe("findConnectingPaths returns edges on real paths", () => {
-  // KNOWN BUG, recorded rather than asserted away.
-  //
-  // `it.fails` means "this test is expected to fail". It keeps the suite green
-  // while making the defect visible, and it will itself fail the moment the
-  // defect is fixed — so the fix cannot land quietly without the test being
-  // updated to `it` in the same change.
-  it.fails("does not report a dead-end edge reachable only by revisiting a node", () => {
+  // Was `it.fails` while the walk-versus-path defect was open: the enumeration
+  // below is what the fix was measured against, and `it.fails` would itself fail
+  // now that it passes — which is how the two were kept in step.
+  it("does not report a dead-end edge reachable only by revisiting a node", () => {
     // s - x - t, plus a dead-end branch x - y.
     //
     // The shortest distance s..t is 2. With a 4-hop budget, edge x-y satisfies
@@ -97,6 +94,58 @@ describe("findConnectingPaths returns edges on real paths", () => {
 
     expect({ extra, missing }).toEqual({ extra: [], missing: [] });
   });
+
+  // The strongest check available: for several topologies and every budget, the
+  // function's edges must equal the union computed by brute force. One hand-built
+  // case proved the defect existed; this is what says the fix is general.
+  const cases: Array<{ name: string; links: Array<[string, string]>; s: string; t: string }> = [
+    {
+      name: "dead end off a chain",
+      links: [["s", "x"], ["x", "t"], ["x", "y"]],
+      s: "s",
+      t: "t",
+    },
+    {
+      name: "diamond",
+      links: [["s", "x"], ["x", "t"], ["s", "y"], ["y", "t"], ["x", "y"]],
+      s: "s",
+      t: "t",
+    },
+    {
+      name: "two-hop chain with a shortcut",
+      links: [["s", "a"], ["a", "b"], ["b", "t"], ["s", "t"]],
+      s: "s",
+      t: "t",
+    },
+    {
+      name: "cycle plus tail",
+      links: [["s", "a"], ["a", "b"], ["b", "s"], ["b", "t"], ["t", "c"]],
+      s: "s",
+      t: "t",
+    },
+  ];
+
+  for (const testCase of cases) {
+    for (let budget = 1; budget <= 5; budget += 1) {
+      it(`matches brute force: ${testCase.name}, budget ${budget}`, () => {
+        const ids = [...new Set(testCase.links.flat())];
+        const graph = graphOf(ids, testCase.links);
+        const result = findConnectingPaths(graph, testCase.s, testCase.t, { maxHops: budget });
+        if (!result) return; // not connected: nothing to compare
+
+        // Compare against the budget the function actually applied, not the one
+        // asked for: a budget below the shortest distance is raised to it rather
+        // than returning nothing, and `span` reports the result. Using the raw
+        // budget made this test wrong at budget 1 for every pair further apart.
+        const truth = new Set<string>();
+        for (const path of simplePathsWithin(testCase.links, testCase.s, testCase.t, result.span)) {
+          for (const [a, b] of path) truth.add(keyOf(a, b));
+        }
+
+        expect([...result.edges].sort()).toEqual([...truth].sort());
+      });
+    }
+  }
 
   it("does not report a branch edge when the budget is the shortest distance", () => {
     // Same shape, but the budget is the shortest distance, where the condition
