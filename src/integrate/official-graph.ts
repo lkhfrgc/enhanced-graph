@@ -81,12 +81,18 @@ const FOCUS_NODE_DIM = 0.03;
  */
 export const FOCUS_EDGE_DRAWN = 0.02;
 /**
- * Breathing space between a node's own radius and the focus ring, in CSS pixels.
+ * How far the focus glow extends, in SCREEN pixels.
  *
- * Constant on purpose: it is a gap, not part of the node, so it must not scale
- * with the zoom the way the ring itself does.
+ * Screen pixels rather than graph units because that is the only frame the
+ * indicator can be reasoned about: the node's drawn size is not readable, and
+ * Obsidian's own `nodeScale` compensates for zoom precisely to keep nodes a
+ * steady size on screen. Bounded at both ends so no zoom level can produce a
+ * glow that swallows the view or one too small to notice.
  */
-export const RING_PADDING = 3;
+export const GLOW_MIN_PX = 12;
+export const GLOW_MAX_PX = 44;
+/** Multiplier on the node's own `getSize()`, before the bounds above. */
+export const GLOW_SPREAD = 2.2;
 /** Shown in the line-colour picker while the theme's own colour is in use. */
 const LINE_COLOR_FALLBACK = "#888888";
 /**
@@ -1221,7 +1227,6 @@ export class OfficialGraphEnhancer {
     const scale = renderer.scale ?? 1;
     const panX = renderer.panX ?? 0;
     const panY = renderer.panY ?? 0;
-    const nodeScale = (renderer as { nodeScale?: number }).nodeScale ?? 1;
     const dpr = window.devicePixelRatio || 1;
 
     const points: MarkerPoint[] = [];
@@ -1233,16 +1238,19 @@ export class OfficialGraphEnhancer {
       points.push({
         x: (node.x * scale + panX) / dpr,
         y: (node.y * scale + panY) / dpr,
-        // The radius has to be scaled exactly like the position. It used to be
-        // `size * nodeScale + 3`, which left the ring a fixed number of pixels
-        // while the node it encircles grew and shrank with the zoom — so zooming
-        // in put the ring inside the node and zooming out left it floating well
-        // outside. `zoom` here is the graph's own scale; `nodeScale` is the size
-        // setting, and the two are independent.
+        // Sized in SCREEN pixels, deliberately not following `scale`.
         //
-        // The `+ RING_PADDING` stays outside the division: it is a constant
-        // breathing space in CSS pixels, not part of the node.
-        radius: (size * nodeScale * scale) / dpr + RING_PADDING,
+        // Two measurements decided this. Across the zoom range `nodeScale`
+        // multiplied by 10.6 while `scale` divided by 111, so they are not
+        // mutual inverses and neither product tracks the node's drawn size — and
+        // that size cannot be read at all, because `renderer.nodeLookup` holds a
+        // data record with no drawn geometry on it. What `nodeScale` is
+        // evidently FOR is keeping nodes a roughly constant size on screen, so a
+        // constant-size indicator matches how the graph behaves.
+        //
+        // Bounded, so no zoom level can turn the glow into a disc covering the
+        // view or a speck that cannot be seen.
+        radius: Math.min(GLOW_MAX_PX, Math.max(GLOW_MIN_PX, size * GLOW_SPREAD)),
       });
     }
     attachment.markers.draw(points, this.markerPalette());
