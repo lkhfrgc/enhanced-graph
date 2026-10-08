@@ -955,8 +955,12 @@ export class OfficialGraphEnhancer {
   }
 
   /**
-   * The set of nodes that should stay bright: everything focused, their
-   * neighbours, and every node on a route between two focused notes.
+   * The set of nodes that should stay bright.
+   *
+   * With ONE note focused: that note and its neighbours. With two or more: the
+   * focused notes and every node on a route between them — and deliberately NOT
+   * their neighbours, which would sweep in the surrounding cluster and leave
+   * bright nodes whose edges are not part of any connecting route.
    *
    * Returns null when nothing is focused, so callers can skip the whole path.
    */
@@ -1046,8 +1050,11 @@ export class OfficialGraphEnhancer {
   }
 
   /**
-   * The edges that belong to the focus: everything incident to a focused note,
-   * plus every step of the routes between them.
+   * The edges that belong to the focus.
+   *
+   * One focused note: its incident edges. Two or more: exactly the steps of the
+   * routes between them, so the highlight is the connecting subgraph and nothing
+   * outside it.
    *
    * Returned as pairs of OUR node ids; resolving to official ids happens in
    * {@link collectLitEdges}.
@@ -1065,20 +1072,17 @@ export class OfficialGraphEnhancer {
       pairs.push([a, b]);
     };
 
-    // Edges incident to a focused note, for ANY number of focused notes.
+    // Only for a SINGLE focused note.
     //
-    // This ran only when exactly one note was focused. Everything else lights
-    // only the routes BETWEEN focused notes, while the bright NODE set has always
-    // included their neighbours — so with two notes selected, a neighbour was
-    // drawn bright with the edge joining it to the focus left dark. On screen
-    // that reads as a route with pieces missing, which is exactly how it was
-    // reported.
-    //
-    // The function's own documentation has said "everything incident to a
-    // focused note, plus every step of the routes between them" all along; only
-    // the second half was implemented for the multi-node case.
-    for (const edge of graph.edges) {
-      if (focused.has(edge.source) || focused.has(edge.target)) push(edge.source, edge.target);
+    // "Focus neighbours" is about one note, so its incident edges are the answer.
+    // With two or more focused the question is which edges CONNECT them, and an
+    // edge that merely touches one of them does not: lighting those drew links
+    // outside the connecting subgraph. That was tried — it added 27 edges to one
+    // measured pair — and it is not what the feature is for.
+    if (focused.size === 1) {
+      for (const edge of graph.edges) {
+        if (focused.has(edge.source) || focused.has(edge.target)) push(edge.source, edge.target);
+      }
     }
     const ids = [...focused];
     for (let i = 0; i < ids.length; i += 1) {
