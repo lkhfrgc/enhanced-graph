@@ -60,10 +60,26 @@ export { probeOfficialGraph, OFFICIAL_GRAPH_VIEW_TYPES } from "./official-intern
  */
 export const GRAPH_MENU_SOURCE = "graph-context-menu";
 
-/** Alpha multiplier for nodes outside the focus set. */
-const FOCUS_NODE_DIM = 0.18;
-/** Alpha multiplier applied to every edge while something is focused. */
-const FOCUS_EDGE_DRAWN = 0.2;
+/**
+ * Alpha multiplier for nodes outside the focus set.
+ *
+ * Pushed down from 0.18 after the focused route proved hard to pick out. The lit
+ * edges were already at full alpha, so the only lever left was contrast: the
+ * route reads as a route because everything else recedes, not because the route
+ * itself can get any brighter.
+ */
+const FOCUS_NODE_DIM = 0.06;
+/**
+ * Alpha multiplier applied to every edge while something is focused.
+ *
+ * Exported so the test asserts the mechanism against this value instead of
+ * hard-coding it.
+ *
+ * The same reasoning as `FOCUS_NODE_DIM`. 0.2 left the surrounding mesh visible
+ * enough to compete with the lit path; at 0.05 the lit edges are the only ones
+ * with any presence, and the shape of the route is what the eye follows.
+ */
+export const FOCUS_EDGE_DRAWN = 0.05;
 /** Shown in the line-colour picker while the theme's own colour is in use. */
 const LINE_COLOR_FALLBACK = "#888888";
 /**

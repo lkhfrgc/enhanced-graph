@@ -1,7 +1,7 @@
 {
   "id": "enhanced-graph",
   "name": "Enhanced Graph",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "minAppVersion": "1.9.10",
   "description": "Add a relevance engine, Louvain communities and knowledge-gap insights to the built-in graph view, plus a standalone graph with filters, weights and reports.",
   "author": "lkhfrgc",

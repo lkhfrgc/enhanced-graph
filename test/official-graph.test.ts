@@ -17,7 +17,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // browser harness uses, so the view code runs unmodified.
 import "../harness/dom-polyfill";
 
-import { GRAPH_MENU_SOURCE, SAFETY_NET_MS } from "../src/integrate/official-graph";
+import { FOCUS_EDGE_DRAWN, GRAPH_MENU_SOURCE, SAFETY_NET_MS } from "../src/integrate/official-graph";
 import { OfficialMarkerLayer } from "../src/integrate/official-markers";
 import { t } from "../src/i18n";
 import { typeColor } from "../src/view/palette";
@@ -1120,7 +1120,13 @@ describe("focus on the built-in graph", () => {
     // it puts both results exactly where they belong without any clamping.
     const drawn = (written: number): number => written * 0.9 + 0.1;
     expect(drawn(routeLink.line.alpha)).toBeCloseTo(1, 6);
-    expect(drawn(otherLink.line.alpha)).toBeCloseTo(0.2, 6);
+    // The dimmed target is read from the module rather than written out here.
+    // Hard-coding 0.2 made this test fail the moment the contrast was raised,
+    // which said nothing about whether the mechanism still worked — the thing
+    // under test is that the route and the rest land on DIFFERENT, ordered
+    // levels, and that the lit one is the brighter.
+    expect(drawn(otherLink.line.alpha)).toBeCloseTo(FOCUS_EDGE_DRAWN, 6);
+    expect(drawn(routeLink.line.alpha)).toBeGreaterThan(drawn(otherLink.line.alpha));
   });
   it("survives the pointer travelling to another node", async () => {
     const h = chain();
