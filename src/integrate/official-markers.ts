@@ -27,7 +27,7 @@ export interface MarkerLine {
 }
 
 /** How strongly a highlighted edge is drawn, relative to full opacity. */
-export const EDGE_OPACITY = 0.55;
+export const EDGE_OPACITY = 0.35;
 
 /** Thickness of the dark rim that separates the dot from the node beneath it. */
 export const MARKER_RIM_PX = 2;
