@@ -113,6 +113,12 @@ await page.waitForFunction(
 );
 await page.waitForTimeout(6000);
 
+const pairArgs = process.argv.slice(2).filter((a) => !a.startsWith("-"));
+if (pairArgs.length) console.log("inspecting pair:", pairArgs.join("  <>  "));
+await page.evaluate((pair) => {
+  window.__DIAGNOSE_PAIR__ = pair;
+}, pairArgs);
+
 const report = await page.evaluate(async () => {
   const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const app = window.app;
@@ -131,13 +137,30 @@ const report = await page.evaluate(async () => {
     if (node) officialIdOf.set(node.id, officialId);
   }
 
-  // Pick a pair that is MAPPABLE and adjacent, so the test is about the pipeline
-  // and not about the known unmappable tail.
-  const candidate = ours.graph.edges.find(
-    (edge) => officialIdOf.has(edge.source) && officialIdOf.has(edge.target),
-  );
-  if (!candidate) return { error: "no mappable edge found" };
-  const ids = [candidate.source, candidate.target];
+  // The pair to inspect: given on the command line when the question is about
+  // specific notes, otherwise any mappable edge — which tests the pipeline but
+  // not the case under discussion.
+  const wanted = window.__DIAGNOSE_PAIR__;
+  let ids;
+  if (Array.isArray(wanted) && wanted.length >= 2) {
+    ids = wanted.slice(0, 2).map((name) => ours.graph.nodes.find((n) => n.id === name || n.label === name)?.id ?? name);
+  } else {
+    const fallback = ours.graph.edges.find(
+      (edge) => officialIdOf.has(edge.source) && officialIdOf.has(edge.target),
+    );
+    if (!fallback) return { error: "no mappable edge found" };
+    ids = [fallback.source, fallback.target];
+  }
+  const candidate = { source: ids[0], target: ids[1] };
+  const unknown = ids.filter((id) => !ours.graph.nodeIndex.has(id));
+  if (unknown.length) {
+    return {
+      error: "these ids are not in the plugin's graph",
+      unknown,
+      hint: "pass the note names as they appear in the vault",
+      sampleIds: ours.graph.nodes.slice(0, 12).map((n) => n.id),
+    };
+  }
 
   const stages = { chosen: ids, officialIds: [officialIdOf.get(ids[0]), officialIdOf.get(ids[1])] };
 
@@ -189,6 +212,7 @@ const report = await page.evaluate(async () => {
   });
 
   // Stage 5: what actually got collected and lit.
+  const links = Array.isArray(renderer.links) ? renderer.links : [];
   let collected = null;
   try {
     const set = enhancer.collectLitEdges(renderer);
@@ -197,13 +221,46 @@ const report = await page.evaluate(async () => {
     stages.collectThrew = String(error);
   }
   stages.collectedLitEdges = collected;
+
+  // The decisive check: for every key that should be lit, is the graphics object
+  // it resolves to actually one of the objects the render loop walks?
+  //
+  // `renderer.links` held 542 entries against 420 edges in our graph, so the two
+  // collections are not the same set. A key whose object is absent from
+  // `renderer.links` can never be given an alpha by the renderer, however
+  // correct the key set is — and a route with such an edge in it lights up with
+  // a gap in the middle.
+  {
+    const inLinks = new Set(links.map((link) => link?.line).filter(Boolean));
+    let resolved = 0;
+    let missingFromLinks = 0;
+    const samples = [];
+    for (const key of enhancer.litEdges.get(renderer) ?? []) {
+      const [a, b] = key.split(":::");
+      const link =
+        lookup[a]?.forward?.[b] ??
+        lookup[b]?.forward?.[a];
+      const line = link?.line;
+      if (!line) continue;
+      resolved += 1;
+      if (!inLinks.has(line)) {
+        missingFromLinks += 1;
+        if (samples.length < 6) samples.push({ key, note: "resolved but absent from renderer.links" });
+      }
+    }
+    stages.litKeyResolution = {
+      keys: enhancer.litEdges.get(renderer)?.size ?? 0,
+      resolved,
+      missingFromLinks,
+      samples,
+    };
+  }
   stages.litEdgesMapSize = enhancer.litEdges ? [...enhancer.litEdges.values()].reduce((s, v) => s + v.size, 0) : null;
 
   // Stage 6: what the link objects' alpha actually is right now.
   // Every link, not the first forty: sampling 40 of 542 and reporting the count
   // as if it described the graph made the previous run look far worse than it
   // was, and would have done the same in the other direction.
-  const links = Array.isArray(renderer.links) ? renderer.links : [];
   const alphas = links.map((link) => link?.line?.alpha).filter((a) => typeof a === "number");
   stages.linkCount = links.length;
   stages.alphasMeasured = alphas.length;
@@ -211,10 +268,11 @@ const report = await page.evaluate(async () => {
   stages.dimAlphaCount = alphas.filter((a) => a < 0.5).length;
   stages.alphaSample = alphas.slice(0, 12);
 
-  // Stage 7: does the searched edge itself appear among the pairs?
-  const wanted = [candidate.source, candidate.target];
+  // Stage 7: does the chosen edge itself appear among the pairs?
+  const wantedEdge = [candidate.source, candidate.target];
   stages.edgeIsInPairs = pairs.some(
-    ([a, b]) => (a === wanted[0] && b === wanted[1]) || (a === wanted[1] && b === wanted[0]),
+    ([a, b]) =>
+      (a === wantedEdge[0] && b === wantedEdge[1]) || (a === wantedEdge[1] && b === wantedEdge[0]),
   );
   const paths = enhancer.findConnectingPathsFor
     ? null
