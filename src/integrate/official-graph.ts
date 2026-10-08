@@ -993,6 +993,10 @@ export class OfficialGraphEnhancer {
    *     pointer position is pinned to the node as well — which is precisely the
    *     state we want to express: "treat this node as hovered". A later real
    *     hover overwrites both, so hovering elsewhere still takes over normally.
+   *
+   * This is the gesture that ACCUMULATES: focusing a second note from the menu is
+   * how the route between two notes is asked for. An insight card is the opposite
+   * — see `focusCardNodes`.
    */
   private focusNodeInGraph(nodeId: string, leaf: WorkspaceLeaf | undefined): void {
     try {
@@ -1025,6 +1029,38 @@ export class OfficialGraphEnhancer {
     } catch (error) {
       console.error("[enhanced-graph] focusing a built-in graph node failed:", error);
     }
+  }
+
+  /**
+   * Focus every note an insight card names — both ends of a connection, at once.
+   *
+   * This REPLACES the focus rather than adding to it. The panel marks only the
+   * last card as active, so the graph has to agree with it: adding left the first
+   * card's connection lit behind the second one, and the anchors piled up — the
+   * focus runs a route search for every PAIR of them, and `drawMarkers` re-runs it
+   * on every frame. `clearFocusRenderer`'s own repaint would be wasted work here,
+   * so the set is written and applied in one pass.
+   *
+   * Notes the built-in graph is not drawing (filtered out, or not loaded yet) are
+   * skipped without a word: a card is not a request for one named note, so unlike
+   * the context menu there is nothing to report.
+   */
+  private focusCardNodes(renderer: OfficialRenderer, nodeIds: readonly string[]): void {
+    const { graph } = this.deps.getData();
+    const resolve = this.resolverFor(graph);
+    const drawn = new Set<string>();
+    for (const officialId of Object.keys(renderer.nodeLookup ?? {})) {
+      const ours = resolve(officialId);
+      if (ours) drawn.add(ours.id);
+    }
+    const ids = nodeIds.filter((id) => graph.nodeIndex.has(id) && drawn.has(id));
+    if (ids.length === 0) {
+      this.clearFocusRenderer(renderer);
+      return;
+    }
+    this.focusIds.set(renderer, new Set(ids));
+    this.assertFocus(renderer);
+    this.startFocusTicker();
   }
 
   /**
@@ -1591,11 +1627,17 @@ export class OfficialGraphEnhancer {
       insights: () => this.deps.getData().insights,
       dismissed: () => new Set(this.deps.getDismissed()),
       mode: () => this.deps.getMode(),
-      // An empty id list is the panel's "unfocus" gesture: clear the highlight
-      // without running the node lookup `focusNodes` would do.
+      // An empty id list is the panel's "unfocus" gesture.
+      //
+      // `focusNodeInGraph`, once per id, rather than `focusNodes`. A connection
+      // card hands over BOTH endpoints and `focusNodes` stops at the first one it
+      // can resolve — it assigns the renderer's own single-node `highlightNode`
+      // and breaks out of the loop — so clicking a card lit one end and left the
+      // other dark. This writes `focusIds`, which is the set the ticker keeps
+      // re-applying, so both ends stay lit.
       onFocusNodes: (nodeIds) => {
-        if (nodeIds.length === 0) this.clearFocus(renderer);
-        else this.focusNodes(renderer, nodeIds);
+        if (nodeIds.length === 0) this.clearFocusRenderer(renderer);
+        else this.focusCardNodes(renderer, nodeIds);
       },
       focusCount: () => {
         const ids = this.focusIds.get(renderer);
@@ -1651,15 +1693,6 @@ export class OfficialGraphEnhancer {
       renderer.changed?.();
     } catch (error) {
       console.error("[enhanced-graph] focusing a built-in graph node failed:", error);
-    }
-  }
-
-  private clearFocus(renderer: OfficialRenderer): void {
-    try {
-      renderer.highlightNode = null;
-      renderer.changed?.();
-    } catch {
-      /* nothing to restore */
     }
   }
 }

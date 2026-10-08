@@ -28,7 +28,14 @@ import {
 } from "../src/integrate/official-graph";
 import { createNodeResolver } from "../src/integrate/official-internals";
 import type { GraphInsights } from "../src/core/insights";
-import { EMPTY_GRAPH, type CommunityInfo, type GraphNode, type PageType, type WikiGraph } from "../src/types";
+import {
+  EMPTY_GRAPH,
+  type CommunityInfo,
+  type GraphNode,
+  type PageType,
+  type UnexpectedLink,
+  type WikiGraph,
+} from "../src/types";
 import { communityColor, hexToRgbInt, NODE_TYPE_COLORS } from "../src/view/palette";
 import { setLanguage } from "../src/i18n";
 
@@ -1704,6 +1711,168 @@ describe("the built-in graph's toolbar", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  /**
+   * A connection card focuses BOTH of its ends, in the plugin's own sense of
+   * "focused" — the state the context menu's 「聚焦邻居」 produces: the notes are
+   * ringed, the route between them is lit, the rest is dimmed, and a focused PAIR
+   * offers the connection-range control.
+   *
+   * The built-in renderer's own highlight (`renderer.highlightNode`) holds exactly
+   * one node, so that path could never mark more than the first end. The focus is
+   * a set, and it is what the rest of the plugin already means by a focused pair.
+   */
+  it("focuses both ends of a connection when its card is clicked", async () => {
+    const draw = vi.spyOn(OfficialMarkerLayer.prototype, "draw").mockImplementation(() => {});
+    try {
+      const h = setup(
+        [{ id: "a.md" }, { id: "b.md" }, { id: "far.md" }],
+        [makeNode({ id: "a" }), makeNode({ id: "b" }), makeNode({ id: "far" })],
+      );
+      h.graph = makeGraph([...h.graph.nodes], [...h.graph.communities], [makeEdge("a", "b")]);
+      h.insights = {
+        connections: [
+          {
+            key: "a:::b",
+            source: { id: "a", label: "A", type: "concept", community: 0 } as never,
+            target: { id: "b", label: "B", type: "entity", community: 1 } as never,
+            score: 9,
+            weight: 4,
+            reasons: ["cross-community"],
+            contributions: { "cross-community": 4 },
+          },
+        ],
+        gaps: [],
+      };
+      h.enhancer.start();
+
+      const panel = h.renderer.containerEl.querySelector<HTMLElement>(".enhanced-graph-official-panel")!;
+      const alphaOf = (id: string): number | undefined => h.renderer.nodeLookup[`${id}.md`]?.color?.a;
+      const cardOf = (): HTMLElement => {
+        const card = panel.querySelector<HTMLElement>(".enhanced-graph-card");
+        if (!card) throw new Error("no insight card was rendered");
+        return card;
+      };
+      /** Ringed notes, as the focus ticker actually draws them. */
+      const rings = (): number => {
+        const calls = draw.mock.calls;
+        return (calls[calls.length - 1]?.[0] ?? []).length;
+      };
+      const hopChoices = (): number => panel.querySelectorAll(".enhanced-graph-hop-button").length;
+      const settle = (): Promise<void> =>
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        );
+
+      expect(hopChoices()).toBe(0);
+
+      cardOf().dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await settle();
+
+      // Both ends bright, everything else dimmed...
+      expect(alphaOf("a")).toBe(1);
+      expect(alphaOf("b")).toBe(1);
+      expect(alphaOf("far")).toBeLessThan(1);
+      // ...both of them ringed, which is what "focused" looks like...
+      expect(rings()).toBe(2);
+      // ...and a focused pair, so the route control is offered exactly as it is
+      // after two notes are focused from the context menu.
+      expect(hopChoices()).toBeGreaterThan(0);
+
+      // Clicking the active card again is the unfocus gesture.
+      cardOf().dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await settle();
+      expect(alphaOf("far")).toBe(1);
+      expect(hopChoices()).toBe(0);
+    } finally {
+      draw.mockRestore();
+    }
+  });
+
+  it("replaces the focus when another card is clicked", () => {
+    const h = setup(
+      [{ id: "a.md" }, { id: "b.md" }, { id: "c.md" }, { id: "d.md" }],
+      [makeNode({ id: "a" }), makeNode({ id: "b" }), makeNode({ id: "c" }), makeNode({ id: "d" })],
+    );
+    h.graph = makeGraph(
+      [...h.graph.nodes],
+      [...h.graph.communities],
+      [makeEdge("a", "b"), makeEdge("c", "d")],
+    );
+    const connection = (source: string, target: string): UnexpectedLink => ({
+      key: `${source}:::${target}`,
+      source: { id: source, label: source, type: "concept", community: 0 } as never,
+      target: { id: target, label: target, type: "entity", community: 1 } as never,
+      score: 9,
+      weight: 4,
+      reasons: ["cross-community"],
+      contributions: { "cross-community": 4 },
+    });
+    h.insights = { connections: [connection("a", "b"), connection("c", "d")], gaps: [] };
+    h.enhancer.start();
+
+    const panel = h.renderer.containerEl.querySelector<HTMLElement>(".enhanced-graph-official-panel")!;
+    const alphaOf = (id: string): number | undefined => h.renderer.nodeLookup[`${id}.md`]?.color?.a;
+    // Re-queried every time: the panel replaces its body whenever it re-renders.
+    const cards = (): HTMLElement[] => Array.from(panel.querySelectorAll<HTMLElement>(".enhanced-graph-card"));
+    const click = (index: number): void => {
+      cards()[index].dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    };
+
+    expect(cards()).toHaveLength(2);
+    click(0);
+    expect(alphaOf("a")).toBe(1);
+    expect(alphaOf("b")).toBe(1);
+    expect(alphaOf("c")).toBeLessThan(1);
+
+    // The second card is what the user is looking at now — the same "one card at
+    // a time" the panel already shows by marking only the last card active. The
+    // first card's connection must not stay lit behind it, and the anchors must
+    // not pile up (the focus runs a route search for every PAIR of them).
+    click(1);
+    expect(alphaOf("c")).toBe(1);
+    expect(alphaOf("d")).toBe(1);
+    expect(alphaOf("a")).toBeLessThan(1);
+    expect(alphaOf("b")).toBeLessThan(1);
+  });
+
+  it("says nothing when a card names a note the built-in graph is not drawing", () => {
+    // The renderer holds `a.md` only, while the card names both ends — the shape
+    // of a card whose other end a filter has hidden. The focus reports a failure
+    // with a Notice, which is right when the USER asked for that note from the
+    // context menu; a card click must not pop one at them for a note the graph is
+    // not drawing.
+    const h = setup([{ id: "a.md" }], [makeNode({ id: "a" }), makeNode({ id: "b" })]);
+    h.graph = makeGraph([...h.graph.nodes], [...h.graph.communities], [makeEdge("a", "b")]);
+    h.insights = {
+      connections: [
+        {
+          key: "a:::b",
+          source: { id: "a", label: "A", type: "concept", community: 0 } as never,
+          target: { id: "b", label: "B", type: "entity", community: 1 } as never,
+          score: 9,
+          weight: 4,
+          reasons: ["cross-community"],
+          contributions: { "cross-community": 4 },
+        },
+      ],
+      gaps: [],
+    };
+    h.enhancer.start();
+
+    const panel = h.renderer.containerEl.querySelector<HTMLElement>(".enhanced-graph-official-panel")!;
+    const card = panel.querySelector<HTMLElement>(".enhanced-graph-card");
+    expect(card).toBeTruthy();
+    errorSpy.mockClear();
+    card!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    // The end that IS drawn is still focused...
+    expect(h.renderer.nodeLookup["a.md"]?.color?.a).toBe(1);
+    // ...and nothing was reported. `reportFocusFailure` also builds a Notice, and
+    // this file mocks `obsidian` down to `setIcon`, so reaching it throws — which
+    // is why the console is checked rather than the popup.
+    expect(errorSpy.mock.calls.flat().join(" ")).not.toContain("focusing a built-in graph node failed");
   });
 
   it("moves the toolbar highlight to the mode that was just picked", async () => {

@@ -147,6 +147,21 @@ const check = (name, pass, detail) => {
   console.log(`  ${pass ? "PASS" : "FAIL"}  ${name}${detail ? `: ${detail}` : ""}`);
 };
 
+/**
+ * Runs one labelled step in the Obsidian page and prints what it returned.
+ *
+ * The insight-card check below was written against this helper, so it stays here
+ * rather than being folded into `check`: it is how a step that needs to LOOK at
+ * something reports what it saw before anything is asserted about it.
+ */
+const step = async (label, fn) => {
+  const result = await page.evaluate(fn);
+  console.log("");
+  console.log(`--- ${label} ---`);
+  console.log(JSON.stringify(result, null, 1));
+  return result;
+};
+
 // Open the filters tab the way a person does: a real press on its toolbar button.
 const filterButton = page.locator(".enhanced-graph-official-toolbar button", { hasText: "过滤器" }).first();
 await filterButton.click({ delay: PRESS_MS });
@@ -205,6 +220,71 @@ const round = async (label, query) => {
 
 await round("plain list", null);
 await round("with a tag search query", "a");
+
+// Click an insight card and see whether BOTH endpoints end up focused.
+const insight = await step("click the first insight connection card", async () => {
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const app = window.app;
+  const plugin = app.plugins.plugins["enhanced-graph"];
+  const enhancer = plugin.officialGraph;
+  const renderer = app.workspace.getLeavesOfType("graph").find((c) => c.view && c.view.renderer)?.view.renderer;
+
+  // Make sure the insights tab is showing.
+  const bar = document.querySelector(".enhanced-graph-official-toolbar");
+  const insightsButton = [...(bar?.querySelectorAll("button") ?? [])].find((el) =>
+    (el.textContent ?? "").includes("洞察"),
+  );
+  insightsButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  await wait(900);
+
+  const cards = [...document.querySelectorAll(".enhanced-graph-card")];
+  const titles = cards.map((el) => (el.textContent ?? "").trim().slice(0, 30));
+  const card = cards[0];
+  if (!card) return { cards: 0, error: "no insight cards rendered" };
+  const before = enhancer.focusIds.get(renderer)?.size ?? 0;
+  card.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  await wait(1500);
+  const focused = [...(enhancer.focusIds.get(renderer) ?? [])];
+
+  // Then a SECOND card: the first card's focus has to be gone, not added to. The
+  // panel only ever marks one card active, so the graph has to agree with it.
+  const second = [...document.querySelectorAll(".enhanced-graph-card")][1];
+  const focusedSecond = second
+    ? await (async () => {
+        second.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        await wait(1500);
+        return [...(enhancer.focusIds.get(renderer) ?? [])];
+      })()
+    : [];
+
+  return {
+    cards: cards.length,
+    firstCard: titles[0] ?? null,
+    secondCard: titles[1] ?? null,
+    focusBefore: before,
+    focusAfter: focused.length,
+    focused,
+    focusAfterSecond: focusedSecond.length,
+    focusedSecond,
+    // Ids the first card focused that are still focused after the second click.
+    leftOver: focused.filter((id) => focusedSecond.includes(id)),
+  };
+});
+
+// The card names a connection, so the plugin's own focus — the state 右键「聚焦邻居」
+// produces — has to hold BOTH ends, not just the first one it can resolve.
+check(
+  "one click on an insight card focuses both ends of the connection",
+  insight.focusAfter === 2,
+  `${insight.cards} card(s), first="${insight.firstCard}", ` +
+    `focus ${insight.focusBefore} → ${insight.focusAfter} [${(insight.focused ?? []).join(", ")}]`,
+);
+check(
+  "clicking a second card drops the first card's focus",
+  insight.cards < 2 || (insight.leftOver ?? []).length === 0,
+  `second="${insight.secondCard}", focus ${insight.focusAfter} → ${insight.focusAfterSecond} ` +
+    `[${(insight.focusedSecond ?? []).join(", ")}], left over from the first [${(insight.leftOver ?? []).join(", ")}]`,
+);
 
 const shot = path.join(os.tmpdir(), "filters-check.png");
 await page.screenshot({ path: shot });
