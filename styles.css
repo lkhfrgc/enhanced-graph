@@ -273,7 +273,8 @@
   gap: 6px;
   padding: 2px 3px;
   border-radius: 4px;
-  cursor: default;
+  /* Clickable: a cluster row lights that cluster and a second click lets go. */
+  cursor: pointer;
 }
 
 /* A cluster held lit by a click. The row's state is how the toggle is
@@ -967,6 +968,11 @@
      who wins when they do meet; capping the panel's height below stops them
      meeting at all, which is the real fix. */
   z-index: 30;
+  /* The overlay turns pointer events off so the graph stays pannable, and only
+     the panel and the toolbar turned them back on for themselves. The legend
+     never did, so it inherited `none` and its rows never received a click — the
+     handler on them has existed all along and had never once run. */
+  pointer-events: auto;
 }
 .enhanced-graph-official-overlay > .enhanced-graph-official-panel {
   pointer-events: auto;
