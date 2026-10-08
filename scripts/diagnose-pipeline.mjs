@@ -374,7 +374,56 @@ const report = await page.evaluate(async () => {
         parentAlpha: typeof line.parent?.worldAlpha === "number" ? line.parent.worldAlpha : null,
       });
     }
-    stages.drawValues = {
+    // Who owns the value: us, or the render loop?
+  //
+  // Stop writing to \`line.alpha\` and watch. If the values drift back toward
+  // something else, the render recomputes them every frame and our writes are
+  // being overwritten — which would explain a bright node beside a dark line
+  // while every write-side check passes.
+  {
+    const snapshot = () =>
+      links
+        .map((link) => link?.line?.alpha)
+        .filter((a) => typeof a === "number");
+    const before = snapshot();
+    const tickerStopped = (() => {
+      try {
+        if (typeof enhancer.stopFocusTicker === "function") {
+          enhancer.stopFocusTicker();
+          return true;
+        }
+        return false;
+      } catch (error) {
+        return String(error);
+      }
+    })();
+    await wait(2500);
+    const after = snapshot();
+    const moved = before.reduce(
+      (sum, value, index) => sum + (Math.abs(value - (after[index] ?? value)) > 0.01 ? 1 : 0),
+      0,
+    );
+    stages.ownership = {
+      tickerStopped,
+      valuesBefore: before.length,
+      valuesAfter: after.length,
+      valuesThatMovedWhileWeStopped: moved,
+      beforeSample: before.slice(0, 8).map((v) => Math.round(v * 1000) / 1000),
+      afterSample: after.slice(0, 8).map((v) => Math.round(v * 1000) / 1000),
+      // What the renderer's own state looks like, for reference.
+      highlightNode: renderer.highlightNode ? "set" : "null",
+      lineColorAlpha: renderer.colors?.line?.a ?? null,
+      lineHighlightAlpha: renderer.colors?.lineHighlight?.a ?? null,
+    };
+    // Put the ticker back so the rest of the report describes a live focus.
+    try {
+      enhancer.startFocusTicker?.();
+    } catch {
+      /* nothing to restart */
+    }
+  }
+
+  stages.drawValues = {
       measured: rows.length,
       litByAlpha: rows.filter((r) => r.alpha !== null && r.alpha > 0.9).length,
       litByWorldAlpha: rows.filter((r) => r.worldAlpha !== null && r.worldAlpha > 0.9).length,
