@@ -142,7 +142,7 @@ const report = await page.evaluate(async () => {
   // not the case under discussion.
   const wanted = window.__DIAGNOSE_PAIR__;
   let ids;
-  if (Array.isArray(wanted) && wanted.length >= 2) {
+  if (Array.isArray(wanted) && wanted.length >= 1) {
     ids = wanted.slice(0, 2).map((name) => ours.graph.nodes.find((n) => n.id === name || n.label === name)?.id ?? name);
   } else {
     const fallback = ours.graph.edges.find(
@@ -178,8 +178,7 @@ const report = await page.evaluate(async () => {
   // empty, so `focusEdgePairs` returned nothing and the first run of this
   // diagnostic reported a break that was really its own mistake.
   // `focusNodeInGraph` is the one that writes `focusIds`.
-  enhancer.focusNodeInGraph(ids[0], leaf);
-  enhancer.focusNodeInGraph(ids[1], leaf);
+  for (const id of ids) enhancer.focusNodeInGraph(id, leaf);
   await wait(1500);
 
   // Stage 3: the pairs it produced.
@@ -298,6 +297,59 @@ const report = await page.evaluate(async () => {
 
   // Stage 7: does the chosen edge itself appear among the pairs?
   const wantedEdge = [candidate.source, candidate.target];
+  // Single-node focus: every incident edge should light. Count how many the
+  // built-in graph has a graphics object for, and list those it does not — those
+  // are the ones drawn only in the standalone view.
+  if (ids.length === 1) {
+    const node = ids[0];
+    const incident = ours.graph.edges.filter((e) => e.source === node || e.target === node);
+    let withLink = 0;
+    const without = [];
+    for (const edge of incident) {
+      const other = edge.source === node ? edge.target : edge.source;
+      const a = officialIdOf.get(node);
+      const b = officialIdOf.get(other);
+      if (!a || !b) {
+        without.push({ other, reason: "endpoint absent from the built-in graph" });
+        continue;
+      }
+      const link = lookup[a]?.forward?.[b] ?? lookup[b]?.forward?.[a];
+      if (link?.line) withLink += 1;
+      else without.push({ other, reason: "no graphics object in the built-in graph" });
+    }
+    // The other direction: lines the built-in graph draws FROM that node which
+    // our graph has no edge for. Those can never be highlighted, and they look
+    // exactly like "connected but not lit".
+    const officialNode = officialIdOf.get(node);
+    const extraLines = [];
+    if (officialNode) {
+      for (const otherOfficial of Object.keys(lookup[officialNode]?.forward ?? {})) {
+        const key = otherOfficial.replace(/\\/g, "/").replace(/\.md$/i, "").toLowerCase();
+        const ourOther = ours.graph.nodeIndex.get(key);
+        if (!ourOther) {
+          extraLines.push({ officialTarget: otherOfficial, reason: "not a note in our graph" });
+          continue;
+        }
+        const hasEdge = ours.graph.edges.some(
+          (e) =>
+            (e.source === node && e.target === ourOther.id) ||
+            (e.target === node && e.source === ourOther.id),
+        );
+        if (!hasEdge) extraLines.push({ officialTarget: otherOfficial, ourId: ourOther.id, reason: "our graph has no such edge" });
+      }
+    }
+    stages.singleNode = {
+      builtInLinesFromNode: officialNode ? Object.keys(lookup[officialNode]?.forward ?? {}).length : null,
+      linesWithNoOurEdge: extraLines.length,
+      lineExamples: extraLines.slice(0, 12),
+      node,
+      incidentEdges: incident.length,
+      highlightable: withLink,
+      notHighlightable: without.length,
+      examples: without.slice(0, 10),
+    };
+  }
+
   stages.edgeIsInPairs = pairs.some(
     ([a, b]) =>
       (a === wantedEdge[0] && b === wantedEdge[1]) || (a === wantedEdge[1] && b === wantedEdge[0]),
