@@ -81,19 +81,25 @@ const FOCUS_NODE_DIM = 0.12;
  */
 export const FOCUS_EDGE_DRAWN = 0.10;
 /**
- * Focus ring geometry, in SCREEN pixels.
+ * Focus ring geometry.
  *
- * `getSize()` is the node's own radius and does not change with zoom, and the
- * gap is added on top of it. What is deliberately ABSENT is `nodeScale`: it
- * multiplies by 10.6 across the zoom range while `scale` divides by 111, and
- * feeding it into the radius is what made the ring grow as the graph zoomed out.
+ * The radius is the node's own `getSize()` plus a gap, put through exactly the
+ * transform the POSITION uses — `(value * scale) / dpr` — and nothing else.
  *
- * Bounded anyway, so a node reporting an unusual size cannot produce a ring that
- * swallows the view or one too small to see.
+ * Three attempts settled this, each contradicted by what was on screen:
+ * `size + gap` alone left the ring a fixed size while the node grew and shrank;
+ * `size * nodeScale + gap` made it grow as the graph zoomed OUT, because
+ * `nodeScale` is inverse to zoom (it multiplies by 10.6 across the range while
+ * `scale` divides by 111). Since the position formula is known correct, reusing
+ * it for the radius is the one option that does not require knowing how the
+ * renderer computes the drawn size — which is not readable from `nodeLookup`.
+ *
+ * The bounds only stop a degenerate case; they are wide enough not to interfere
+ * across the normal zoom range.
  */
 export const RING_GAP_PX = 3;
-export const RING_MIN_PX = 6;
-export const RING_MAX_PX = 30;
+export const RING_MIN_PX = 4;
+export const RING_MAX_PX = 60;
 /** Shown in the line-colour picker while the theme's own colour is in use. */
 const LINE_COLOR_FALLBACK = "#888888";
 /**
@@ -1239,9 +1245,12 @@ export class OfficialGraphEnhancer {
       points.push({
         x: (node.x * scale + panX) / dpr,
         y: (node.y * scale + panY) / dpr,
-        // `size` is the node's own radius; see `RING_GAP_PX` for why nothing
-        // else is multiplied in.
-        radius: Math.min(RING_MAX_PX, Math.max(RING_MIN_PX, size + RING_GAP_PX)),
+        // The radius goes through the same transform as the position above —
+        // `* scale / dpr` — and nothing else. See `RING_GAP_PX`.
+        radius: Math.min(
+          RING_MAX_PX,
+          Math.max(RING_MIN_PX, ((size + RING_GAP_PX) * scale) / dpr),
+        ),
       });
     }
     attachment.markers.draw(points, this.markerPalette());

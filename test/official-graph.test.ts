@@ -988,16 +988,20 @@ describe("focus on the built-in graph", () => {
       expect(points).toHaveLength(1);
       expect(points[0].x).toBeCloseTo((10 * 2 + 100) / (window.devicePixelRatio || 1), 6);
       expect(points[0].y).toBeCloseTo((20 * 2 + 50) / (window.devicePixelRatio || 1), 6);
-      // The ring sits just outside the node's own radius. What matters is that
-      // it does NOT depend on the zoom: the two earlier attempts multiplied by
-      // `scale` or `nodeScale`, and across the zoom range `nodeScale` grows by
-      // 10.6 while `scale` shrinks by 111 — neither tracks the node's drawn
-      // size, which is not readable from `nodeLookup` at all.
+      // The radius goes through the SAME transform as the position, and nothing
+      // else. Three earlier formulas were contradicted by what was on screen: a
+      // fixed size left the ring immobile, and `size * nodeScale` made it grow as
+      // the graph zoomed OUT, because `nodeScale` is inverse to zoom. Reusing the
+      // position transform is the only option that needs no knowledge of how the
+      // renderer computes the drawn size — which is not readable from
+      // `nodeLookup`.
       //
       // The fake node has no `getSize`, so the fallback of 6 applies.
-      expect(points[0].radius).toBeCloseTo(6 + RING_GAP_PX, 6);
-      expect(points[0].radius).toBeGreaterThanOrEqual(RING_MIN_PX);
-      expect(points[0].radius).toBeLessThanOrEqual(RING_MAX_PX);
+      const dpr = window.devicePixelRatio || 1;
+      const radiusAt = (zoom: number): number => ((6 + RING_GAP_PX) * zoom) / dpr;
+      expect(points[0].radius).toBeCloseTo(radiusAt(h.renderer.scale), 6);
+      // The property that was reported broken: it has to move with the zoom.
+      expect(radiusAt(h.renderer.scale)).not.toBeCloseTo(radiusAt(1), 6);
     } finally {
       draw.mockRestore();
     }
