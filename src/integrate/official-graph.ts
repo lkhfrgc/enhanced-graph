@@ -24,6 +24,7 @@
 
 import { App, Menu, Notice, TFile, WorkspaceLeaf } from "obsidian";
 import type { GraphInsights } from "../core/insights";
+import { edgeKeyEndpoints } from "../core/graph-keys";
 import { findConnectingPaths } from "../core/paths";
 import { renderFilters } from "../view/graph-filters";
 import { renderWeights } from "../view/graph-weights";
@@ -1063,7 +1064,15 @@ export class OfficialGraphEnhancer {
       for (let j = i + 1; j < ids.length; j += 1) {
         const paths = findConnectingPaths(graph, ids[i], ids[j], this.pathOptions());
         if (!paths) continue;
-        for (let k = 0; k + 1 < paths.nodes.length; k += 1) push(paths.nodes[k], paths.nodes[k + 1]);
+        // The edges the search already identified — NOT consecutive entries of
+        // `nodes`.
+        //
+        // `nodes` is every node on SOME included path, ordered by distance from
+        // `from`. Two entries next to each other in that list therefore need not
+        // share an edge at all, so pairing them up both invented edges that do
+        // not exist and skipped the real ones — which showed up as a focused
+        // route lighting only a scattered few of its edges.
+        for (const key of paths.edges) push(...edgeKeyEndpoints(key));
       }
     }
     return pairs;

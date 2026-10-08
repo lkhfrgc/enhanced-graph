@@ -1162,6 +1162,48 @@ describe("focus on the built-in graph", () => {
     expect(drawn(aToX.line.alpha)).toBeCloseTo(1, 6);
     expect(drawn(xToB.line.alpha)).toBeCloseTo(1, 6);
   });
+
+  it("lights every edge of a route that branches, not just the ones in order", async () => {
+    // A diamond: a -> x -> b and a -> y -> b. The path search reports the nodes
+    // on SOME route ordered by distance from `a`, so that list reads
+    // [a, x, y, b] — and x is not connected to y. Pairing consecutive entries
+    // therefore invents the edge x-y, drops a-y, and drops x-b: four real edges
+    // become two lit plus one that does not exist.
+    //
+    // The single-chain fixture could not tell the two implementations apart,
+    // because there the node order happens to equal the edge order. That is why
+    // the bug survived a passing test suite.
+    const h = setup(
+      [{ id: "a.md" }, { id: "x.md" }, { id: "y.md" }, { id: "b.md" }],
+      [makeNode({ id: "a" }), makeNode({ id: "x" }), makeNode({ id: "y" }), makeNode({ id: "b" })],
+    );
+    h.graph = makeGraph(
+      [...h.graph.nodes],
+      [...h.graph.communities],
+      [makeEdge("a", "x"), makeEdge("x", "b"), makeEdge("a", "y"), makeEdge("y", "b")],
+    );
+    h.enhancer.start();
+
+    const links = {
+      ax: { line: { alpha: 1 } },
+      xb: { line: { alpha: 1 } },
+      ay: { line: { alpha: 1 } },
+      yb: { line: { alpha: 1 } },
+    };
+    h.renderer.nodeLookup["a.md"].forward = { "x.md": links.ax, "y.md": links.ay };
+    h.renderer.nodeLookup["x.md"].forward = { "b.md": links.xb };
+    h.renderer.nodeLookup["y.md"].forward = { "b.md": links.yb };
+    h.renderer.links = Object.values(links);
+
+    focusViaMenu(h, "concepts/a");
+    focusViaMenu(h, "concepts/b");
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+    const drawn = (written: number): number => written * 0.9 + 0.1;
+    for (const [name, link] of Object.entries(links)) {
+      expect(drawn(link.line.alpha), name).toBeCloseTo(1, 6);
+    }
+  });
   it("survives the pointer travelling to another node", async () => {
     const h = chain();
     h.enhancer.start();
