@@ -69,29 +69,20 @@ export class OfficialMarkerLayer {
 
     for (const point of points) {
       if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) continue;
-
-      // A soft glow rather than a hard ring.
-      //
-      // The ring had to be exactly the node's radius, and that radius turned out
-      // not to be derivable: the object in `renderer.nodeLookup` is a data
-      // record with no drawn geometry on it, so every attempt to compute the
-      // size was guesswork — and a hard edge turns a size error into something
-      // that reads as broken. A gradient does not: being a little too wide or
-      // too narrow just changes how soft it looks.
-      //
-      // Two passes, for the same reason the ring had two: the wide dark one
-      // makes the marker read against a bright node, the tighter bright one
-      // against a dark node.
-      const glow = context.createRadialGradient(point.x, point.y, 0, point.x, point.y, point.radius);
-      glow.addColorStop(0, palette.halo);
-      glow.addColorStop(0.45, palette.halo);
-      glow.addColorStop(0.5, palette.ring);
-      glow.addColorStop(0.72, palette.ring);
-      glow.addColorStop(1, "transparent");
+      // Two rings: a dark halo so the marker reads against a bright node, and a
+      // bright ring so it reads against a dark one — the same treatment the
+      // standalone view gives a focused note.
       context.beginPath();
       context.arc(point.x, point.y, point.radius, 0, Math.PI * 2);
-      context.fillStyle = glow;
-      context.fill();
+      context.lineWidth = 5;
+      context.strokeStyle = palette.halo;
+      context.stroke();
+
+      context.beginPath();
+      context.arc(point.x, point.y, point.radius, 0, Math.PI * 2);
+      context.lineWidth = 2.5;
+      context.strokeStyle = palette.ring;
+      context.stroke();
     }
   }
 }

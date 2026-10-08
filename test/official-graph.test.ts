@@ -17,7 +17,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // browser harness uses, so the view code runs unmodified.
 import "../harness/dom-polyfill";
 
-import { GLOW_MAX_PX, GLOW_MIN_PX, GLOW_SPREAD, FOCUS_EDGE_DRAWN, GRAPH_MENU_SOURCE, SAFETY_NET_MS } from "../src/integrate/official-graph";
+import { RING_GAP_PX, RING_MAX_PX, RING_MIN_PX, FOCUS_EDGE_DRAWN, GRAPH_MENU_SOURCE, SAFETY_NET_MS } from "../src/integrate/official-graph";
 import { OfficialMarkerLayer } from "../src/integrate/official-markers";
 import { t } from "../src/i18n";
 import { typeColor } from "../src/view/palette";
@@ -988,17 +988,16 @@ describe("focus on the built-in graph", () => {
       expect(points).toHaveLength(1);
       expect(points[0].x).toBeCloseTo((10 * 2 + 100) / (window.devicePixelRatio || 1), 6);
       expect(points[0].y).toBeCloseTo((20 * 2 + 50) / (window.devicePixelRatio || 1), 6);
-      // The glow is sized in screen pixels and bounded, so no zoom level can
-      // make it swallow the view or shrink to nothing. The fake node has no
-      // `getSize`, so the fallback of 6 applies and lands inside the bounds.
+      // The ring sits just outside the node's own radius. What matters is that
+      // it does NOT depend on the zoom: the two earlier attempts multiplied by
+      // `scale` or `nodeScale`, and across the zoom range `nodeScale` grows by
+      // 10.6 while `scale` shrinks by 111 — neither tracks the node's drawn
+      // size, which is not readable from `nodeLookup` at all.
       //
-      // Deliberately NOT tied to `scale`: that is what the two previous attempts
-      // did, and the node's drawn size does not follow `scale` — the display
-      // object is not reachable from `nodeLookup` to check it against, so
-      // scaling by it was guesswork either way.
-      expect(points[0].radius).toBeCloseTo(6 * GLOW_SPREAD, 6);
-      expect(points[0].radius).toBeGreaterThanOrEqual(GLOW_MIN_PX);
-      expect(points[0].radius).toBeLessThanOrEqual(GLOW_MAX_PX);
+      // The fake node has no `getSize`, so the fallback of 6 applies.
+      expect(points[0].radius).toBeCloseTo(6 + RING_GAP_PX, 6);
+      expect(points[0].radius).toBeGreaterThanOrEqual(RING_MIN_PX);
+      expect(points[0].radius).toBeLessThanOrEqual(RING_MAX_PX);
     } finally {
       draw.mockRestore();
     }

@@ -68,7 +68,7 @@ export const GRAPH_MENU_SOURCE = "graph-context-menu";
  * route reads as a route because everything else recedes, not because the route
  * itself can get any brighter.
  */
-const FOCUS_NODE_DIM = 0.03;
+const FOCUS_NODE_DIM = 0.12;
 /**
  * Alpha multiplier applied to every edge while something is focused.
  *
@@ -79,20 +79,21 @@ const FOCUS_NODE_DIM = 0.03;
  * enough to compete with the lit path; at 0.05 the lit edges are the only ones
  * with any presence, and the shape of the route is what the eye follows.
  */
-export const FOCUS_EDGE_DRAWN = 0.02;
+export const FOCUS_EDGE_DRAWN = 0.10;
 /**
- * How far the focus glow extends, in SCREEN pixels.
+ * Focus ring geometry, in SCREEN pixels.
  *
- * Screen pixels rather than graph units because that is the only frame the
- * indicator can be reasoned about: the node's drawn size is not readable, and
- * Obsidian's own `nodeScale` compensates for zoom precisely to keep nodes a
- * steady size on screen. Bounded at both ends so no zoom level can produce a
- * glow that swallows the view or one too small to notice.
+ * `getSize()` is the node's own radius and does not change with zoom, and the
+ * gap is added on top of it. What is deliberately ABSENT is `nodeScale`: it
+ * multiplies by 10.6 across the zoom range while `scale` divides by 111, and
+ * feeding it into the radius is what made the ring grow as the graph zoomed out.
+ *
+ * Bounded anyway, so a node reporting an unusual size cannot produce a ring that
+ * swallows the view or one too small to see.
  */
-export const GLOW_MIN_PX = 12;
-export const GLOW_MAX_PX = 44;
-/** Multiplier on the node's own `getSize()`, before the bounds above. */
-export const GLOW_SPREAD = 2.2;
+export const RING_GAP_PX = 3;
+export const RING_MIN_PX = 6;
+export const RING_MAX_PX = 30;
 /** Shown in the line-colour picker while the theme's own colour is in use. */
 const LINE_COLOR_FALLBACK = "#888888";
 /**
@@ -1238,19 +1239,9 @@ export class OfficialGraphEnhancer {
       points.push({
         x: (node.x * scale + panX) / dpr,
         y: (node.y * scale + panY) / dpr,
-        // Sized in SCREEN pixels, deliberately not following `scale`.
-        //
-        // Two measurements decided this. Across the zoom range `nodeScale`
-        // multiplied by 10.6 while `scale` divided by 111, so they are not
-        // mutual inverses and neither product tracks the node's drawn size — and
-        // that size cannot be read at all, because `renderer.nodeLookup` holds a
-        // data record with no drawn geometry on it. What `nodeScale` is
-        // evidently FOR is keeping nodes a roughly constant size on screen, so a
-        // constant-size indicator matches how the graph behaves.
-        //
-        // Bounded, so no zoom level can turn the glow into a disc covering the
-        // view or a speck that cannot be seen.
-        radius: Math.min(GLOW_MAX_PX, Math.max(GLOW_MIN_PX, size * GLOW_SPREAD)),
+        // `size` is the node's own radius; see `RING_GAP_PX` for why nothing
+        // else is multiplied in.
+        radius: Math.min(RING_MAX_PX, Math.max(RING_MIN_PX, size + RING_GAP_PX)),
       });
     }
     attachment.markers.draw(points, this.markerPalette());
