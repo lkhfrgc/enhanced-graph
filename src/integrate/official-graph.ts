@@ -255,6 +255,8 @@ export class OfficialGraphEnhancer {
    */
   private readonly focusIds = new Map<OfficialRenderer, Set<string>>();
   private focusTicker: number | null = null;
+  /** Re-applies the focus the moment the window becomes visible again. */
+  private visibilityHandler: (() => void) | null = null;
   /**
    * Edges of the focused route, as `edgeKey` strings rather than link graphics.
    *
@@ -281,11 +283,31 @@ export class OfficialGraphEnhancer {
     this.sync();
     if (typeof window !== "undefined") {
       this.safetyTimer = window.setInterval(() => this.tick(), SAFETY_NET_MS);
+      // Browsers do not run requestAnimationFrame while the window is hidden, and
+      // the focus ticker is built on it. Any repaint during that time resets the
+      // link alphas to the renderer's own values, so the highlight came back
+      // missing its edges while the nodes — dimmed once, not per frame — stayed
+      // bright. Measured: stopping the ticker and forcing one repaint moved the
+      // lit count from 38 to 542, i.e. the edges lost their highlight entirely.
+      //
+      // Re-applying on the way back in closes that window without waiting for a
+      // frame that may not come.
+      this.visibilityHandler = () => {
+        if (typeof document !== "undefined" && document.hidden) return;
+        this.reapplyFocus();
+      };
+      document.addEventListener("visibilitychange", this.visibilityHandler);
+      window.addEventListener("focus", this.visibilityHandler);
     }
   }
 
   stop(): void {
     this.started = false;
+    if (this.visibilityHandler) {
+      if (typeof document !== "undefined") document.removeEventListener("visibilitychange", this.visibilityHandler);
+      if (typeof window !== "undefined") window.removeEventListener("focus", this.visibilityHandler);
+      this.visibilityHandler = null;
+    }
     if (this.safetyTimer !== null) {
       window.clearInterval(this.safetyTimer);
       this.safetyTimer = null;
@@ -1224,6 +1246,28 @@ export class OfficialGraphEnhancer {
    * is active: hovering would otherwise re-dim everything through `ZU` and undo
    * the focus set we just painted.
    */
+  /**
+   * Re-apply the focus highlight immediately.
+   *
+   * Called when the window becomes visible again. The ticker alone is not enough
+   * because it runs on requestAnimationFrame, which does not fire while hidden —
+   * and a repaint in that time drops the edge highlight while the node dimming
+   * survives.
+   */
+  private reapplyFocus(): void {
+    if (this.focusIds.size === 0) return;
+    for (const [renderer, ids] of this.focusIds) {
+      if (ids.size === 0) continue;
+      try {
+        this.forceLitEdges(renderer);
+        this.drawMarkers(renderer);
+      } catch {
+        /* the renderer is gone; the next sync drops it */
+      }
+    }
+    this.startFocusTicker();
+  }
+
   private startFocusTicker(): void {
     if (this.focusTicker !== null) return;
     if (typeof window === "undefined") return;

@@ -162,6 +162,28 @@ console.log(JSON.stringify(await state("after blur + visibilitychange")));
 const blurredShot = await page.screenshot();
 fs.writeFileSync(path.join(os.tmpdir(), "ticker-blurred.png"), blurredShot);
 
+console.log("");
+console.log("--- 4. window becomes visible again (the fix) ---");
+await page.evaluate(() => {
+  document.dispatchEvent(new Event("visibilitychange"));
+  window.dispatchEvent(new Event("focus"));
+});
+await page.waitForTimeout(1500);
+const restored = await state("after visibilitychange + focus");
+console.log(JSON.stringify(restored));
+const restoredShot = await page.screenshot();
+fs.writeFileSync(path.join(os.tmpdir(), "ticker-restored.png"), restoredShot);
+console.log("");
+console.log("VERDICT");
+console.log("  ticker running:  38 lit / 504 dim   (the highlight)");
+console.log("  ticker stopped:  " + "542 lit / 0 dim   (the highlight lost)");
+console.log("  after restore:   " + restored.litCount + " lit / " + restored.dimCount + " dim");
+console.log(
+  restored.litCount === 38 && restored.dimCount === 504
+    ? "  -> the fix restores it"
+    : "  -> STILL WRONG: expected 38 lit / 504 dim",
+);
+
 const out = path.join(os.tmpdir());
 console.log("");
 console.log("three screenshots written to " + out + ":");
