@@ -220,6 +220,14 @@ interface Attachment {
   lastData: unknown;
   /** Theme edge colours, stashed before overriding so they can be restored. */
   originalEdgeColor: { line?: OfficialColor; lineHighlight?: OfficialColor };
+  /**
+   * Which theme \`originalEdgeColor\` was captured under.
+   *
+   * The stash holds the theme's own line colour, so it stops being a valid
+   * "original" the moment the theme changes. Without this the restore path kept
+   * putting the other theme's colour back.
+   */
+  originalEdgeTheme?: boolean;
 }
 
 export class OfficialGraphEnhancer {
@@ -526,8 +534,13 @@ export class OfficialGraphEnhancer {
     const { renderer } = attachment;
     // Nothing to do when neither the mode, the focus, nor the graph has moved.
     const focus = this.focusSet(renderer);
+    // The THEME belongs here. It was missing at first, so switching from dark to
+    // light left the signature unchanged, the pass was skipped, and the graph kept
+    // the line colour that had been right for the other theme — reported as "the
+    // lines are too dark in light mode".
     const signature = [
       mode,
+      this.isDarkTheme() ? "dark" : "light",
       this.deps.getLineColor() ?? "",
       focus ? [...focus].sort().join(",") : "",
       this.deps.getData().graph.nodes.length,
@@ -1073,9 +1086,15 @@ export class OfficialGraphEnhancer {
     for (const key of ["line", "lineHighlight"] as const) {
       const color = colors[key];
       if (!color) continue;
+      // The original is whatever the theme had, so it stops being valid when the
+      // theme changes: restoring from a stash taken under the other theme left the
+      // lines the wrong colour permanently.
+      const dark = this.isDarkTheme();
       const stashed = attachment.originalEdgeColor[key];
-      const original = stashed ?? { a: color.a, rgb: color.rgb };
-      if (!stashed) attachment.originalEdgeColor[key] = original;
+      const original =
+        stashed && attachment.originalEdgeTheme === dark ? stashed : { a: color.a, rgb: color.rgb };
+      attachment.originalEdgeColor[key] = original;
+      attachment.originalEdgeTheme = dark;
       color.a = original.a;
       color.rgb = chosen ? hexToRgbInt(chosen) : original.rgb;
     }
