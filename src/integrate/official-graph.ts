@@ -220,14 +220,6 @@ interface Attachment {
   lastData: unknown;
   /** Theme edge colours, stashed before overriding so they can be restored. */
   originalEdgeColor: { line?: OfficialColor; lineHighlight?: OfficialColor };
-  /**
-   * Which theme \`originalEdgeColor\` was captured under.
-   *
-   * The stash holds the theme's own line colour, so it stops being a valid
-   * "original" the moment the theme changes. Without this the restore path kept
-   * putting the other theme's colour back.
-   */
-  originalEdgeTheme?: boolean;
 }
 
 export class OfficialGraphEnhancer {
@@ -263,15 +255,6 @@ export class OfficialGraphEnhancer {
    */
   private readonly focusIds = new Map<OfficialRenderer, Set<string>>();
   private focusTicker: number | null = null;
-  /**
-   * What the last colour pass was computed from, per renderer.
-   *
-   * The safety net runs every \`SAFETY_NET_MS\` and used to recolour the graph
-   * unconditionally, so edges were rewritten once a second even with nothing
-   * focused and nothing changed — visible as the lines being repainted for no
-   * reason. The pass is now skipped unless one of these actually differs.
-   */
-  private readonly colorSignature = new WeakMap<OfficialRenderer, string>();
   /** Re-applies the focus the moment the window becomes visible again. */
   private visibilityHandler: (() => void) | null = null;
   /**
@@ -532,21 +515,6 @@ export class OfficialGraphEnhancer {
   private applyColors(attachment: Attachment): void {
     const mode = this.deps.getMode();
     const { renderer } = attachment;
-    // Nothing to do when neither the mode, the focus, nor the graph has moved.
-    const focus = this.focusSet(renderer);
-    // The THEME belongs here. It was missing at first, so switching from dark to
-    // light left the signature unchanged, the pass was skipped, and the graph kept
-    // the line colour that had been right for the other theme — reported as "the
-    // lines are too dark in light mode".
-    const signature = [
-      mode,
-      this.isDarkTheme() ? "dark" : "light",
-      this.deps.getLineColor() ?? "",
-      focus ? [...focus].sort().join(",") : "",
-      this.deps.getData().graph.nodes.length,
-    ].join("|");
-    if (this.colorSignature.get(renderer) === signature) return;
-    this.colorSignature.set(renderer, signature);
     try {
       // The line colour is independent of the node-colouring mode, so it is
       // applied (or restored) before that mode is considered.
@@ -566,6 +534,7 @@ export class OfficialGraphEnhancer {
       const { graph } = this.deps.getData();
       if (graph.nodes.length === 0) return;
       const resolve = this.resolverFor(graph);
+      const focus = this.focusSet(renderer);
 
       for (const node of nodesWithRestore(renderer)) {
         // Tags, unresolved links and attachments are virtual nodes with no
@@ -1086,15 +1055,9 @@ export class OfficialGraphEnhancer {
     for (const key of ["line", "lineHighlight"] as const) {
       const color = colors[key];
       if (!color) continue;
-      // The original is whatever the theme had, so it stops being valid when the
-      // theme changes: restoring from a stash taken under the other theme left the
-      // lines the wrong colour permanently.
-      const dark = this.isDarkTheme();
       const stashed = attachment.originalEdgeColor[key];
-      const original =
-        stashed && attachment.originalEdgeTheme === dark ? stashed : { a: color.a, rgb: color.rgb };
-      attachment.originalEdgeColor[key] = original;
-      attachment.originalEdgeTheme = dark;
+      const original = stashed ?? { a: color.a, rgb: color.rgb };
+      if (!stashed) attachment.originalEdgeColor[key] = original;
       color.a = original.a;
       color.rgb = chosen ? hexToRgbInt(chosen) : original.rgb;
     }
