@@ -48,6 +48,23 @@ npm run audit:submission  the plugin submission requirements
 so its last two checks fail between a version bump and the release. That is
 expected, not a regression.
 
+## The vault copy must be rebuilt, not assumed
+
+`npm run build` writes to the **repository root**, because that is what the
+plugin directory's build verification scans for. The copy Obsidian actually loads
+lives in the vault, outside the repository, and is only written by
+`npm run build:vault`.
+
+That split caused a real problem: for three released versions every check passed
+against the fresh repository copy while the vault held a build from before the
+change, so reported behaviour came from code that had already been replaced. The
+person testing was not wrong; the artifact they were testing was stale.
+
+`npm run verify` now ends with `build:vault`, and `verify:obsidian` starts
+with it, so both copies are current after either. Keep it that way — if a change
+to the build ever leaves only one copy fresh, the checks will keep passing while
+the thing under test is old.
+
 ## How claims are made here
 
 - **Measure, do not assert.** "475 tests pass" is a claim; the command output is
