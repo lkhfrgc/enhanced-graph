@@ -1,4 +1,4 @@
-import { App, Plugin, PluginSettingTab, Setting } from "obsidian";
+import { App, getLanguage, Plugin, PluginSettingTab, Setting } from "obsidian";
 import type { SettingsHost } from "./plugin-host";
 import type { OfficialGraphMode } from "./types";
 import { t } from "./i18n";
@@ -16,7 +16,9 @@ export class EnhancedGraphSettingTab extends PluginSettingTab {
   display(): void {
     const { containerEl } = this;
     containerEl.empty();
-    containerEl.createEl("h2", { text: t("settings.heading") });
+    // Not `createEl("h2")`: Obsidian asks for headings to go through `Setting`
+    // so they pick up the same classes and spacing as every other setting row.
+    new Setting(containerEl).setName(t("settings.heading")).setHeading();
 
     this.renderGraph(containerEl);
     this.renderAdvanced(containerEl);
@@ -38,7 +40,7 @@ export class EnhancedGraphSettingTab extends PluginSettingTab {
           .onChange(async (value) => {
             this.plugin.settings.language = value as EnhancedGraphSettings["language"];
             await this.plugin.saveSettings();
-            applyLanguage(this.plugin.settings, window.localStorage.getItem("language") ?? undefined);
+            applyLanguage(this.plugin.settings, getLanguage());
             this.plugin.refreshViews();
             this.display();
           }),

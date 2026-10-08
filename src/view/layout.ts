@@ -86,8 +86,13 @@ export async function runLayoutAsync(graph: Graph, options: LayoutOptions): Prom
 
 function yieldToEventLoop(): Promise<void> {
   return new Promise((resolve) => {
-    if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => resolve());
-    else setTimeout(resolve, 0);
+    // `window.` prefixed: a bare call resolves against the main window, so a
+    // graph in a popout would never get its frame.
+    if (typeof window.requestAnimationFrame === "function") {
+      window.requestAnimationFrame(() => resolve());
+    } else {
+      window.setTimeout(resolve, 0);
+    }
   });
 }
 

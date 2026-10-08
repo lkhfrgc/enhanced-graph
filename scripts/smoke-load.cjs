@@ -13,16 +13,10 @@ const Module = require("node:module");
 const path = require("node:path");
 const fs = require("node:fs");
 
-const bundlePath = path.resolve(
-  __dirname,
-  "..",
-  "..",
-  "插件开发",
-  ".obsidian",
-  "plugins",
-  "enhanced-graph",
-  "main.js",
-);
+// The repo root, which is where `npm run build` writes by default. It used to
+// read the vault copy, which tied this check to one developer's directory layout
+// and to a build step that wrote outside the checkout.
+const bundlePath = path.resolve(__dirname, "..", "main.js");
 
 if (!fs.existsSync(bundlePath)) {
   console.error(`bundle not found: ${bundlePath}\nrun \`npm run build\` first`);
@@ -188,6 +182,9 @@ const obsidianStub = {
   WorkspaceLeaf,
   normalizePath: (p) => String(p).replace(/\\/g, "/").replace(/^\/+/, "").replace(/\/{2,}/g, "/"),
   setIcon: () => {},
+  // The plugin reads the interface language through Obsidian's own getter rather
+  // than `localStorage`, so the stub has to provide it.
+  getLanguage: () => "en",
   debounce: (fn) => fn,
   requestUrl: async () => ({ status: 200, text: "{}" }),
   MarkdownView: class {},
@@ -201,6 +198,9 @@ Module.prototype.require = function patched(id) {
 
 const app = {
   vault: {
+    // The graph builder skips the configuration folder, and its name is read
+    // from the vault rather than assumed.
+    configDir: ".obsidian",
     on: () => ({}),
     getMarkdownFiles: () => [],
     getAbstractFileByPath: () => null,
@@ -239,12 +239,24 @@ async function main() {
 
   let moduleExports;
   try {
-    moduleExports = require(bundlePath);
+    // Compiled as CommonJS explicitly rather than through `require()`.
+    //
+    // The bundle now lives in the repository root, and `package.json` declares
+    // `"type": "module"`, so Node would treat a `main.js` there as ESM and refuse
+    // the `module.exports` at the end of it. The bundle IS CommonJS — esbuild is
+    // configured that way, and Obsidian loads it from a plugin folder that has no
+    // `package.json` at all. `_compile` runs the source as CJS whatever the
+    // surrounding package says, which is what Obsidian effectively does.
+    const bundleModule = new Module(bundlePath, null);
+    bundleModule.filename = bundlePath;
+    bundleModule.paths = Module._nodeModulePaths(path.dirname(bundlePath));
+    bundleModule._compile(source, bundlePath);
+    moduleExports = bundleModule.exports;
   } catch (error) {
     check("bundle can be required", false, error.message);
     return finish();
   }
-  check("bundle can be required", true, "");
+  check("bundle can be required", true, "as CommonJS, independent of package.json type");
 
   const PluginClass = moduleExports.default ?? moduleExports;
   check("default export is a plugin class", typeof PluginClass === "function", typeof PluginClass);

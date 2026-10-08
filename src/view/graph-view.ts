@@ -34,7 +34,6 @@ import { renderWeights } from "./graph-weights";
 
 import { analyzeGraph, type GraphInsights } from "../core/insights";
 import { edgeKey } from "../core/graph-keys";
-import { findConnectingPaths, type ConnectingPaths } from "../core/paths";
 import {
   NO_FOCUS,
   applyFocus,
@@ -461,11 +460,8 @@ export class EnhancedGraphView extends ItemView {
     this.lastLayoutKey = dataKey;
     this.persistPositions(sigmaGraph);
     this.renderer?.refresh();
-    console.info(
-      `[enhanced-graph] adopted the ${external.source} layout: ` +
-        `${result.placed} placed, ${result.extrapolated} interpolated ` +
-        `(${(external.coverage * 100).toFixed(0)}% coverage)`,
-    );
+    // No console line: the status bar already names the layout source and the
+    // coverage, which is where a user would look for it.
     return true;
   }
 

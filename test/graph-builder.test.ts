@@ -80,6 +80,7 @@ function vaultWithBrokenRead(
   const memory = new MemoryVault(files);
   const brokenSet = new Set(broken);
   return {
+    configDir: () => ".obsidian",
     listMarkdownFiles: () => memory.listMarkdownFiles(),
     read: async (path: string) => {
       if (brokenSet.has(path)) throw new Error(`EIO: ${path}`);
@@ -507,6 +508,7 @@ describe("discovery and loading", () => {
 
   it("falls back to EMPTY_GRAPH when the vault cannot even be listed", async () => {
     const unlistable: VaultAdapter = {
+      configDir: () => ".obsidian",
       listMarkdownFiles: async () => {
         throw new Error("EACCES");
       },

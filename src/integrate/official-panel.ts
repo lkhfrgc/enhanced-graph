@@ -19,9 +19,8 @@ import { setIcon } from "obsidian";
 import type { GraphInsights } from "../core/insights";
 import type { OfficialGraphMode, WikiGraph } from "../types";
 import { t } from "../i18n";
-import { communityColor } from "../view/palette";
 import { colourRow } from "../view/controls";
-import { countUndismissed, renderInsightsPanel } from "../view/insights-panel";
+import { renderInsightsPanel } from "../view/insights-panel";
 
 /** Hop budgets offered for a focused pair; mirrors the standalone view's list. */
 const FOCUS_INTERMEDIATE_CHOICES = [0, 1, 2, 3] as const;

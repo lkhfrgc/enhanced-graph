@@ -7,7 +7,7 @@
  * The behaviour lives in `core/`, `view/`, `integrate/` and `reports.ts`.
  */
 
-import { Notice, Plugin, TFile, WorkspaceLeaf } from "obsidian";
+import { getLanguage, Notice, Plugin, TFile, WorkspaceLeaf } from "obsidian";
 import { EnhancedGraphSettingTab } from "./settings";
 import { DEFAULT_SETTINGS, applyLanguage, mergeSettings, type EnhancedGraphSettings } from "./settings-model";
 import { t } from "./i18n";
@@ -22,7 +22,6 @@ import {
 import { buildWikiGraph } from "./core/graph-builder";
 import { analyzeGraph, type GraphInsights } from "./core/insights";
 import type { VaultAdapter } from "./core/vault";
-import { createRelevanceContext, rankRelated } from "./core/relevance";
 import { GRAPH_MENU_SOURCE, OfficialGraphEnhancer, probeOfficialGraph } from "./integrate/official-graph";
 import { captureOfficialLayout } from "./integrate/official-layout";
 import { hasOfficialGraphView } from "./integrate/official-internals";
@@ -69,7 +68,7 @@ export default class EnhancedGraphPlugin extends Plugin implements PluginHost, S
 
   async onload(): Promise<void> {
     await this.loadSettings();
-    applyLanguage(this.settings, window.localStorage.getItem("language") ?? undefined);
+    applyLanguage(this.settings, getLanguage());
     this.vaultAdapter = new ObsidianVaultAdapter(this.app);
 
     this.registerView(VIEW_TYPE_ENHANCED_GRAPH, (leaf) => {
@@ -153,12 +152,22 @@ export default class EnhancedGraphPlugin extends Plugin implements PluginHost, S
     this.setupOfficialGraph();
   }
 
-  async onunload(): Promise<void> {
+  /**
+   * Not `async`: `Plugin.onunload` is typed as returning `void`, and an async
+   * implementation returns a promise the app never awaits.
+   *
+   * The leaves are deliberately NOT detached here. Detaching them on unload
+   * resets the view to its default location, so a user who moved the graph to a
+   * different pane finds it back where it started the next time the plugin
+   * loads. Obsidian tears the leaf down itself when the view type is
+   * unregistered; the enhancer still has to let go of the built-in graph, which
+   * is what `stop()` does.
+   */
+  onunload(): void {
     if (this.rebuildTimer !== null) window.clearTimeout(this.rebuildTimer);
     // Detach before the leaves disappear so the built-in graph is restored.
     this.officialGraph?.stop();
     this.officialGraph = null;
-    this.app.workspace.detachLeavesOfType(VIEW_TYPE_ENHANCED_GRAPH);
     this.views.clear();
   }
 

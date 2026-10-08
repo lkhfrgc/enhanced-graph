@@ -5,6 +5,14 @@
  * tests and in the browser harness against an in-memory vault.
  */
 export interface VaultAdapter {
+  /**
+   * Name of the vault's configuration folder.
+   *
+   * Obsidian lets the user rename it, so it cannot be assumed to be
+   * `.obsidian`; the engine uses this to skip the folder rather than parsing
+   * the app's own files as notes.
+   */
+  configDir(): string;
   /** Vault-relative paths of every markdown file, using `/` separators. */
   listMarkdownFiles(): Promise<string[]>;
   /** Raw file content. Rejects when the file does not exist. */
@@ -17,6 +25,10 @@ export interface VaultAdapter {
 /** In-memory adapter used by tests and the browser harness. */
 export class MemoryVault implements VaultAdapter {
   private readonly files = new Map<string, string>();
+
+  configDir(): string {
+    return ".obsidian";
+  }
 
   constructor(initial: Record<string, string> = {}) {
     for (const [path, content] of Object.entries(initial)) {

@@ -195,7 +195,7 @@
 }
 
 .enhanced-graph-canvas-wrap .sigma-container {
-  background: transparent !important;
+  background: transparent;
 }
 
 /* --------------------------------------------------------------------------
@@ -793,6 +793,11 @@
   box-shadow: 0 0 0 1px var(--background-modifier-border);
 }
 
+/* Set by the renderer while the pointer is over a node. */
+.enhanced-graph-canvas.is-hovering-node {
+  cursor: pointer;
+}
+
 .enhanced-graph-swatch:hover {
   box-shadow: 0 0 0 2px var(--text-muted);
 }
@@ -808,14 +813,16 @@
   background: repeating-conic-gradient(
     var(--text-faint) 0% 25%,
     var(--background-primary) 0% 50%
-  ) 50% / 8px 8px !important;
+  ) 50% / 8px 8px;
 }
 
 /* --------------------------------------------------------------------------
    Tooltip
    -------------------------------------------------------------------------- */
 
+/* Hidden until the renderer adds `.is-visible`. */
 .enhanced-graph-tooltip {
+  display: none;
   position: absolute;
   z-index: 20;
   max-width: 280px;

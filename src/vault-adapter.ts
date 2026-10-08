@@ -14,6 +14,11 @@ import type { VaultAdapter } from "./core/vault";
 export class ObsidianVaultAdapter implements VaultAdapter {
   constructor(private readonly app: App) {}
 
+  /** `Vault#configDir`, because the folder is user-configurable. */
+  configDir(): string {
+    return this.app.vault.configDir;
+  }
+
   async listMarkdownFiles(): Promise<string[]> {
     return this.app.vault.getMarkdownFiles().map((file) => file.path);
   }

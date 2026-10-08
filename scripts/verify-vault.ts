@@ -20,6 +20,9 @@ const vaultRoot = path.resolve(process.argv[2] ?? path.join(process.cwd(), "..",
 const outFile = path.resolve(process.cwd(), "harness", "graph.json");
 
 class NodeVault implements VaultAdapter {
+  configDir(): string {
+    return ".obsidian";
+  }
   async listMarkdownFiles(): Promise<string[]> {
     const out: string[] = [];
     const walk = (dir: string) => {

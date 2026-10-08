@@ -1336,7 +1336,6 @@ export class OfficialGraphEnhancer {
       const resolve = this.resolverFor(graph);
       const visible = new Set(filterNodes(graph.nodes, filters).map((node) => node.id));
       const kept: Record<string, unknown> = {};
-      let matched = 0;
       for (const officialId of Object.keys(nodes)) {
         const ours = resolve(officialId);
         if (ours && !visible.has(ours.id)) continue;
@@ -1344,7 +1343,6 @@ export class OfficialGraphEnhancer {
           // Virtual nodes (tags, unresolved links) have no label of ours, so a
           // search hides them rather than leaving unsearchable clutter behind.
           if (!ours.label.toLowerCase().includes(query)) continue;
-          matched += 1;
         }
         kept[officialId] = nodes[officialId];
       }

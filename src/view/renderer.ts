@@ -200,7 +200,7 @@ export class GraphRenderer {
 
     if (this.container.clientWidth === 0 || this.container.clientHeight === 0) {
       // Sigma throws on a zero-sized container; wait for layout instead.
-      requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
         if (this.container.clientWidth > 0 && this.container.clientHeight > 0) this.mount(graph, options);
       });
       return;
@@ -669,7 +669,7 @@ export class GraphRenderer {
     const wasDrag = (): boolean => this.pressTravel > CLICK_SLOP_PX;
 
     sigma.on("enterNode", ({ node }) => {
-      this.container.style.cursor = "pointer";
+      this.container.addClass("is-hovering-node");
       this.hoveredNode = node;
       // Resolved lazily: the view can swap the graph without rebinding events.
       const current = this.sigma?.getGraph();
@@ -679,7 +679,7 @@ export class GraphRenderer {
     });
 
     sigma.on("leaveNode", () => {
-      this.container.style.cursor = "default";
+      this.container.removeClass("is-hovering-node");
       if (this.hoveredNode === null) return;
       this.hoveredNode = null;
       this.hoverNeighbors = new Set();
@@ -728,11 +728,9 @@ export class GraphRenderer {
   // -------------------------------------------------------------------------
 
   private buildTooltip(): void {
-    const tooltip = document.createElement("div");
-    tooltip.addClass("enhanced-graph-tooltip");
-    tooltip.style.display = "none";
-    this.container.appendChild(tooltip);
-    this.tooltip = tooltip;
+    // Visibility is a state class rather than an inline style, so the rule for
+    // it lives in styles.css alongside the tooltip's other appearance rules.
+    this.tooltip = this.container.createDiv({ cls: "enhanced-graph-tooltip" });
   }
 
   private showNodeTooltip(nodeId: string): void {
@@ -815,21 +813,21 @@ export class GraphRenderer {
   private showTooltip(): void {
     if (!this.tooltip) return;
     this.tooltipVisible = true;
-    this.tooltip.style.display = "block";
+    this.tooltip.addClass("is-visible");
     this.positionTooltip();
   }
 
   private hideTooltip(): void {
     if (!this.tooltip) return;
     this.tooltipVisible = false;
-    this.tooltip.style.display = "none";
+    this.tooltip.removeClass("is-visible");
   }
 
   private moveTooltip(clientX: number, clientY: number): void {
     this.pointer = { x: clientX, y: clientY };
     if (!this.tooltipVisible) return;
     if (this.pendingFrame) return;
-    this.pendingFrame = requestAnimationFrame(() => {
+    this.pendingFrame = window.requestAnimationFrame(() => {
       this.pendingFrame = 0;
       this.positionTooltip();
     });

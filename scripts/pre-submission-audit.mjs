@@ -58,6 +58,20 @@ check(
 );
 
 // --- repo layout ---------------------------------------------------------------------
+// The directory states this outright: "An English description of the plugin is
+// required, even if translations are also provided." Measured as the share of
+// ASCII in the file rather than by looking for a magic phrase.
+{
+  const readme = fs.readFileSync("README.md", "utf8");
+  const ascii = (readme.match(/[\x20-\x7E]/g) ?? []).length;
+  const share = ascii / readme.length;
+  check(
+    "README contains English text",
+    share > 0.9 && readme.length > 1000,
+    `${(share * 100).toFixed(1)}% ASCII, ${readme.length} bytes`,
+  );
+}
+
 check("LICENSE exists at the repo root", fs.existsSync("LICENSE"), fs.existsSync("LICENSE") ? `${fs.statSync("LICENSE").size} bytes` : "missing");
 check("README.md exists at the repo root", fs.existsSync("README.md"), fs.existsSync("README.md") ? `${fs.statSync("README.md").size} bytes` : "missing");
 check("versions.json has an entry for this version", Boolean(versions[manifest.version]), JSON.stringify(versions));

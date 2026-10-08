@@ -65,8 +65,8 @@ export interface LinkIndex {
 const DEFAULT_CONCURRENCY = 16;
 const DEFAULT_MAX_FILE_BYTES = 2_000_000;
 
-/** Obsidian's own bookkeeping folders never contain knowledge pages. */
-const IGNORED_FOLDER_PREFIXES: readonly string[] = [".obsidian/", ".trash/", ".git/"];
+/** Bookkeeping folders that never contain knowledge pages. */
+const IGNORED_FOLDER_PREFIXES: readonly string[] = [".trash/", ".git/"];
 
 /**
  * Research artefacts ("saved chat answers") are intermediate products: the
@@ -153,7 +153,16 @@ async function mapWithConcurrency<T, R>(
 // Discovery + loading
 // ---------------------------------------------------------------------------
 
-function isExcludedPath(path: string, excludeFolders: readonly string[]): boolean {
+function isExcludedPath(
+  path: string,
+  excludeFolders: readonly string[],
+  configDir: string,
+): boolean {
+  // The configuration folder name comes from the vault, not from a literal:
+  // Obsidian lets the user rename it, and parsing it as notes would pull the
+  // app's own files into the graph.
+  const configPrefix = configDir.endsWith("/") ? configDir : `${configDir}/`;
+  if (path.startsWith(configPrefix)) return true;
   if (IGNORED_FOLDER_PREFIXES.some((prefix) => path.startsWith(prefix))) return true;
   return excludeFolders.some((prefix) => path.startsWith(prefix));
 }
@@ -170,11 +179,12 @@ async function discoverMarkdownFiles(
     return [];
   }
 
+  const configDir = vault.configDir();
   const unique = new Set<string>();
   for (const raw of listed) {
     const path = normalizeVaultPath(raw);
     if (!/\.md$/i.test(path)) continue;
-    if (isExcludedPath(path, excludeFolders)) continue;
+    if (isExcludedPath(path, excludeFolders, configDir)) continue;
     unique.add(path);
   }
   // Sorted, so link-index collisions ("first writer wins") and the resulting

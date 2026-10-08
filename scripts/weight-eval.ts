@@ -43,6 +43,9 @@ const NEGATIVE_SAMPLES = 20000;
 const SEED = 20261007;
 
 class NodeVault implements VaultAdapter {
+  configDir(): string {
+    return ".obsidian";
+  }
   async listMarkdownFiles(): Promise<string[]> {
     const out: string[] = [];
     const walk = (dir: string) => {

@@ -325,6 +325,18 @@ export function setIcon(el: HTMLElement, icon: string): void {
   el.innerHTML = `<svg data-icon="${icon}" viewBox="0 0 24 24"></svg>`;
 }
 
+/**
+ * Obsidian's own language getter.
+ *
+ * The plugin used to read `localStorage.getItem("language")` directly, which the
+ * directory flagged: the key is an implementation detail and the value is not
+ * guaranteed to be there. This stands in for the real one in tests and in the
+ * harness, where `document.documentElement.lang` is the closest equivalent.
+ */
+export function getLanguage(): string {
+  return document.documentElement.lang || "en";
+}
+
 export function normalizePath(path: string): string {
   return path.replace(/\\/g, "/").replace(/^\/+/, "").replace(/\/{2,}/g, "/");
 }

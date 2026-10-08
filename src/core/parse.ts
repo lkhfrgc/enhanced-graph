@@ -161,7 +161,8 @@ function toStringArray(value: unknown): string[] {
 // Wikilinks
 // ---------------------------------------------------------------------------
 
-const WIKILINK_RE = /\[\[([^\[\]]+?)\]\]/g;
+// Inside a character class, `[` needs no escape.
+const WIKILINK_RE = /\[\[([^[\]]+?)\]\]/g;
 
 /** Remove fenced and inline code so links inside code are not counted. */
 export function stripCode(content: string): string {
