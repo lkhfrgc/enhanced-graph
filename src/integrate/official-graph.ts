@@ -223,14 +223,6 @@ interface Attachment {
    */
   lastFocusCount: number;
   /**
-   * The cluster the legend is currently holding lit, if any.
-   *
-   * Clicking a row lights that cluster; clicking the same row again has to let go,
-   * which needs the previous choice remembered somewhere. It also feeds the row's
-   * active state, so the control shows what the next click will do.
-   */
-  activeCommunity: number | null;
-  /**
    * The payload of the last `setData` call. Kept so that changing a filter can
    * re-apply it: the built-in engine has no idea our filter changed and would
    * otherwise not push new data until the vault does.
@@ -460,15 +452,14 @@ export class OfficialGraphEnhancer {
         setDataWasOwn: false,
         panel: new OfficialSidePanel(overlay, this.panelOptions(renderer)),
         tooltip: new OfficialHoverTooltip(containerEl, this.hoverOptions()),
-        legend: new OfficialLegend(containerEl, () => this.legendOptions(renderer)),
+        legend: new OfficialLegend(containerEl, () => this.legendOptions()),
         markers: new OfficialMarkerLayer(containerEl),
         toolbar: new OfficialToolbar(overlay, this.toolbarOptions(renderer)),
         syncTimer: null,
         lastData: null,
         /** The insights the panel currently shows; see `tick()`. */
         lastInsights: null,
-        lastFocusCount: 0,
-        activeCommunity: null,
+      lastFocusCount: 0,
         originalEdgeColor: {},
       };
 
@@ -650,7 +641,7 @@ export class OfficialGraphEnhancer {
    * Hidden while colouring is off: there is nothing to explain then, and an empty
    * box in the corner is worse than none.
    */
-  private legendOptions(renderer?: OfficialRenderer): ConstructorParameters<typeof OfficialLegend>[1] extends () => infer R
+  private legendOptions(): ConstructorParameters<typeof OfficialLegend>[1] extends () => infer R
     ? R
     : never {
     const { graph } = this.deps.getData();
@@ -670,16 +661,9 @@ export class OfficialGraphEnhancer {
         void this.deps.onSetVisibility({ hiddenTypes: [...next] });
       },
       onShowAllTypes: () => void this.deps.onSetVisibility({ hiddenTypes: [] }),
-      // Which cluster is held lit, so its row can say so — the row's own state is
-      // how the toggle is discoverable at all.
-      activeCommunityId: renderer ? (this.attachmentFor(renderer)?.activeCommunity ?? null) : null,
-      onFocusNodes: (nodeIds, communityId) => {
-        // `focusNodeInGraph`, not the removed `focusNodes`: the latter only assigned
-        // `renderer.highlightNode`, the renderer's own hover highlight, so a clicked
-        // cluster lit for a moment and let go. This writes `focusIds`, which the
-        // ticker keeps re-applying.
+      onFocusNodes: (nodeIds) => {
         for (const attachment of this.attachments.values()) {
-          this.toggleCommunity(attachment, nodeIds, communityId);
+          this.focusNodes(attachment.renderer, nodeIds);
           return;
         }
       },
@@ -1559,14 +1543,9 @@ export class OfficialGraphEnhancer {
       mode: () => this.deps.getMode(),
       // An empty id list is the panel's "unfocus" gesture: clear the highlight
       // without running the node lookup `focusNodes` would do.
-      onFocusNodes: (nodeIds, communityId) => {
-        const attachment = this.attachmentFor(renderer);
-        if (!attachment) {
-          if (nodeIds.length === 0) this.clearFocus(renderer);
-          else for (const id of nodeIds) this.focusNodeInGraph(id, undefined);
-          return;
-        }
-        this.toggleCommunity(attachment, nodeIds, communityId);
+      onFocusNodes: (nodeIds) => {
+        if (nodeIds.length === 0) this.clearFocus(renderer);
+        else this.focusNodes(renderer, nodeIds);
       },
       focusCount: () => {
         const ids = this.focusIds.get(renderer);
@@ -1602,41 +1581,27 @@ export class OfficialGraphEnhancer {
   // Focus
   // -------------------------------------------------------------------------
 
-  /**
-   * Light a cluster, or let it go if it is the one already lit.
-   *
-   * A second click on the same row has to undo the first, which is why the choice
-   * is remembered rather than inferred from the focus set — the set cannot say
-   * whether it got there by this click or by something else.
-   */
-  private toggleCommunity(
-    attachment: Attachment,
-    nodeIds: readonly string[],
-    communityId: number | undefined,
-  ): void {
-    const renderer = attachment.renderer;
-    if (communityId !== undefined && attachment.activeCommunity === communityId) {
-      attachment.activeCommunity = null;
-      this.clearFocusRenderer(renderer);
-      attachment.legend.render();
-      return;
+  /** Use the official renderer's own focus highlight, which dims non-neighbours. */
+  private focusNodes(renderer: OfficialRenderer, nodeIds: readonly string[]): void {
+    const { graph } = this.deps.getData();
+    const resolve = this.resolverFor(graph);
+    const officialIds = Object.keys(renderer.nodeLookup ?? {});
+    let target: OfficialNode | null = null;
+    for (const id of nodeIds) {
+      const graphNode = graph.nodeIndex.get(id);
+      if (!graphNode) continue;
+      const officialId = officialIds.find((candidate) => resolve(candidate)?.id === graphNode.id);
+      if (officialId) {
+        target = renderer.nodeLookup?.[officialId] ?? null;
+        break;
+      }
     }
-    if (communityId === undefined) {
-      // A caller that does not name a cluster (the type rows) just focuses.
-      for (const id of nodeIds) this.focusNodeInGraph(id, undefined);
-      return;
+    try {
+      renderer.highlightNode = target;
+      renderer.changed?.();
+    } catch (error) {
+      console.error("[enhanced-graph] focusing a built-in graph node failed:", error);
     }
-    attachment.activeCommunity = communityId;
-    for (const id of nodeIds) this.focusNodeInGraph(id, undefined);
-    attachment.legend.render();
-  }
-
-  /** The attachment holding this renderer, if it is attached. */
-  private attachmentFor(renderer: OfficialRenderer): Attachment | null {
-    for (const attachment of this.attachments.values()) {
-      if (attachment.renderer === renderer) return attachment;
-    }
-    return null;
   }
 
   private clearFocus(renderer: OfficialRenderer): void {
