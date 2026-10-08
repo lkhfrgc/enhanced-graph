@@ -1465,6 +1465,25 @@ async function main() {
       search.dispatchEvent(new Event("input", { bubbles: true }));
       const restored = countRows();
 
+      // Turn the OTHER filters on before testing the restore.
+      //
+      // Without this the check proves nothing: with tags as the only active
+      // filter, an implementation that clears nothing but tags still reaches the
+      // full node count. Verified by putting the old behaviour back — the check
+      // passed anyway. So the type boxes and both visibility switches are
+      // switched on first, and only then is "restore all" pressed.
+      const panel = document.querySelector(".enhanced-graph-official-filters");
+      const switches = [...(panel?.querySelectorAll("input[type=checkbox]") ?? [])];
+      for (const box of switches) {
+        if (box.checked) box.click();
+      }
+      const visibilitySwitches = [...(panel?.querySelectorAll(".enhanced-graph-checkbox input") ?? [])];
+      for (const box of visibilitySwitches.slice(0, 2)) {
+        if (!box.checked) box.click();
+      }
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      const nodesWithOthersOn = window.__HARNESS__.view.renderer.instance.getGraph().order;
+
       // Found by its text, not by its container. Two earlier versions of this
       // listed the containers the button was expected to sit in, and it moved
       // both times — the check then failed for a reason that had nothing to do
@@ -1480,6 +1499,21 @@ async function main() {
         restored,
         allMatch,
         nodesAfterClear: window.__HARNESS__.view.renderer.instance.getGraph().order,
+        nodesWithOthersOn,
+        // The plugin's own graph, before any filtering: "restored" means every
+        // one of these is on screen again. Comparing against the count taken
+        // before the tag filter only says the tag filter was undone.
+        // Defensive: the harness API exposes the snapshot rather than the plugin,
+        // and a wrong guess here would fail the check for the wrong reason.
+        totalNodes: (() => {
+          try {
+            const api = window.__HARNESS__;
+            const entry = typeof api.snapshot === "function" ? api.snapshot() : api.snapshot;
+            return entry?.graph?.nodes?.length ?? null;
+          } catch {
+            return null;
+          }
+        })(),
       };
     });
     check(
@@ -1487,10 +1521,28 @@ async function main() {
       tagRestore.after > 0 && tagRestore.after < tagRestore.before && tagRestore.allMatch,
       `"retriev" → ${tagRestore.after}/${tagRestore.before} rows, all matching=${tagRestore.allMatch}`,
     );
+    // At least everything the tag filter hid has to come back, and the label
+    // promises more than the tags: the run before this one went 77 → 65 → 79,
+    // above the pre-filter 77, because "restore all" also switches off the two
+    // visibility toggles that were already on. Asserting equality with the
+    // pre-filter count would call that correct behaviour a failure.
+    //
+    // The weaker "> after" assertion this replaces passed while the button only
+    // cleared tags — the label said all and the behaviour was one category — so
+    // it was checking nothing a user could observe. This at least fails if the
+    // restore stops short of the tag filter's own effect.
+    // Restored means the WHOLE graph is back, not merely that the tag filter was
+    // undone: the button says "restore all" and also switches off the hidden-type
+    // and visibility toggles. Comparing against the count from just before the
+    // tag filter would call a partial restore a pass whenever some other filter
+    // happened to be on.
     check(
       "clearing the search and pressing 全部恢复 restores the graph",
-      tagRestore.restored === tagRestore.before && tagRestore.nodesAfterClear > tagFilter.after,
-      `rows restored ${tagRestore.restored}/${tagRestore.before}; nodes back to ${tagRestore.nodesAfterClear}`,
+      tagRestore.restored === tagRestore.before &&
+        tagRestore.totalNodes !== null &&
+        tagRestore.nodesWithOthersOn < tagRestore.totalNodes &&
+        tagRestore.nodesAfterClear === tagRestore.totalNodes,
+      `rows restored ${tagRestore.restored}/${tagRestore.before}; nodes ${tagFilter.before} → ${tagFilter.after} → ${tagRestore.nodesAfterClear} of ${tagRestore.totalNodes}`,
     );
 
     // --- 11b. the "no matching nodes" message ------------------------------

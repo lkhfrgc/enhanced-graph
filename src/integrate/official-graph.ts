@@ -632,7 +632,16 @@ export class OfficialGraphEnhancer {
         else next.add(tag);
         void this.deps.onSetVisibility({ hiddenTags: [...next] });
       },
-      onClearTags: () => void this.deps.onSetVisibility({ hiddenTags: [] }),
+      // Everything the button's label promises: tags, types, and the two
+      // visibility switches. Clearing only the tags was the old behaviour, and
+      // the label was wrong for it.
+      onRestoreAll: () =>
+        void this.deps.onSetVisibility({
+          hiddenTags: [],
+          hiddenTypes: [],
+          hideIsolated: false,
+          hideStructural: false,
+        }),
       onToggleIsolated: (value) => void this.deps.onSetVisibility({ hideIsolated: value }),
       // Repaints just this body rather than the whole panel: the element is in hand,
       // and the tag search text lives at module level so it survives.
