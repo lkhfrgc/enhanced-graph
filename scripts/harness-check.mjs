@@ -1474,11 +1474,20 @@ async function main() {
       );
       button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       await new Promise((resolve) => setTimeout(resolve, 450));
+      // The tag rows' own checkboxes, which is what the user watches: the
+      // restore has to leave every one of them ticked. Reading the settings
+      // instead would miss a stale list still drawn from the old set.
+      const tagBoxes = [
+        ...document.querySelectorAll(".enhanced-graph-tag-list input[type=checkbox]"),
+      ];
+      const uncheckedTagRows = tagBoxes.filter((el) => !el.checked).length;
+
       return {
         before,
         after,
         restored,
         allMatch,
+        uncheckedTagRows,
         nodesAfterClear: window.__HARNESS__.view.renderer.instance.getGraph().order,
         // The plugin's own graph, before any filtering: "restored" means every
         // one of these is on screen again. Comparing against the count taken
@@ -1523,8 +1532,9 @@ async function main() {
     check(
       "clearing the search and pressing 全部恢复 restores the graph",
       tagRestore.restored === tagRestore.before &&
-        tagRestore.nodesAfterClear === tagFilter.before,
-      `rows restored ${tagRestore.restored}/${tagRestore.before}; nodes ${tagFilter.before} → ${tagFilter.after} → ${tagRestore.nodesAfterClear} of ${tagRestore.totalNodes}`,
+        tagRestore.nodesAfterClear === tagFilter.before &&
+        tagRestore.uncheckedTagRows === 0,
+      `rows restored ${tagRestore.restored}/${tagRestore.before}; nodes ${tagFilter.before} → ${tagFilter.after} → ${tagRestore.nodesAfterClear}; tag boxes left unticked ${tagRestore.uncheckedTagRows}`,
     );
 
     // --- 11b. the "no matching nodes" message ------------------------------

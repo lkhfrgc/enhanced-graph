@@ -635,7 +635,17 @@ export class OfficialGraphEnhancer {
       // Tags only. The button lives in the tag group and undoes what that group
       // did; the hidden-type and visibility switches are separate decisions the
       // user made elsewhere, and clearing them here would silently overrule them.
-      onClearTags: () => void this.deps.onSetVisibility({ hiddenTags: [] }),
+      //
+      // Redrawn once the write lands. Ticking the boxes in place is not enough:
+      // `onSetVisibility` replaces the set, while the options this body was built
+      // with still hold the old one, so the next repaint put the ticks straight
+      // back. Reported as "the tag checkboxes do not all come back at once".
+      onClearTags: () => {
+        void Promise.resolve(this.deps.onSetVisibility({ hiddenTags: [] })).then(() => {
+          el.empty();
+          this.renderFiltersBody(el);
+        });
+      },
       onToggleIsolated: (value) => void this.deps.onSetVisibility({ hideIsolated: value }),
       // Repaints just this body rather than the whole panel: the element is in hand,
       // and the tag search text lives at module level so it survives.
