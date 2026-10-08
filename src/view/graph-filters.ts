@@ -37,6 +37,45 @@ export interface FilterOptions {
   readonly onClearTags: () => void;
   readonly onToggleIsolated: (value: boolean) => void;
   readonly onToggleStructural: (value: boolean) => void;
+  /**
+   * Which filter groups are folded away, and how to fold them.
+   *
+   * Optional, and held by the caller: this function runs on every repaint, so
+   * state kept here would be forgotten the moment anything else redraws the panel
+   * and the group would spring open again. With neither option passed the
+   * headings stay plain labels.
+   */
+  readonly collapsedSections?: ReadonlySet<FilterSection>;
+  readonly onToggleSection?: (section: FilterSection) => void;
+}
+
+/** The filter groups that can be folded away. */
+export type FilterSection = "types" | "tags";
+
+/**
+ * Section heading that doubles as its fold control.
+ *
+ * Mirrors the one in `insights-panel`; the two panels are separate components and
+ * a shared helper would have to carry both an icon slot and a plain-label case to
+ * serve both, which is more machinery than the duplication costs.
+ */
+function sectionHeader(
+  section: HTMLElement,
+  options: FilterOptions,
+  which: FilterSection,
+  label: string,
+): HTMLElement {
+  const collapsed = options.collapsedSections?.has(which) ?? false;
+  const toggle = options.onToggleSection;
+  if (!toggle) {
+    return section.createDiv({ cls: "enhanced-graph-section-title", text: label });
+  }
+  const title = section.createEl("button", { cls: "enhanced-graph-section-title is-toggle" });
+  title.setAttribute("aria-expanded", String(!collapsed));
+  title.createSpan({ text: label });
+  title.createSpan({ cls: "enhanced-graph-section-chevron", attr: { "data-chevron": collapsed ? "right" : "down" } });
+  title.addEventListener("click", () => toggle(which));
+  return title;
 }
 
 /**
@@ -49,15 +88,19 @@ export interface FilterOptions {
  */
 export function renderFilters(container: HTMLElement, options: FilterOptions): void {
   const section = container.createDiv({ cls: "enhanced-graph-section" });
-  section.createDiv({ cls: "enhanced-graph-section-title", text: t("filter.types") });
+  const typesCollapsed = options.collapsedSections?.has("types") ?? false;
+  if (typesCollapsed) section.addClass("is-collapsed");
+  sectionHeader(section, options, "types", t("filter.types"));
   const counts = typeCounts(options.graph);
-  for (const type of PAGE_TYPES.filter((candidate) => (counts.get(candidate) ?? 0) > 0)) {
-    const row = section.createEl("label", { cls: "enhanced-graph-checkbox" });
-    const input = row.createEl("input", { type: "checkbox" });
-    input.checked = !options.hiddenTypes.has(type);
-    input.addEventListener("change", () => options.onToggleType(type, input.checked));
-    row.createSpan({ text: t(`type.${type}` as never) });
-    row.createSpan({ cls: "enhanced-graph-legend-count", text: String(counts.get(type) ?? 0) });
+  if (!typesCollapsed) {
+    for (const type of PAGE_TYPES.filter((candidate) => (counts.get(candidate) ?? 0) > 0)) {
+      const row = section.createEl("label", { cls: "enhanced-graph-checkbox" });
+      const input = row.createEl("input", { type: "checkbox" });
+      input.checked = !options.hiddenTypes.has(type);
+      input.addEventListener("change", () => options.onToggleType(type, input.checked));
+      row.createSpan({ text: t(`type.${type}` as never) });
+      row.createSpan({ cls: "enhanced-graph-legend-count", text: String(counts.get(type) ?? 0) });
+    }
   }
 
   renderTagSection(container, options);
@@ -84,9 +127,19 @@ function renderTagSection(container: HTMLElement, options: FilterOptions): void 
   const section = container.createDiv({ cls: "enhanced-graph-section" });
   const all = collectTags(options.graph.nodes);
 
-  const header = section.createDiv({ cls: "enhanced-graph-section-title" });
-  header.createSpan({ text: `${t("filter.tags")} (${all.length})` });
+  // A row, not a title: the clear button sits beside the fold control, and a
+  // button nested inside a button is invalid markup.
+  const header = section.createDiv({ cls: "enhanced-graph-section-title-row" });
+  sectionHeader(header, options, "tags", `${t("filter.tags")} (${all.length})`);
   const clear = header.createEl("button", { cls: "enhanced-graph-link", text: t("filter.clearTags") });
+
+  if (options.collapsedSections?.has("tags")) {
+    section.addClass("is-collapsed");
+    // The button is still placed, and its visibility kept in step, or it would
+    // read "show all" while the list is not on screen at all.
+    clear.classList.toggle("is-hidden", options.hiddenTags.size === 0);
+    return;
+  }
 
   const search = section.createEl("input", { cls: "enhanced-graph-tag-search" });
   search.type = "search";

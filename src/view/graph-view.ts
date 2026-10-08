@@ -40,7 +40,7 @@ import {
   highlightFor,
   type FocusState,
 } from "./selection";
-import { renderFilters } from "./graph-filters";
+import { type FilterSection, renderFilters } from "./graph-filters";
 import { renderAppearance } from "./graph-appearance";
 import { renderLegend } from "./graph-legend";
 import { renderToolbar, renderZoomControls, type PanelMode } from "./graph-toolbar";
@@ -108,6 +108,8 @@ export class EnhancedGraphView extends ItemView {
   private showDismissed = false;
   /** Insight sections the user folded away; see `InsightSection`. */
   private collapsedSections: ReadonlySet<InsightSection> = new Set();
+  /** Filter groups the user folded away, in this view's filters tab. */
+  private collapsedFilters: ReadonlySet<FilterSection> = new Set();
 
   private highlightNodes: ReadonlySet<string> = new Set<string>();
   private highlightEdges: ReadonlySet<string> = new Set<string>();
@@ -913,6 +915,15 @@ export class EnhancedGraphView extends ItemView {
         this.plugin.settings.hideIsolated = value;
         await this.plugin.saveSettings();
         await this.applyGraphData();
+      },
+      collapsedSections: this.collapsedFilters,
+      onToggleSection: (section) => {
+        const next = new Set(this.collapsedFilters);
+        if (next.has(section)) next.delete(section);
+        else next.add(section);
+        this.collapsedFilters = next;
+        el.empty();
+        this.renderFilters(el);
       },
       onToggleStructural: async (value) => {
         this.plugin.settings.hideStructural = value;

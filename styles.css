@@ -451,6 +451,26 @@
   content: "▸";
 }
 
+/* A heading that shares its line with another control — the tag group's "show
+   all" button. The fold control takes the space and the other control keeps its
+   own, which is why the toggle inside a row must not be full width. */
+.enhanced-graph-section-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.enhanced-graph-section-title-row .enhanced-graph-section-title {
+  margin-top: 0;
+  flex: 1 1 auto;
+  width: auto;
+}
+
+.enhanced-graph-section-title-row > .enhanced-graph-link {
+  flex: 0 0 auto;
+}
+
 .enhanced-graph-section-title svg {
   width: 13px;
   height: 13px;

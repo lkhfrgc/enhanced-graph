@@ -26,7 +26,7 @@ import { App, Menu, Notice, TFile, WorkspaceLeaf } from "obsidian";
 import type { GraphInsights } from "../core/insights";
 import { edgeKey, edgeKeyEndpoints } from "../core/graph-keys";
 import { findConnectingPaths } from "../core/paths";
-import { renderFilters } from "../view/graph-filters";
+import { type FilterSection, renderFilters } from "../view/graph-filters";
 import { renderWeights } from "../view/graph-weights";
 import { filterNodes, type VisibilityFilters } from "../view/visibility";
 import type { GraphNode, OfficialGraphMode, RelevanceWeights, WikiGraph } from "../types";
@@ -267,6 +267,8 @@ export class OfficialGraphEnhancer {
   private focusTicker: number | null = null;
   /** Re-applies the focus the moment the window becomes visible again. */
   private visibilityHandler: (() => void) | null = null;
+  /** Filter groups the user folded away, in the built-in graph's panel. */
+  private collapsedFilters: ReadonlySet<FilterSection> = new Set();
   /**
    * Edges of the focused route, as `edgeKey` strings rather than link graphics.
    *
@@ -632,6 +634,17 @@ export class OfficialGraphEnhancer {
       },
       onClearTags: () => void this.deps.onSetVisibility({ hiddenTags: [] }),
       onToggleIsolated: (value) => void this.deps.onSetVisibility({ hideIsolated: value }),
+      // Repaints just this body rather than the whole panel: the element is in hand,
+      // and the tag search text lives at module level so it survives.
+      collapsedSections: this.collapsedFilters,
+      onToggleSection: (section) => {
+        const next = new Set(this.collapsedFilters);
+        if (next.has(section)) next.delete(section);
+        else next.add(section);
+        this.collapsedFilters = next;
+        el.empty();
+        this.renderFiltersBody(el);
+      },
       onToggleStructural: (value) => void this.deps.onSetVisibility({ hideStructural: value }),
     });
   }
