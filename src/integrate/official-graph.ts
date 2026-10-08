@@ -662,10 +662,14 @@ export class OfficialGraphEnhancer {
       },
       onShowAllTypes: () => void this.deps.onSetVisibility({ hiddenTypes: [] }),
       onFocusNodes: (nodeIds) => {
-        for (const attachment of this.attachments.values()) {
-          this.focusNodes(attachment.renderer, nodeIds);
-          return;
-        }
+        // `focusNodeInGraph`, not `focusNodes`.
+        //
+        // `focusNodes` only assigns `renderer.highlightNode` — the renderer's own
+        // single-node hover highlight — so clicking a cluster in the legend lit it
+        // for a moment and then let go. `focusNodeInGraph` writes `focusIds`, which
+        // is what the ticker keeps re-applying; calling it once per id is how a
+        // whole cluster stays lit.
+        for (const id of nodeIds) this.focusNodeInGraph(id, undefined);
       },
     };
   }
@@ -1544,8 +1548,10 @@ export class OfficialGraphEnhancer {
       // An empty id list is the panel's "unfocus" gesture: clear the highlight
       // without running the node lookup `focusNodes` would do.
       onFocusNodes: (nodeIds) => {
+        // Same reason as the legend above: this has to land in `focusIds`, or the
+        // highlight lasts one frame.
         if (nodeIds.length === 0) this.clearFocus(renderer);
-        else this.focusNodes(renderer, nodeIds);
+        else for (const id of nodeIds) this.focusNodeInGraph(id, undefined);
       },
       focusCount: () => {
         const ids = this.focusIds.get(renderer);
@@ -1580,29 +1586,6 @@ export class OfficialGraphEnhancer {
   // -------------------------------------------------------------------------
   // Focus
   // -------------------------------------------------------------------------
-
-  /** Use the official renderer's own focus highlight, which dims non-neighbours. */
-  private focusNodes(renderer: OfficialRenderer, nodeIds: readonly string[]): void {
-    const { graph } = this.deps.getData();
-    const resolve = this.resolverFor(graph);
-    const officialIds = Object.keys(renderer.nodeLookup ?? {});
-    let target: OfficialNode | null = null;
-    for (const id of nodeIds) {
-      const graphNode = graph.nodeIndex.get(id);
-      if (!graphNode) continue;
-      const officialId = officialIds.find((candidate) => resolve(candidate)?.id === graphNode.id);
-      if (officialId) {
-        target = renderer.nodeLookup?.[officialId] ?? null;
-        break;
-      }
-    }
-    try {
-      renderer.highlightNode = target;
-      renderer.changed?.();
-    } catch (error) {
-      console.error("[enhanced-graph] focusing a built-in graph node failed:", error);
-    }
-  }
 
   private clearFocus(renderer: OfficialRenderer): void {
     try {

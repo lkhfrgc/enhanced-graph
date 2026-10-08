@@ -147,6 +147,39 @@ const report = await page.evaluate(() => {
 
 console.log("");
 console.log(JSON.stringify(report, null, 1));
+// Click a cluster row and see whether the focus set actually receives it.
+// "It compiles" is not evidence that a click does anything.
+const clickResult = await page.evaluate(async () => {
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const plugin = window.app.plugins.plugins["enhanced-graph"];
+  const enhancer = plugin.officialGraph;
+  const renderer = window.app.workspace.getLeavesOfType("graph").find((c) => c.view && c.view.renderer)?.view.renderer;
+  if (!renderer) return { error: "no renderer" };
+  const rows = [...document.querySelectorAll(".enhanced-graph-official-legend .enhanced-graph-legend-row")];
+  if (rows.length === 0) return { error: "no legend rows" };
+  const label = rows[0].querySelector(".enhanced-graph-legend-label")?.textContent ?? "?";
+  const before = enhancer.focusIds.get(renderer)?.size ?? 0;
+  rows[0].dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  await wait(1500);
+  const after = enhancer.focusIds.get(renderer)?.size ?? 0;
+  return {
+    firstRow: label,
+    focusBefore: before,
+    focusAfter: after,
+    tickerRunning: enhancer.focusTicker !== null && enhancer.focusTicker !== undefined,
+    litEdgeKeys: enhancer.litEdges?.get(renderer)?.size ?? null,
+  };
+});
+console.log("");
+console.log("=== clicking the first cluster row ===");
+console.log(JSON.stringify(clickResult, null, 1));
+await page.screenshot({ path: require("node:path").join(require("node:os").tmpdir(), "cluster-click.png") }).catch(() => {});
+const shot2 = await page.screenshot();
+const fsmod = await import("node:fs");
+const osmod = await import("node:os");
+const pathmod = await import("node:path");
+fsmod.writeFileSync(pathmod.join(osmod.tmpdir(), "cluster-click.png"), shot2);
+
 console.log("");
 console.log("=== read this ===");
 console.log("  panel.maxHeight      what the browser actually applied");
