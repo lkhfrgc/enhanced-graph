@@ -28,13 +28,24 @@ export interface EnhancedGraphSettings {
    * its core node — and the ids are what the analysis produces.
    */
   hiddenCommunities: number[];
-  /** Tags the tag filter acts on; see `tagFilterMode` for what that means. */
+  /** Tags to exclude. Only read while `tagFilterMode` is `"exclude"`. */
   hiddenTags: string[];
   /**
-   * Whether the ticked tags are the ones to hide, or the only ones to keep.
+   * Tags to keep. Only read while `tagFilterMode` is `"include"`.
    *
-   * Default `"exclude"` keeps the meaning every existing settings file already
-   * has: the list is the tags being hidden.
+   * `null` means "no selection has been made in include mode yet", which keeps
+   * everything — the state the mode opens in, since its first selection is every
+   * tag. An EMPTY list is a selection the user made, and means the opposite: keep
+   * nothing. The two are deliberately different values, not the same state twice.
+   */
+  includedTags: string[] | null;
+  /**
+   * Which way round the ticked tags are read.
+   *
+   * Each mode keeps its own selection, so switching back and forth never rewrites
+   * the other one. Default `"exclude"`, which is also the only mode a file written
+   * before this feature knows about — its `hiddenTags` meant "the tags being
+   * hidden", and still does.
    */
   tagFilterMode: "exclude" | "include";
   hideIsolated: boolean;
@@ -75,8 +86,17 @@ export interface EnhancedGraphSettings {
   typeColorOverrides: Record<string, string>;
   /** Per-community colour overrides. JSON keys are strings, so ids are stored as text. */
   communityColorOverrides: Record<string, string>;
-  /** How far to layer onto Obsidian's built-in graph view. */
-  officialGraphMode: OfficialGraphMode;
+  /** Whether to layer the enhancement onto Obsidian's built-in graph view. */
+  officialGraphEnabled: boolean;
+  /**
+   * How the built-in graph colours its nodes while the enhancement is on.
+   *
+   * Its own switch is separate: "off" used to be a third value of this setting, so
+   * the same control both turned the enhancement on and chose how it coloured.
+   * Which colouring it uses is now picked where it can be seen — the graph's own
+   * toolbar — and this only remembers that choice.
+   */
+  officialGraphColorMode: "community" | "type";
   /**
    * Line colour for the built-in graph's enhancement, or `null` to leave the
    * built-in graph's own theme colour alone.
@@ -102,6 +122,7 @@ export const DEFAULT_SETTINGS: EnhancedGraphSettings = {
   hiddenTypes: [],
   hiddenCommunities: [],
   hiddenTags: [],
+  includedTags: null,
   tagFilterMode: "exclude",
   hideIsolated: false,
   hideStructural: true,
@@ -120,7 +141,8 @@ export const DEFAULT_SETTINGS: EnhancedGraphSettings = {
   customNodeColor: "#60a5fa",
   typeColorOverrides: {},
   communityColorOverrides: {},
-  officialGraphMode: "off",
+  officialGraphEnabled: true,
+  officialGraphColorMode: "community",
   officialLineColor: null,
   reuseOfficialLayout: true,
   positions: {},
@@ -130,6 +152,12 @@ export const DEFAULT_SETTINGS: EnhancedGraphSettings = {
 /** Fill in anything a previous settings file is missing. */
 export function mergeSettings(raw: unknown): EnhancedGraphSettings {
   const source = (raw ?? {}) as Partial<EnhancedGraphSettings>;
+  // The key this feature used to live under. Read from the raw file rather than the
+  // typed source, because the interface no longer has it — this is the only place
+  // that still knows the old name, and it only reads it.
+  const legacyMode = ((raw ?? {}) as { officialGraphMode?: OfficialGraphMode }).officialGraphMode;
+  /** The tag mode as a file may have written it before the two selections split. */
+  const legacyTagMode = source.tagFilterMode;
   return {
     ...DEFAULT_SETTINGS,
     ...source,
@@ -139,9 +167,23 @@ export function mergeSettings(raw: unknown): EnhancedGraphSettings {
     excludeFolders: source.excludeFolders ?? [],
     hiddenTypes: source.hiddenTypes ?? [],
     hiddenCommunities: source.hiddenCommunities ?? [],
-    hiddenTags: source.hiddenTags ?? [],
+    hiddenTags: legacyTagMode === "include" ? [] : (source.hiddenTags ?? []),
+    // A file written while the two modes shared one list had it meaning "keep
+    // these" if it said include. That list moves to the mode it belonged to, so
+    // the graph looks the same after the upgrade.
+    includedTags:
+      source.includedTags ??
+      (legacyTagMode === "include" ? (source.hiddenTags ?? []) : DEFAULT_SETTINGS.includedTags),
     tagFilterMode: source.tagFilterMode ?? DEFAULT_SETTINGS.tagFilterMode,
-    officialGraphMode: source.officialGraphMode ?? DEFAULT_SETTINGS.officialGraphMode,
+    // Split out of the old three-state `officialGraphMode`, which said both whether
+    // the enhancement ran and how it coloured. A file that has only ever known that
+    // key keeps the state it was actually in: "off" stays off, and a colouring that
+    // was in use stays on with that colouring — nobody's graph changes on upgrade.
+    // A file with NEITHER key is a fresh install, and that starts ON.
+    officialGraphEnabled:
+      source.officialGraphEnabled ?? (legacyMode === undefined ? true : legacyMode !== "off"),
+    officialGraphColorMode:
+      source.officialGraphColorMode ?? (legacyMode === "type" ? "type" : "community"),
     officialLineColor: source.officialLineColor ?? DEFAULT_SETTINGS.officialLineColor,
     reuseOfficialLayout: source.reuseOfficialLayout ?? DEFAULT_SETTINGS.reuseOfficialLayout,
     edgeWeakColor: source.edgeWeakColor ?? DEFAULT_SETTINGS.edgeWeakColor,

@@ -1752,7 +1752,9 @@ async function main() {
       const sigma = window.__HARNESS__.view.renderer.instance;
       const before = sigma.getGraph().order;
 
-      input.checked = false;
+      // A tick means "the tag this filter acts on"; in the default mode that means
+      // excluding it, so ticking the first row is what hides that tag.
+      input.checked = true;
       input.dispatchEvent(new Event("change", { bubbles: true }));
       await new Promise((resolve) => setTimeout(resolve, 450));
 
@@ -1769,6 +1771,12 @@ async function main() {
         rowStillListed: [...document.querySelectorAll(".enhanced-graph-tag-name")].some(
           (el) => el.textContent === tag,
         ),
+        // Diagnostics: did the tick stick, and does the plugin's own view agree with
+        // the renderer about what is visible?
+        ticked: input.checked,
+        mode: window.__HARNESS__.settings.tagFilterMode,
+        hiddenTags: (window.__HARNESS__.settings.hiddenTags ?? []).slice(),
+        visibleNow: window.__HARNESS__.visibleNodeIds().length,
       };
     });
     check(
@@ -1777,7 +1785,9 @@ async function main() {
         tagFilter.before - tagFilter.after === tagFilter.expectedDrop &&
         tagFilter.survivorsCarryingTag === 0,
       `hiding "${tagFilter.tag}": ${tagFilter.before} → ${tagFilter.after} nodes ` +
-        `(expected -${tagFilter.expectedDrop}), ${tagFilter.survivorsCarryingTag} carriers left`,
+        `(expected -${tagFilter.expectedDrop}), ${tagFilter.survivorsCarryingTag} carriers left; ` +
+        `ticked=${tagFilter.ticked} mode=${tagFilter.mode} settingsHidden=${JSON.stringify(tagFilter.hiddenTags)} ` +
+        `visible=${tagFilter.visibleNow}`,
     );
     check(
       "a hidden tag stays listed so it can be switched back on",
@@ -1806,24 +1816,24 @@ async function main() {
       // both times — the check then failed for a reason that had nothing to do
       // with what it is testing.
       const button = [...document.querySelectorAll("button")].find((el) =>
-        el.textContent?.includes("全部恢复"),
+        el.textContent?.includes("全清"),
       );
       button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       await new Promise((resolve) => setTimeout(resolve, 450));
-      // The tag rows' own checkboxes, which is what the user watches: the
-      // restore has to leave every one of them ticked. Reading the settings
-      // instead would miss a stale list still drawn from the old set.
+      // The tag rows' own checkboxes, which is what the user watches: clearing the
+      // ticks has to leave every one of them unticked. Reading the settings instead
+      // would miss a stale list still drawn from the old set.
       const tagBoxes = [
         ...document.querySelectorAll(".enhanced-graph-tag-list input[type=checkbox]"),
       ];
-      const uncheckedTagRows = tagBoxes.filter((el) => !el.checked).length;
+      const tickedTagRows = tagBoxes.filter((el) => el.checked).length;
 
       return {
         before,
         after,
         restored,
         allMatch,
-        uncheckedTagRows,
+        tickedTagRows,
         nodesAfterClear: window.__HARNESS__.view.renderer.instance.getGraph().order,
         // The plugin's own graph, before any filtering: "restored" means every
         // one of these is on screen again. Comparing against the count taken
@@ -1866,11 +1876,11 @@ async function main() {
     // nothing but tags — which is the correct behaviour — so it distinguished
     // nothing at all.
     check(
-      "clearing the search and pressing 全部恢复 restores the graph",
+      "clearing the search and pressing 全清 restores the graph",
       tagRestore.restored === tagRestore.before &&
         tagRestore.nodesAfterClear === tagFilter.before &&
-        tagRestore.uncheckedTagRows === 0,
-      `rows restored ${tagRestore.restored}/${tagRestore.before}; nodes ${tagFilter.before} → ${tagFilter.after} → ${tagRestore.nodesAfterClear}; tag boxes left unticked ${tagRestore.uncheckedTagRows}`,
+        tagRestore.tickedTagRows === 0,
+      `rows restored ${tagRestore.restored}/${tagRestore.before}; nodes ${tagFilter.before} → ${tagFilter.after} → ${tagRestore.nodesAfterClear}; tag boxes left ticked ${tagRestore.tickedTagRows}`,
     );
 
     // --- 11b. the "no matching nodes" message ------------------------------

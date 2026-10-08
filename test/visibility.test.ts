@@ -84,6 +84,56 @@ describe("isNodeVisible", () => {
     expect(isNodeVisible(target, filters({ hiddenTags: new Set(["nothing-like-this"]) }))).toBe(true);
   });
 
+  it("keeps ONLY pages carrying a ticked tag in include mode", () => {
+    const include = (tags: string[] | null, nodeTags: string[]): boolean =>
+      isNodeVisible(
+        node("a", { tags: nodeTags }),
+        filters({
+          includedTags: tags === null ? null : new Set(tags),
+          tagFilterMode: "include",
+        }),
+      );
+
+    // Anything carrying one of the ticked tags survives...
+    expect(include(["rag"], ["rag", "retrieval"])).toBe(true);
+    expect(include(["retrieval"], ["rag", "retrieval"])).toBe(true);
+    // ...and anything carrying none of them does not.
+    expect(include(["safety"], ["rag", "retrieval"])).toBe(false);
+    expect(include(["rag"], [])).toBe(false);
+  });
+
+  it("tells 'nothing picked yet' apart from 'keep nothing' in include mode", () => {
+    const target = node("a", { tags: ["rag"] });
+    // No selection yet keeps everything: that is the state include mode opens in,
+    // before its list has been filled with every tag.
+    expect(isNodeVisible(target, filters({ includedTags: null, tagFilterMode: "include" }))).toBe(true);
+    expect(isNodeVisible(target, filters({ includedTags: null, tagFilterMode: "include" }))).toBe(true);
+    // An EMPTY selection is a choice the user made — 全清 in include mode means keep
+    // nothing, so every page goes.
+    expect(isNodeVisible(target, filters({ includedTags: new Set(), tagFilterMode: "include" }))).toBe(false);
+    expect(isNodeVisible(node("b"), filters({ includedTags: new Set(), tagFilterMode: "include" }))).toBe(false);
+  });
+
+  it("reads exclude mode from its own list, whatever include mode holds", () => {
+    const target = node("a", { tags: ["rag"] });
+    // The two modes keep separate selections; only the one in force is read.
+    const both = filters({
+      hiddenTags: new Set(["rag"]),
+      includedTags: new Set(["safety"]),
+      tagFilterMode: "exclude",
+    });
+    expect(isNodeVisible(target, both)).toBe(false);
+    expect(isNodeVisible(target, { ...both, tagFilterMode: "include" })).toBe(false);
+    expect(isNodeVisible(target, { ...both, tagFilterMode: "include", includedTags: new Set(["rag"]) })).toBe(
+      true,
+    );
+  });
+
+  it("treats no hidden tags as no filter, in either mode", () => {
+    expect(isNodeVisible(node("a", { tags: ["rag"] }), filters({ tagFilterMode: "exclude" }))).toBe(true);
+    expect(isNodeVisible(node("b"), filters({ tagFilterMode: "exclude" }))).toBe(true);
+  });
+
   it("hides structural pages on request", () => {
     const target = node("a", { isStructural: true });
     expect(isNodeVisible(target, filters({ hideStructural: true }))).toBe(false);

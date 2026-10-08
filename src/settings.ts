@@ -1,6 +1,5 @@
 import { App, getLanguage, Plugin, PluginSettingTab, Setting } from "obsidian";
 import type { SettingsHost } from "./plugin-host";
-import type { OfficialGraphMode } from "./types";
 import { t } from "./i18n";
 import { applyLanguage, type EnhancedGraphSettings } from "./settings-model";
 import { hasOfficialGraphView } from "./integrate/official-internals";
@@ -49,21 +48,16 @@ export class EnhancedGraphSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName(t("settings.officialGraph"))
       .setDesc(t("settings.officialGraphDesc"))
-      .addDropdown((dropdown) =>
-        dropdown
-          .addOption("off", t("settings.officialGraphOff"))
-          .addOption("community", t("settings.officialGraphCommunity"))
-          .addOption("type", t("settings.officialGraphType"))
-          .setValue(this.plugin.settings.officialGraphMode)
-          .onChange(async (value) => {
-            this.plugin.settings.officialGraphMode = value as OfficialGraphMode;
-            await this.plugin.saveSettings();
-            this.plugin.applyOfficialGraphMode();
-            this.display();
-          }),
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.officialGraphEnabled).onChange(async (value) => {
+          this.plugin.settings.officialGraphEnabled = value;
+          await this.plugin.saveSettings();
+          this.plugin.applyOfficialGraphMode();
+          this.display();
+        }),
       );
 
-    if (this.plugin.settings.officialGraphMode !== "off") {
+    if (this.plugin.settings.officialGraphEnabled) {
       containerEl.createEl("p", {
         cls: "setting-item-description mod-warning",
         text: t("settings.officialGraphWarning"),

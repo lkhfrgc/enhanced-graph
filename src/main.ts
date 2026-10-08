@@ -207,10 +207,13 @@ export default class EnhancedGraphPlugin extends Plugin implements PluginHost, S
     this.officialGraph = new OfficialGraphEnhancer({
       app: this.app,
       getData: () => this.cached,
-      getMode: () => this.settings.officialGraphMode,
+      // The enhancer works in terms of a mode, "off" included; the setting is a
+      // switch plus a colouring, so the two are composed here and nowhere else.
+      getMode: () => this.officialMode(),
       getDismissed: () => this.settings.dismissedInsights,
       onSetMode: async (mode) => {
-        this.settings.officialGraphMode = mode;
+        if (mode === "off") return;
+        this.settings.officialGraphColorMode = mode;
         await this.saveSettings();
         this.applyOfficialGraphMode();
       },
@@ -219,16 +222,13 @@ export default class EnhancedGraphPlugin extends Plugin implements PluginHost, S
         hiddenTypes: new Set(this.settings.hiddenTypes as never[]),
         hiddenCommunities: new Set(this.settings.hiddenCommunities),
         hiddenTags: new Set(this.settings.hiddenTags),
+        includedTags:
+          this.settings.includedTags === null ? null : new Set(this.settings.includedTags),
         tagFilterMode: this.settings.tagFilterMode,
         hideStructural: this.settings.hideStructural,
         hideIsolated: this.settings.hideIsolated,
       }),
       getTagFilterMode: () => this.settings.tagFilterMode,
-      onSetTagFilterMode: async (mode) => {
-        this.settings.tagFilterMode = mode;
-        await this.saveSettings();
-        this.refreshViews();
-      },
       onSetVisibility: async (patch) => {
         Object.assign(this.settings, patch);
         await this.saveSettings();
@@ -289,7 +289,7 @@ export default class EnhancedGraphPlugin extends Plugin implements PluginHost, S
       },
     });
 
-    if (this.settings.officialGraphMode !== "off") {
+    if (this.settings.officialGraphEnabled) {
       // Two things have to be true before this can run, and only the second was
       // being honoured:
       //
@@ -305,10 +305,15 @@ export default class EnhancedGraphPlugin extends Plugin implements PluginHost, S
     }
   }
 
-  /** Re-apply the mode after a settings change (called from the settings tab). */
+  /** The enhancer's view of the setting: the switch, then the colouring. */
+  officialMode(): OfficialGraphMode {
+    return this.settings.officialGraphEnabled ? this.settings.officialGraphColorMode : "off";
+  }
+
+  /** Re-apply the switch after a settings change (called from the settings tab). */
   applyOfficialGraphMode(): void {
     if (!this.officialGraph) return;
-    if (this.settings.officialGraphMode === "off") {
+    if (!this.settings.officialGraphEnabled) {
       this.officialGraph.stop();
       return;
     }
@@ -320,8 +325,14 @@ export default class EnhancedGraphPlugin extends Plugin implements PluginHost, S
   }
 
   private async setOfficialGraphMode(mode: OfficialGraphMode, notify = true): Promise<void> {
-    if (this.settings.officialGraphMode === mode) return;
-    this.settings.officialGraphMode = mode;
+    if (mode === "off") {
+      if (!this.settings.officialGraphEnabled) return;
+      this.settings.officialGraphEnabled = false;
+    } else {
+      if (this.settings.officialGraphEnabled && this.settings.officialGraphColorMode === mode) return;
+      this.settings.officialGraphEnabled = true;
+      this.settings.officialGraphColorMode = mode;
+    }
     await this.saveSettings();
     this.applyOfficialGraphMode();
     if (notify) {
@@ -339,14 +350,14 @@ export default class EnhancedGraphPlugin extends Plugin implements PluginHost, S
   }
 
   private async toggleOfficialGraph(): Promise<void> {
-    if (this.settings.officialGraphMode !== "off") {
+    if (this.settings.officialGraphEnabled) {
       await this.setOfficialGraphMode("off");
       return;
     }
     // The view-type strings live only in `official-internals`; ask it rather
     // than repeating the literals here.
     if (!hasOfficialGraphView(this.app)) new Notice(t("notice.officialNoView"));
-    await this.setOfficialGraphMode("community");
+    await this.setOfficialGraphMode(this.settings.officialGraphColorMode);
   }
 
   /** Re-seed every open standalone view from the built-in graph's layout. */

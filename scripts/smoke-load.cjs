@@ -215,6 +215,11 @@ const app = {
     revealLeaf: async () => {},
     detachLeavesOfType: () => {},
     getActiveFile: () => null,
+    // The enhancement is ON by default, so `onload` waits for this before it
+    // starts. Without it the stub is simply not the API the plugin is written
+    // against, and the smoke test fails for the stub's reason rather than a real
+    // one. Called back straight away: the layout is ready, as far as this goes.
+    onLayoutReady: (callback) => callback(),
   },
 };
 

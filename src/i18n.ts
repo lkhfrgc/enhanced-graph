@@ -184,8 +184,7 @@ const zh = {
   "settings.layoutCacheDesc": "已缓存 {count} 个节点位置。清空后下次打开会重新计算布局。",
   "settings.officialGraph": "官方图谱增强",
   "settings.officialGraphDesc":
-    "在 Obsidian 内置的关系图谱上叠加社区着色、关联度浮层与洞察侧栏。该功能与 Obsidian 版本绑定，更新后可能失效——失效时官方图谱本身不受影响。",
-  "settings.officialGraphOff": "关闭（不触碰官方图谱）",
+    "在 Obsidian 内置的关系图谱上叠加着色、关联度浮层与洞察侧栏。开启后按内置图谱工具栏里的「按社区着色 / 按页面类型着色」切换配色。该功能与 Obsidian 版本绑定，更新后可能失效——失效时官方图谱本身不受影响。",
   "settings.officialGraphCommunity": "按社区着色",
   "settings.officialGraphType": "按页面类型着色",
   "settings.officialGraphWarning": "注意：开启后会覆盖官方图谱的 color groups 着色，关闭时自动还原。",
@@ -390,8 +389,7 @@ const en: Record<MessageKey, string> = {
   "settings.layoutCacheDesc": "{count} node positions cached. Clearing it recomputes the layout next time.",
   "settings.officialGraph": "Enhance the built-in graph",
   "settings.officialGraphDesc":
-    "Overlays community colouring, a relevance tooltip and an insights panel on Obsidian's built-in graph view. It is tied to the Obsidian version, so an update may break it — when it does, the built-in graph itself is unaffected.",
-  "settings.officialGraphOff": "Off (leave the built-in graph untouched)",
+    "Overlays colouring, a relevance tooltip and an insights panel on Obsidian's built-in graph view. Once on, the built-in graph's own toolbar switches between colouring by community and by page type. It is tied to the Obsidian version, so an update may break it — when it does, the built-in graph itself is unaffected.",
   "settings.officialGraphCommunity": "Colour by community",
   "settings.officialGraphType": "Colour by page type",
   "settings.officialGraphWarning": "Note: this overrides the built-in graph's colour groups while active, and restores them when turned off.",

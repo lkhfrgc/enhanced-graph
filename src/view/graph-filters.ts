@@ -30,7 +30,8 @@ export interface FilterOptions {
    */
   readonly communities: readonly CommunityInfo[];
   readonly hiddenCommunities: ReadonlySet<number>;
-  readonly hiddenTags: ReadonlySet<string>;
+  /** The ticks on screen: whichever list the current mode reads. */
+  readonly selectedTags: ReadonlySet<string>;
   /**
    * Whether the ticked tags are the ones to hide, or the only ones to keep.
    *
@@ -263,14 +264,14 @@ function renderTagRows(
    * list under the pointer and steal focus from the search box), so a
    * conditionally created button would not appear until some unrelated re-render
    * happened — i.e. it would be unreachable exactly when it is needed.
-   * `options.hiddenTags` is the view's live set, so reading it after a toggle is
+   * `options.selectedTags` is the view's live set, so reading it after a toggle is
    * enough to know what to show.
    */
   const tickedRows = (): HTMLInputElement[] =>
     Array.from(list.querySelectorAll<HTMLInputElement>("input[type=checkbox]"));
   const syncBulk = (): void => {
     const rows = tickedRows();
-    clear.classList.toggle("is-hidden", options.hiddenTags.size === 0);
+    clear.classList.toggle("is-hidden", options.selectedTags.size === 0);
     selectAll.classList.toggle("is-hidden", rows.every((input) => input.checked));
   };
   selectAll.addEventListener("click", () => {
@@ -279,7 +280,7 @@ function renderTagRows(
     syncBulk();
   });
   clear.addEventListener("click", () => {
-    if (options.hiddenTags.size === 0) return;
+    if (options.selectedTags.size === 0) return;
     options.onClearTags();
     for (const input of tickedRows()) input.checked = false;
     syncBulk();
@@ -290,7 +291,7 @@ function renderTagRows(
     const matched = all.filter((entry) => tagMatches(entry.tag, tagQuery));
     // A hidden tag stays pinned to the top even when the query filters it out,
     // otherwise the thing the user just switched off would vanish from view.
-    const pinned = all.filter((entry) => options.hiddenTags.has(entry.tag) && !matched.includes(entry));
+    const pinned = all.filter((entry) => options.selectedTags.has(entry.tag) && !matched.includes(entry));
     const rows = [...pinned, ...matched];
 
     if (rows.length === 0) {
@@ -305,7 +306,7 @@ function renderTagRows(
       const row = list.createEl("label", { cls: "enhanced-graph-checkbox" });
       const input = row.createEl("input", { type: "checkbox" });
       // Ticked means "this filter acts on this tag" — the mode above says which way.
-      input.checked = options.hiddenTags.has(entry.tag);
+      input.checked = options.selectedTags.has(entry.tag);
       input.dataset.tag = entry.tag;
       input.addEventListener("change", () => {
         options.onToggleTag(entry.tag, input.checked);

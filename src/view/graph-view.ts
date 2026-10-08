@@ -64,7 +64,7 @@ import {
   runLayoutAsync,
   runLayoutSync,
 } from "./layout";
-import { filterEdges, filterNodes, type VisibilityFilters } from "./visibility";
+import { collectTags, filterEdges, filterNodes, type VisibilityFilters } from "./visibility";
 
 /**
  * ForceAtlas2 steps taken per gravity-drag event.
@@ -102,7 +102,10 @@ export class EnhancedGraphView extends ItemView {
   private colorMode: ColorMode = "type";
   private searchQuery = "";
   private hiddenTypes = new Set<PageType>();
+  /** Tags to exclude; only read while the tag filter is in exclude mode. */
   private hiddenTags = new Set<string>();
+  /** Tags to keep, or `null` before anything has been ticked in include mode. */
+  private includedTags: Set<string> | null = null;
   private showLabels = true;
   private panelMode: PanelMode = "insights";
   private showDismissed = false;
@@ -348,10 +351,44 @@ export class EnhancedGraphView extends ItemView {
       // two views share nothing else about what is on screen.
       hiddenCommunities: new Set(this.plugin.settings.hiddenCommunities),
       hiddenTags: this.hiddenTags,
+      includedTags: this.includedTags,
       tagFilterMode: this.plugin.settings.tagFilterMode,
       hideStructural: this.plugin.settings.hideStructural,
       hideIsolated: this.plugin.settings.hideIsolated,
     };
+  }
+
+  /**
+   * The tag list the current mode reads, as the panel's ticks.
+   *
+   * Include mode with no selection yet shows everything ticked, which is what it
+   * means — every tag is kept until one is taken away.
+   */
+  private activeTagSelection(): ReadonlySet<string> {
+    if (this.plugin.settings.tagFilterMode === "exclude") return this.hiddenTags;
+    if (this.includedTags !== null) return this.includedTags;
+    return new Set(collectTags(this.graph.nodes).map((entry) => entry.tag));
+  }
+
+  /**
+   * Write the ticks back to the list the current mode owns.
+   *
+   * Mutated IN PLACE, never replaced: the filters panel captures this set when it
+   * renders and deliberately does not re-render on every toggle (that would rebuild
+   * the list under the pointer and steal focus from the search box). Handing it a
+   * new set would leave it reading a stale empty one, and its own bulk buttons would
+   * then decide there was nothing to do.
+   */
+  private setTagSelection(tags: Iterable<string>): void {
+    const target = this.plugin.settings.tagFilterMode === "exclude" ? this.hiddenTags : this.includeSet();
+    target.clear();
+    for (const tag of tags) target.add(tag);
+  }
+
+  /** Include mode's own list, created on first use so it can be mutated in place. */
+  private includeSet(): Set<string> {
+    if (this.includedTags === null) this.includedTags = new Set();
+    return this.includedTags;
   }
 
   private visibleNodes(): GraphNode[] {
@@ -932,7 +969,8 @@ export class EnhancedGraphView extends ItemView {
     renderFilters(el, {
       graph: this.graph,
       hiddenTypes: this.hiddenTypes,
-      hiddenTags: this.hiddenTags,
+      // The ticks the panel shows are whichever list the CURRENT mode reads.
+      selectedTags: this.activeTagSelection(),
       hideIsolated: this.plugin.settings.hideIsolated,
       hideStructural: this.plugin.settings.hideStructural,
       onToggleType: (type, visible) => {
@@ -942,24 +980,38 @@ export class EnhancedGraphView extends ItemView {
         this.renderLegend();
       },
       onToggleTag: (tag, selected) => {
-        if (selected) this.hiddenTags.add(tag);
-        else this.hiddenTags.delete(tag);
+        const next = new Set(this.activeTagSelection());
+        if (selected) next.add(tag);
+        else next.delete(tag);
+        this.setTagSelection(next);
         void this.applyGraphData();
         this.renderLegend();
       },
+      // 全清 empties the selection IN THE MODE ON SCREEN: excluding nothing more,
+      // or — while including — keeping nothing at all. Each mode has its own list,
+      // so this cannot disturb the other one's ticks.
       onClearTags: () => {
-        this.hiddenTags.clear();
+        this.setTagSelection(new Set());
         void this.applyGraphData();
         this.renderLegend();
       },
       tagFilterMode: this.plugin.settings.tagFilterMode,
       onSelectAllTags: (tags) => {
-        for (const tag of tags) if (tag.length > 0) this.hiddenTags.add(tag);
+        const next = new Set(this.activeTagSelection());
+        for (const tag of tags) if (tag.length > 0) next.add(tag);
+        this.setTagSelection(next);
         void this.applyGraphData();
         this.renderLegend();
       },
+      // Each mode keeps its own selection, so switching back and forth never
+      // rewrites the other one. Include mode opens fully ticked the first time it is
+      // entered — everything kept — because a fresh include list is `null`, and an
+      // empty one would mean the opposite: keep nothing.
       onSetTagFilterMode: (mode) => {
         this.plugin.settings.tagFilterMode = mode;
+        if (mode === "include" && this.includedTags === null) {
+          this.includedTags = new Set(collectTags(this.graph.nodes).map((entry) => entry.tag));
+        }
         void this.plugin.saveSettings().then(() => this.applyGraphData());
         this.renderPanel();
         this.renderLegend();

@@ -141,6 +141,7 @@ class FakeOfficialRenderer {
 /** The plugin's settings, in the shape `main.ts` reads and writes them. */
 const settings = {
   hiddenTags: [] as string[],
+  includedTags: null as string[] | null,
   tagFilterMode: "exclude" as "exclude" | "include",
   hiddenTypes: [] as string[],
   hiddenCommunities: [] as number[],
@@ -177,16 +178,12 @@ enhancer = new OfficialGraphEnhancer({
     hiddenTypes: new Set(settings.hiddenTypes as never[]),
     hiddenCommunities: new Set(settings.hiddenCommunities),
     hiddenTags: new Set(settings.hiddenTags),
+    includedTags: settings.includedTags === null ? null : new Set(settings.includedTags),
     tagFilterMode: settings.tagFilterMode,
     hideStructural: settings.hideStructural,
     hideIsolated: settings.hideIsolated,
   }),
   getTagFilterMode: () => settings.tagFilterMode,
-  onSetTagFilterMode: async (mode) => {
-    settings.tagFilterMode = mode;
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    enhancer?.refresh();
-  },
   onSetVisibility: async (patch) => {
     Object.assign(settings, patch);
     // `main.ts` awaits the settings write and only then re-renders the views. The
@@ -215,6 +212,8 @@ interface OfficialFiltersApi {
   enhancer: OfficialGraphEnhancer;
   /** How many distinct tags the fixture's graph carries. */
   tagCount: number;
+  /** Each page's tags, so a check can work out what a filter should keep. */
+  nodeTags: Record<string, readonly string[]>;
   /** The stand-in renderer, so a check can move its camera. */
   renderer: FakeOfficialRenderer;
 }
@@ -223,6 +222,7 @@ interface OfficialFiltersApi {
   settings,
   enhancer,
   tagCount: TAGS.length,
+  nodeTags: Object.fromEntries(nodes.map((node) => [node.id, node.tags])),
   renderer,
 };
 (window as unknown as { __OFFICIAL_FILTERS_READY__: boolean }).__OFFICIAL_FILTERS_READY__ = true;

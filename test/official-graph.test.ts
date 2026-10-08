@@ -194,6 +194,7 @@ interface Harness {
   rebuilds: number;
   weights: { directLink: number; sourceOverlap: number; commonNeighbor: number; coCitation: number };
   hiddenTags: string[];
+  includedTags: string[] | null;
   tagFilterMode: "exclude" | "include";
   /** Knowledge clusters the user has excluded, by id. */
   hiddenCommunities: number[];
@@ -238,6 +239,7 @@ function setup(
     rebuilds: 0,
     weights: { directLink: 3, sourceOverlap: 4, commonNeighbor: 1.5, coCitation: 1 },
     hiddenTags: [],
+    includedTags: null,
     tagFilterMode: "exclude",
     hiddenCommunities: [],
     hideStructural: false,
@@ -261,6 +263,7 @@ function setup(
       hiddenTypes: new Set(state.hiddenTypes as never[]),
       hiddenCommunities: new Set(state.hiddenCommunities),
       hiddenTags: new Set(state.hiddenTags),
+      includedTags: state.includedTags === null ? null : new Set(state.includedTags),
       tagFilterMode: state.tagFilterMode,
       hideStructural: state.hideStructural,
       hideIsolated: state.hideIsolated,
@@ -307,9 +310,6 @@ function setup(
       state.opened.push(nodeId);
     },
     getTagFilterMode: () => state.tagFilterMode,
-    onSetTagFilterMode: (mode) => {
-      state.tagFilterMode = mode;
-    },
   });
   return state;
 }
@@ -433,6 +433,7 @@ describe("OfficialGraphEnhancer colouring", () => {
         hiddenCommunities: new Set(),
         hiddenTags: new Set(),
         tagFilterMode: "exclude",
+        includedTags: null,
         hideStructural: false,
         hideIsolated: false,
       }),
@@ -450,7 +451,6 @@ describe("OfficialGraphEnhancer colouring", () => {
       onDismiss: () => {},
       onOpenNode: () => {},
       getTagFilterMode: () => "exclude" as const,
-      onSetTagFilterMode: () => {},
     });
     enhancer.start();
     expect(renderer.nodeLookup["a.md"].color?.rgb).toBe(hexToRgbInt(communityColor(1)));
@@ -509,6 +509,7 @@ describe("OfficialGraphEnhancer hover", () => {
         hiddenCommunities: new Set(),
         hiddenTags: new Set(),
         tagFilterMode: "exclude",
+        includedTags: null,
         hideStructural: false,
         hideIsolated: false,
       }),
@@ -526,7 +527,6 @@ describe("OfficialGraphEnhancer hover", () => {
       onDismiss: () => {},
       onOpenNode: () => {},
       getTagFilterMode: () => "exclude" as const,
-      onSetTagFilterMode: () => {},
     });
     enhancer.start();
 
@@ -662,6 +662,7 @@ describe("OfficialGraphEnhancer panel and lifecycle", () => {
         hiddenCommunities: new Set(),
         hiddenTags: new Set(),
         tagFilterMode: "exclude",
+        includedTags: null,
         hideStructural: false,
         hideIsolated: false,
       }),
@@ -679,7 +680,6 @@ describe("OfficialGraphEnhancer panel and lifecycle", () => {
       onDismiss: () => {},
       onOpenNode: () => {},
       getTagFilterMode: () => "exclude" as const,
-      onSetTagFilterMode: () => {},
     });
     enhancer.start();
     expect(renderer.containerEl.querySelectorAll(".enhanced-graph-official-panel")).toHaveLength(1);
@@ -747,6 +747,7 @@ describe("degradation", () => {
         hiddenCommunities: new Set(),
         hiddenTags: new Set(),
         tagFilterMode: "exclude",
+        includedTags: null,
         hideStructural: false,
         hideIsolated: false,
       }),
@@ -764,7 +765,6 @@ describe("degradation", () => {
       onDismiss: () => {},
       onOpenNode: () => {},
       getTagFilterMode: () => "exclude" as const,
-      onSetTagFilterMode: () => {},
     });
 
     expect(() => {
@@ -791,6 +791,7 @@ describe("degradation", () => {
         hiddenCommunities: new Set(),
         hiddenTags: new Set(),
         tagFilterMode: "exclude",
+        includedTags: null,
         hideStructural: false,
         hideIsolated: false,
       }),
@@ -808,7 +809,6 @@ describe("degradation", () => {
       onDismiss: () => {},
       onOpenNode: () => {},
       getTagFilterMode: () => "exclude" as const,
-      onSetTagFilterMode: () => {},
     });
 
     expect(() => enhancer.start()).not.toThrow();
@@ -1648,7 +1648,7 @@ describe("the built-in graph's toolbar", () => {
     expect(tagBoxes().filter((box) => box.checked)).toHaveLength(0);
   });
 
-  it("ticks every listed tag with 全选, and filters by inclusion on request", async () => {
+  it("ticks every listed tag with 全选, and gives each mode its own default selection", async () => {
     const h = setup(
       [{ id: "a.md" }, { id: "b.md" }, { id: "c.md" }],
       [
@@ -1674,13 +1674,22 @@ describe("the built-in graph's toolbar", () => {
     await settle();
     expect([...h.hiddenTags].sort()).toEqual(["alpha", "beta", "gamma"]);
 
-    // Switched to inclusion, the same ticks mean "keep only these" — one mode, one
-    // selection, read the other way round.
+    // Each mode owns its own selection, so switching back and forth never rewrites
+    // the other one. Include mode opens fully ticked the first time it is entered —
+    // everything kept — and the exclude ticks are exactly as they were left.
     panelButton(t("filter.tagModeInclude")).dispatchEvent(new MouseEvent("click", { bubbles: true }));
     await settle();
     expect(h.tagFilterMode).toBe("include");
+    expect([...h.includedTags!].sort()).toEqual(["alpha", "beta", "gamma"]);
+    expect([...h.hiddenTags].sort()).toEqual(["alpha", "beta", "gamma"]);
 
-    // And back to exclusion, where the ticks are the tags being hidden.
+    // Clearing the ticks while including means keep NOTHING — an empty selection is
+    // a choice, not the absence of one.
+    panelButton(t("filter.clearTags")).dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await settle();
+    expect(h.includedTags).toEqual([]);
+    expect([...h.hiddenTags].sort()).toEqual(["alpha", "beta", "gamma"]);
+
     panelButton(t("filter.tagModeExclude")).dispatchEvent(new MouseEvent("click", { bubbles: true }));
     await settle();
     expect(h.tagFilterMode).toBe("exclude");

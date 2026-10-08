@@ -130,7 +130,7 @@ const readState = () =>
     const plugin = window.app.plugins.plugins[id];
     return {
       tagRows: boxes.length,
-      unticked: boxes.filter((el) => !el.checked).length,
+      ticked: boxes.filter((el) => el.checked).length,
       hiddenTags: (plugin.settings.hiddenTags ?? []).slice(),
       hideIsolated: plugin.settings.hideIsolated,
       hideStructural: plugin.settings.hideStructural,
@@ -179,7 +179,7 @@ const round = async (label, query) => {
   }
 
   const before = await readState();
-  console.log(`  rows ${before.tagRows}, unticked ${before.unticked}, hidden ${JSON.stringify(before.hiddenTags)}`);
+  console.log(`  rows ${before.tagRows}, ticked ${before.ticked}, hidden ${JSON.stringify(before.hiddenTags)}`);
 
   // Three real presses on three tag checkboxes. Each one focuses the box, which
   // is what defers the panel's re-render for the whole sequence.
@@ -190,26 +190,26 @@ const round = async (label, query) => {
   }
   const afterHiding = await readState();
   console.log(
-    `  after three presses: unticked ${afterHiding.unticked}, hidden ${JSON.stringify(afterHiding.hiddenTags)}, ` +
+    `  after three presses: ticked ${afterHiding.ticked}, hidden ${JSON.stringify(afterHiding.hiddenTags)}, ` +
       `focus ${afterHiding.focus} inPanel=${afterHiding.focusInPanel}`,
   );
   check(
-    `${label}: three presses hide three tags, and the settings keep all three`,
-    afterHiding.hiddenTags.length === 3 && afterHiding.unticked === 3,
-    `${afterHiding.unticked} unticked on screen, ${afterHiding.hiddenTags.length} in the settings (want 3 and 3)`,
+    `${label}: three presses exclude three tags, and the settings keep all three`,
+    afterHiding.hiddenTags.length === 3 && afterHiding.ticked === 3,
+    `${afterHiding.ticked} ticked on screen, ${afterHiding.hiddenTags.length} in the settings (want 3 and 3)`,
   );
 
   // The press under test, held the way a person holds it.
-  await page.locator("button", { hasText: "全部恢复" }).first().click({ delay: PRESS_MS });
+  await page.locator("button", { hasText: "全清" }).first().click({ delay: PRESS_MS });
   await page.waitForTimeout(1200);
   const afterRestore = await readState();
   console.log(
-    `  after 全部恢复: unticked ${afterRestore.unticked}, hidden ${JSON.stringify(afterRestore.hiddenTags)}`,
+    `  after 全清: ticked ${afterRestore.ticked}, hidden ${JSON.stringify(afterRestore.hiddenTags)}`,
   );
   check(
-    `${label}: ONE press of 全部恢复 brings every tag back`,
-    afterRestore.hiddenTags.length === 0 && afterRestore.unticked === 0,
-    `${afterRestore.unticked} unticked on screen, ${afterRestore.hiddenTags.length} in the settings (want 0 and 0)`,
+    `${label}: ONE press of 全清 clears the tag selection`,
+    afterRestore.hiddenTags.length === 0 && afterRestore.ticked === 0,
+    `${afterRestore.ticked} ticked on screen, ${afterRestore.hiddenTags.length} in the settings (want 0 and 0)`,
   );
   check(
     `${label}: the visibility switches were left alone`,

@@ -16,6 +16,7 @@ import { EnhancedGraphView } from "../src/view/graph-view";
 import { captureOfficialLayout } from "../src/integrate/official-layout";
 import { DEFAULT_RELEVANCE_WEIGHTS, type ColorMode, type WikiGraph } from "../src/types";
 import type { GraphInsights } from "../src/core/insights";
+import type { EnhancedGraphSettings } from "../src/settings-model";
 
 // `main.ts` is only referenced by the view through a type-only import, so the
 // harness never pulls the Obsidian plugin lifecycle in.
@@ -52,13 +53,15 @@ const snapshot: Snapshot = {
  * — a missing `edgeWidthScale` made every edge render at the same width, which
  * looked like a rendering bug rather than a fixture gap.
  */
-const settings = {
+const settings: EnhancedGraphSettings = {
   language: "zh" as const,
   weights: { ...DEFAULT_RELEVANCE_WEIGHTS },
   excludeFolders: [] as string[],
   hiddenTypes: [] as string[],
   hiddenCommunities: [] as number[],
   hiddenTags: [] as string[],
+  includedTags: null,
+  tagFilterMode: "exclude" as const,
   hideIsolated: false,
   hideStructural: true,
   showLabels: true,
@@ -76,7 +79,10 @@ const settings = {
   focusMaxIntermediates: 0,
   typeColorOverrides: {} as Record<string, string>,
   communityColorOverrides: {} as Record<string, string>,
-  officialGraphMode: "off" as const,
+  // The standalone harness drives the view, not the built-in graph enhancement.
+  officialGraphEnabled: false,
+  officialGraphColorMode: "community" as const,
+  officialLineColor: null,
   // Off by default so the existing checks exercise the ForceAtlas2 path; the
   // layout-reuse check flips this on and installs a fake built-in graph.
   reuseOfficialLayout: false,
@@ -84,9 +90,22 @@ const settings = {
   dismissedInsights: [] as string[],
 };
 
+/**
+ * A markdown file for the stubbed vault.
+ *
+ * Built the way Obsidian's own type demands — its `TFile` constructor takes no
+ * arguments, and the vault supplies the path — rather than the stub's one-argument
+ * shortcut, so the harness type-checks against the real API.
+ */
+function makeFile(path: string): TFile {
+  const file = new TFile();
+  (file as { path: string }).path = path;
+  return file;
+}
+
 const app = {
   vault: {
-    getAbstractFileByPath: (path: string) => (path.endsWith(".md") ? new TFile(path) : null),
+    getAbstractFileByPath: (path: string) => (path.endsWith(".md") ? makeFile(path) : null),
     getMarkdownFiles: () => [] as TFile[],
   },
   workspace: {

@@ -28,7 +28,7 @@ import { edgeKey, edgeKeyEndpoints } from "../core/graph-keys";
 import { findConnectingPaths } from "../core/paths";
 import { type FilterSection, renderFilters } from "../view/graph-filters";
 import { renderWeights } from "../view/graph-weights";
-import { filterNodes, type TagFilterMode, type VisibilityFilters } from "../view/visibility";
+import { collectTags, filterNodes, type TagFilterMode, type VisibilityFilters } from "../view/visibility";
 import type { GraphNode, OfficialGraphMode, RelevanceWeights, WikiGraph } from "../types";
 import { t } from "../i18n";
 import { countUndismissed } from "../view/insights-panel";
@@ -177,7 +177,6 @@ export interface OfficialGraphDeps {
   readonly onToggleType: (pageType: string) => Promise<void> | void;
   /** Whether the ticked tags are hidden or kept; shared with the standalone view. */
   readonly getTagFilterMode: () => TagFilterMode;
-  readonly onSetTagFilterMode: (mode: TagFilterMode) => Promise<void> | void;
 }
 
 interface Attachment {
@@ -638,12 +637,24 @@ export class OfficialGraphEnhancer {
     const { graph } = this.deps.getData();
     const filters = this.deps.getVisibility();
     const hiddenTypes = new Set([...filters.hiddenTypes].filter((type) => graph.nodes.some((n) => n.type === type)));
+    const excluding = filters.tagFilterMode === "exclude";
+    /** The ticks on screen: whichever list the mode on screen reads. */
+    const selection = (): ReadonlySet<string> => {
+      if (excluding) return this.deps.getVisibility().hiddenTags;
+      const included = this.deps.getVisibility().includedTags;
+      // No selection yet keeps everything, and that is what the list shows: every
+      // tag ticked until one is taken away.
+      return included ?? new Set(collectTags(graph.nodes).map((entry) => entry.tag));
+    };
+    /** Write ticks back to the list the mode on screen owns; never the other one. */
+    const setSelection = (tags: string[]): Promise<void> | void =>
+      this.deps.onSetVisibility(excluding ? { hiddenTags: tags } : { includedTags: tags });
     renderFilters(el, {
       graph,
       hiddenTypes: hiddenTypes as never,
       communities: graph.communities,
       hiddenCommunities: liveSet(() => this.deps.getVisibility().hiddenCommunities),
-      hiddenTags: liveSet(() => this.deps.getVisibility().hiddenTags),
+      selectedTags: liveSet(() => selection()),
       hideIsolated: filters.hideIsolated,
       hideStructural: filters.hideStructural,
       onToggleType: (type, visible) => {
@@ -660,35 +671,52 @@ export class OfficialGraphEnhancer {
       },
       onClearCommunities: () => void this.deps.onSetVisibility({ hiddenCommunities: [] }),
       onToggleTag: (tag, selected) => {
-        const next = new Set(this.deps.getVisibility().hiddenTags);
+        const next = new Set(selection());
         if (selected) next.add(tag);
         else next.delete(tag);
-        void this.deps.onSetVisibility({ hiddenTags: [...next] });
+        void setSelection([...next]);
       },
       // Tags only. The buttons live in the tag group and act on what that group
       // did; the hidden-type and visibility switches are separate decisions the
       // user made elsewhere, and clearing them here would silently overrule them.
       //
+      // 全清 empties the selection in the mode on screen: excluding nothing more, or
+      // — while including — keeping nothing at all. Each mode owns its own list, so
+      // this cannot disturb the other one's ticks.
+      //
       // Redrawn once the write lands: the boxes are ticked in place as well, but
       // a tag that was pinned to the top because it was selected has to move back
       // into its place in the list, and only a redraw does that.
       onClearTags: () => {
-        void Promise.resolve(this.deps.onSetVisibility({ hiddenTags: [] })).then(() => {
+        void Promise.resolve(setSelection([])).then(() => {
           el.empty();
           this.renderFiltersBody(el);
         });
       },
       onSelectAllTags: (tags) => {
-        const next = new Set(this.deps.getVisibility().hiddenTags);
+        const next = new Set(selection());
         for (const tag of tags) if (tag.length > 0) next.add(tag);
-        void Promise.resolve(this.deps.onSetVisibility({ hiddenTags: [...next] })).then(() => {
+        void Promise.resolve(setSelection([...next])).then(() => {
           el.empty();
           this.renderFiltersBody(el);
         });
       },
       tagFilterMode: this.deps.getTagFilterMode(),
+      // Each mode keeps its own selection, so switching back and forth never
+      // rewrites the other one. Include mode opens fully ticked the first time it is
+      // entered — everything kept — because a fresh include list is `null`, and an
+      // empty one means the opposite: keep nothing. Written in one call, so the
+      // panel is redrawn once and never shows a half-applied state.
       onSetTagFilterMode: (mode) => {
-        void Promise.resolve(this.deps.onSetTagFilterMode(mode)).then(() => {
+        const firstTimeIncluding =
+          mode === "include" && this.deps.getVisibility().includedTags === null;
+        void Promise.resolve(
+          this.deps.onSetVisibility(
+            firstTimeIncluding
+              ? { tagFilterMode: mode, includedTags: collectTags(graph.nodes).map((e) => e.tag) }
+              : { tagFilterMode: mode },
+          ),
+        ).then(() => {
           el.empty();
           this.renderFiltersBody(el);
         });
@@ -1675,6 +1703,11 @@ export class OfficialGraphEnhancer {
       filters.hiddenTypes.size > 0 ||
       filters.hiddenCommunities.size > 0 ||
       filters.hiddenTags.size > 0 ||
+      // Include mode hides by NOT keeping: a selection that is not null narrows the
+      // graph even when the exclude list is empty, and an empty one is the narrowest
+      // selection there is — keep nothing. Missing this made the fast path hand the
+      // whole graph back as if no filter were in force.
+      (filters.tagFilterMode === "include" && filters.includedTags !== null) ||
       filters.hideStructural ||
       filters.hideIsolated;
     // The search query is deliberately NOT part of this. Searching marks the

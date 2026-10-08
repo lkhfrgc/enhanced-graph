@@ -111,8 +111,9 @@ const state = () =>
     const boxes = [...document.querySelectorAll(".enhanced-graph-tag-list input[type=checkbox]")];
     return {
       tagRows: boxes.length,
-      unticked: boxes.filter((el) => !el.checked).length,
+      selected: boxes.filter((el) => el.checked).length,
       hiddenTags: api.settings.hiddenTags.slice(),
+      tagMode: api.settings.tagFilterMode,
       activeTag: document.activeElement?.tagName ?? null,
       focusInFilters: Boolean(document.activeElement?.closest?.(".enhanced-graph-official-filters")),
     };
@@ -151,13 +152,14 @@ try {
   const tagRowsExpected = await page.evaluate(() => window.__OFFICIAL_FILTERS__.tagCount);
   check(
     "the filters panel lists a checkbox per tag",
-    before.tagRows === tagRowsExpected && before.unticked === 0,
-    `${before.tagRows} rows, ${before.unticked} unticked (want ${tagRowsExpected})`,
+    before.tagRows === tagRowsExpected && before.selected === 0,
+    `${before.tagRows} rows, ${before.selected} ticked (want ${tagRowsExpected} rows, none ticked)`,
   );
 
   // Three real presses on three tag checkboxes. Each one focuses its box, which
   // is what defers the panel's re-render for the whole sequence — the state the
-  // restore button used to read a stale copy of.
+  // bulk button used to read a stale copy of. A tick now means "the tag this
+  // filter acts on", and the default mode excludes it.
   const boxes = page.locator(".enhanced-graph-tag-list input[type=checkbox]");
   for (let index = 0; index < 3; index += 1) {
     await boxes.nth(index).click({ delay: PRESS_MS });
@@ -165,13 +167,13 @@ try {
   }
   const hidden = await state();
   console.log(
-    `\n  after three presses: ${hidden.unticked} unticked on screen, ` +
+    `\n  after three presses: ${hidden.selected} ticked on screen, ` +
       `${JSON.stringify(hidden.hiddenTags)} in the settings, focus ${hidden.activeTag} (in panel: ${hidden.focusInFilters})`,
   );
   check(
-    "three presses hide three tags, and every one of them reaches the settings",
-    hidden.unticked === 3 && hidden.hiddenTags.length === 3,
-    `${hidden.unticked} unticked, ${hidden.hiddenTags.length} hidden (want 3 and 3)`,
+    "three presses exclude three tags, and every one of them reaches the settings",
+    hidden.selected === 3 && hidden.hiddenTags.length === 3,
+    `${hidden.selected} ticked, ${hidden.hiddenTags.length} excluded (want 3 and 3)`,
   );
   check(
     "a tag checkbox keeps focus, so the panel is NOT rebuilt between presses",
@@ -181,24 +183,129 @@ try {
 
   // The press under test. Held, like the ones above, because that is the press
   // that used to be dropped: the panel rebuilt the button mid-press.
-  await page.locator("button", { hasText: "全部恢复" }).first().click({ delay: PRESS_MS });
+  await page.locator("button", { hasText: "全清" }).first().click({ delay: PRESS_MS });
   await page.waitForTimeout(800);
   const restored = await state();
   console.log(
-    `  after one press of 全部恢复: ${restored.unticked} unticked on screen, ` +
+    `  after one press of 全清: ${restored.selected} ticked on screen, ` +
       `${JSON.stringify(restored.hiddenTags)} in the settings\n`,
   );
   check(
-    "ONE press of 全部恢复 leaves every tag ticked",
-    restored.unticked === 0,
-    `${restored.unticked} tag rows unticked (want 0)`,
+    "ONE press of 全清 leaves every tag unticked",
+    restored.selected === 0,
+    `${restored.selected} tag rows ticked (want 0)`,
   );
   check(
-    "ONE press of 全部恢复 empties the hidden tags",
+    "ONE press of 全清 clears the tag selection",
     restored.hiddenTags.length === 0,
-    `${restored.hiddenTags.length} hidden (want 0)`,
+    `${restored.hiddenTags.length} ticked (want 0)`,
   );
   check("nothing logged an error while the panel was driven", consoleErrors.length === 0, consoleErrors.join(" | "));
+
+  // --- the two tag modes, end to end -------------------------------------
+  // Each mode starts in its own natural state — excluding with nothing ticked,
+  // including with everything ticked — so switching never leaves the graph filtered
+  // by the other mode's ticks. Counted on the payload the built-in renderer was
+  // actually handed, so this is the filter the user sees rather than a setting.
+  const drawnNodes = () =>
+    page.evaluate(() =>
+      Object.keys(window.__OFFICIAL_FILTERS__.renderer.lastData?.nodes ?? {}).length,
+    );
+  const carries = (tag) =>
+    page.evaluate(
+      (name) =>
+        Object.values(window.__OFFICIAL_FILTERS__.nodeTags).filter((tags) => tags.includes(name)).length,
+      tag,
+    );
+  const tickedRows = () =>
+    page.evaluate(
+      () =>
+        [...document.querySelectorAll(".enhanced-graph-tag-list input[type=checkbox]")].filter(
+          (el) => el.checked,
+        ).length,
+    );
+  const rows = page.locator(".enhanced-graph-tag-list input[type=checkbox]");
+  const firstName = await page.evaluate(
+    () => document.querySelector(".enhanced-graph-tag-name")?.textContent ?? "",
+  );
+  const total = await drawnNodes();
+  const carriers = await carries(firstName);
+
+  await page.locator("button", { hasText: "包含标签" }).first().click({ delay: PRESS_MS });
+  await page.waitForTimeout(600);
+  const includeDefaultTicked = await tickedRows();
+  const includeDefaultDrawn = await drawnNodes();
+
+  // 全清 while including keeps NOTHING: an empty selection is a choice the user
+  // made, not the absence of one, so the graph empties.
+  await page.locator("button", { hasText: "全清" }).first().click({ delay: PRESS_MS });
+  await page.waitForTimeout(600);
+  const clearedTicked = await tickedRows();
+  const clearedDrawn = await drawnNodes();
+
+  // With one tag ticked, including keeps exactly its carriers.
+  await rows.first().click({ delay: PRESS_MS });
+  await page.waitForTimeout(600);
+  const includedDrawn = await drawnNodes();
+
+  await page.locator("button", { hasText: "排除标签" }).first().click({ delay: PRESS_MS });
+  await page.waitForTimeout(600);
+  const excludeDefaultTicked = await tickedRows();
+  const excludeDefaultDrawn = await drawnNodes();
+  await rows.first().click({ delay: PRESS_MS });
+  await page.waitForTimeout(600);
+  const excludedDrawn = await drawnNodes();
+
+  // Back to including: its own ticks are exactly as they were left, and so is the
+  // graph. Each mode keeps its own list; switching rewrites neither.
+  await page.locator("button", { hasText: "包含标签" }).first().click({ delay: PRESS_MS });
+  await page.waitForTimeout(600);
+  const includeRememberedTicked = await tickedRows();
+  const includeRememberedDrawn = await drawnNodes();
+  await page.locator("button", { hasText: "全清" }).first().click({ delay: PRESS_MS });
+  await page.waitForTimeout(600);
+  await page.locator("button", { hasText: "排除标签" }).first().click({ delay: PRESS_MS });
+  await page.waitForTimeout(600);
+  await page.locator("button", { hasText: "全清" }).first().click({ delay: PRESS_MS });
+  await page.waitForTimeout(600);
+
+  console.log(
+    `\n  tag modes: "${firstName}" is on ${carriers} of ${total} pages; ` +
+      `include default ${includeDefaultTicked} ticked → ${includeDefaultDrawn} drawn; ` +
+      `全清 → ${clearedTicked} ticked, ${clearedDrawn} drawn; include one → ${includedDrawn}; ` +
+      `exclude default ${excludeDefaultTicked} ticked → ${excludeDefaultDrawn} drawn; exclude one → ${excludedDrawn}; ` +
+      `back to include → ${includeRememberedTicked} ticked, ${includeRememberedDrawn} drawn\n`,
+  );
+  check(
+    "包含标签 opens fully ticked and 排除标签 starts empty, both showing the whole graph",
+    includeDefaultTicked === total &&
+      includeDefaultDrawn === total &&
+      excludeDefaultTicked === 0 &&
+      excludeDefaultDrawn === total,
+    `include ${includeDefaultTicked} ticked → ${includeDefaultDrawn} drawn; ` +
+      `exclude ${excludeDefaultTicked} ticked → ${excludeDefaultDrawn} drawn (want ${total} drawn both times)`,
+  );
+  check(
+    "全清 while including keeps nothing",
+    clearedTicked === 0 && clearedDrawn === 0,
+    `${clearedTicked} ticked, ${clearedDrawn} drawn (want 0 and 0)`,
+  );
+  check(
+    "包含标签 keeps exactly the pages carrying the one ticked tag",
+    carriers > 0 && includedDrawn === carriers && includedDrawn < total,
+    `${firstName}: ${carriers} carriers, ${includedDrawn} drawn of ${total}`,
+  );
+  check(
+    "排除标签 excludes the same tag instead",
+    excludedDrawn === total - carriers,
+    `${excludedDrawn} drawn of ${total} (want ${total - carriers})`,
+  );
+  check(
+    "each mode remembers its own ticks across a switch",
+    includeRememberedTicked === 1 && includeRememberedDrawn === carriers,
+    `back in include: ${includeRememberedTicked} ticked, ${includeRememberedDrawn} drawn ` +
+      `(want 1 and ${carriers})`,
+  );
 
   // Clusters: the legend's cards are controls in the built-in graph too, and they
   // write the same shared setting as the filters panel. Driven with the real

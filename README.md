@@ -35,7 +35,7 @@ Louvain clustering, with cohesion and mean intra-degree — the latter is indepe
 - **Knowledge gaps** — isolated notes, sparse areas, bridge notes
 - Each card can be marked as seen
 
-### Built-in graph enhancement (optional, off by default)
+### Built-in graph enhancement (on by default)
 
 Overlays community colouring, the association tooltip, an insights sidebar and click-to-focus on Obsidian's own graph view. Enabling it takes over the graph's color groups; turning it off restores them one by one.
 

@@ -144,4 +144,32 @@ describe("mergeSettings: the excluded clusters", () => {
     expect(settings.officialLineColor).toBe("#123456");
     expect(roundTrip({ ...DEFAULT_SETTINGS, officialLineColor: null }).officialLineColor).toBeNull();
   });
+
+  it("turns the built-in graph enhancement on by default", () => {
+    expect(mergeSettings({}).officialGraphEnabled).toBe(true);
+    expect(mergeSettings({}).officialGraphColorMode).toBe("community");
+    expect(roundTrip({ ...DEFAULT_SETTINGS, officialGraphEnabled: false }).officialGraphEnabled).toBe(
+      false,
+    );
+  });
+
+  it("splits the old three-state setting without changing anyone's state", () => {
+    // It used to be one key saying both whether the enhancement ran and how it
+    // coloured. A file that has only ever known that key has to keep the state it
+    // was actually in — nobody's graph may change on upgrade.
+    const off = mergeSettings({ officialGraphMode: "off" });
+    expect(off.officialGraphEnabled).toBe(false);
+
+    const community = mergeSettings({ officialGraphMode: "community" });
+    expect(community.officialGraphEnabled).toBe(true);
+    expect(community.officialGraphColorMode).toBe("community");
+
+    const byType = mergeSettings({ officialGraphMode: "type" });
+    expect(byType.officialGraphEnabled).toBe(true);
+    expect(byType.officialGraphColorMode).toBe("type");
+
+    // A file written after the split wins over the legacy key.
+    const explicit = mergeSettings({ officialGraphMode: "off", officialGraphEnabled: true });
+    expect(explicit.officialGraphEnabled).toBe(true);
+  });
 });

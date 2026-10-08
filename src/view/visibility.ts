@@ -42,6 +42,13 @@ export interface VisibilityFilters {
    * still exactly "the tags to hide", so stored settings keep their meaning.
    */
   readonly hiddenTags: ReadonlySet<string>;
+  /**
+   * The tags include mode keeps, or `null` when none have been picked yet.
+   *
+   * The two are different states on purpose: `null` is "nothing chosen", which
+   * keeps everything, while an empty set is a choice — keep nothing.
+   */
+  readonly includedTags: ReadonlySet<string> | null;
   readonly tagFilterMode: TagFilterMode;
   readonly hideStructural: boolean;
   readonly hideIsolated: boolean;
@@ -51,6 +58,7 @@ export const NO_FILTERS: VisibilityFilters = {
   hiddenTypes: new Set(),
   hiddenCommunities: new Set(),
   hiddenTags: new Set(),
+  includedTags: null,
   tagFilterMode: "exclude",
   hideStructural: false,
   hideIsolated: false,
@@ -67,15 +75,13 @@ export function isNodeVisible(node: GraphNode, filters: VisibilityFilters): bool
   if (filters.hiddenCommunities.has(node.community)) return false;
   if (filters.hideStructural && node.isStructural) return false;
   if (filters.hideIsolated && node.linkCount === 0) return false;
-  if (filters.hiddenTags.size > 0) {
-    const carriesATickedTag = node.tags.some((tag) => filters.hiddenTags.has(tag));
-    if (filters.tagFilterMode === "include") {
-      // Show only what carries one. An empty selection is not an empty graph:
-      // nothing ticked means the filter is not in use.
-      if (!carriesATickedTag) return false;
-    } else if (carriesATickedTag) {
-      return false;
-    }
+  if (filters.tagFilterMode === "include") {
+    const keep = filters.includedTags;
+    // `null` is "nothing picked yet", which keeps everything; an EMPTY selection is
+    // a real choice — the user cleared every tick and means to keep nothing.
+    if (keep !== null && !node.tags.some((tag) => keep.has(tag))) return false;
+  } else if (filters.hiddenTags.size > 0 && node.tags.some((tag) => filters.hiddenTags.has(tag))) {
+    return false;
   }
   return true;
 }
