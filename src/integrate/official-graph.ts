@@ -1094,16 +1094,26 @@ export class OfficialGraphEnhancer {
       pairs.push([a, b]);
     };
 
-    // Only for a SINGLE focused note.
+    // A SINGLE focused note shows its neighbourhood, and the neighbourhood is a
+    // subgraph: the bright NODES are the note plus its neighbours, so the bright
+    // EDGES have to be every edge between those nodes.
     //
-    // "Focus neighbours" is about one note, so its incident edges are the answer.
-    // With two or more focused the question is which edges CONNECT them, and an
-    // edge that merely touches one of them does not: lighting those drew links
-    // outside the connecting subgraph. That was tried — it added 27 edges to one
-    // measured pair — and it is not what the feature is for.
+    // Lighting only the edges incident to the focused note left the two sets
+    // disagreeing. Measured on a real vault with one note focused: 39 bright
+    // nodes against 38 bright edges, and 175 edges running between bright
+    // neighbours that stayed dark — which is exactly what "two bright nodes with
+    // no bright line between them" is.
+    //
+    // With two or more focused the question is different — which edges CONNECT
+    // them — and there the routes are the answer, not the induced subgraph.
     if (focused.size === 1) {
+      const bright = new Set<string>(focused);
       for (const edge of graph.edges) {
-        if (focused.has(edge.source) || focused.has(edge.target)) push(edge.source, edge.target);
+        if (focused.has(edge.source)) bright.add(edge.target);
+        else if (focused.has(edge.target)) bright.add(edge.source);
+      }
+      for (const edge of graph.edges) {
+        if (bright.has(edge.source) && bright.has(edge.target)) push(edge.source, edge.target);
       }
     }
     const ids = [...focused];
