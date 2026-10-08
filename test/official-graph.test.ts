@@ -17,7 +17,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // browser harness uses, so the view code runs unmodified.
 import "../harness/dom-polyfill";
 
-import { RING_GAP_PX, RING_MAX_PX, RING_MIN_PX, FOCUS_EDGE_DRAWN, GRAPH_MENU_SOURCE, SAFETY_NET_MS } from "../src/integrate/official-graph";
+import { MARKER_RADIUS_PX, FOCUS_EDGE_DRAWN, GRAPH_MENU_SOURCE, SAFETY_NET_MS } from "../src/integrate/official-graph";
 import { OfficialMarkerLayer } from "../src/integrate/official-markers";
 import { t } from "../src/i18n";
 import { typeColor } from "../src/view/palette";
@@ -988,20 +988,15 @@ describe("focus on the built-in graph", () => {
       expect(points).toHaveLength(1);
       expect(points[0].x).toBeCloseTo((10 * 2 + 100) / (window.devicePixelRatio || 1), 6);
       expect(points[0].y).toBeCloseTo((20 * 2 + 50) / (window.devicePixelRatio || 1), 6);
-      // The radius goes through the SAME transform as the position, and nothing
-      // else. Three earlier formulas were contradicted by what was on screen: a
-      // fixed size left the ring immobile, and `size * nodeScale` made it grow as
-      // the graph zoomed OUT, because `nodeScale` is inverse to zoom. Reusing the
-      // position transform is the only option that needs no knowledge of how the
-      // renderer computes the drawn size — which is not readable from
-      // `nodeLookup`.
-      //
-      // The fake node has no `getSize`, so the fallback of 6 applies.
-      const dpr = window.devicePixelRatio || 1;
-      const radiusAt = (zoom: number): number => ((6 + RING_GAP_PX) * zoom) / dpr;
-      expect(points[0].radius).toBeCloseTo(radiusAt(h.renderer.scale), 6);
-      // The property that was reported broken: it has to move with the zoom.
-      expect(radiusAt(h.renderer.scale)).not.toBeCloseTo(radiusAt(1), 6);
+      // The marker is OURS: a fixed size pinned at the centre, derived from
+      // nothing about the node. That is the whole point of the change — four
+      // formulas for the node's drawn radius were each contradicted by what was
+      // on screen, because the renderer does not expose it. A centre marker
+      // never needed to know it.
+      expect(points[0].radius).toBe(MARKER_RADIUS_PX);
+      // The position, by contrast, MUST follow the zoom — that part was always
+      // right and is what keeps the marker on the node.
+      expect(points[0].x).not.toBe(0);
     } finally {
       draw.mockRestore();
     }

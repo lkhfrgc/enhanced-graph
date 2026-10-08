@@ -18,6 +18,9 @@ export interface MarkerPoint {
   radius: number;
 }
 
+/** Thickness of the dark rim that separates the dot from the node beneath it. */
+export const MARKER_RIM_PX = 2;
+
 export interface MarkerPalette {
   readonly ring: string;
   readonly halo: string;
@@ -69,20 +72,27 @@ export class OfficialMarkerLayer {
 
     for (const point of points) {
       if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) continue;
-      // Two rings: a dark halo so the marker reads against a bright node, and a
-      // bright ring so it reads against a dark one — the same treatment the
-      // standalone view gives a focused note.
+      // A dot pinned at the node's centre, not a ring around it.
+      //
+      // A ring has to be exactly the node's radius, and that radius is not
+      // readable: `renderer.nodeLookup` holds a data record with no drawn
+      // geometry on it, so every formula for it was guesswork against what was
+      // on screen. A marker at the CENTRE has no such requirement — the position
+      // is computed correctly and the size is ours to choose — which removes the
+      // problem instead of approximating it.
+      //
+      // Two discs, for the same reason the ring had two colours: the dark outer
+      // one separates the marker from the node underneath whatever colour that
+      // node is, and the bright inner one carries the mark itself.
       context.beginPath();
       context.arc(point.x, point.y, point.radius, 0, Math.PI * 2);
-      context.lineWidth = 5;
-      context.strokeStyle = palette.halo;
-      context.stroke();
+      context.fillStyle = palette.halo;
+      context.fill();
 
       context.beginPath();
-      context.arc(point.x, point.y, point.radius, 0, Math.PI * 2);
-      context.lineWidth = 2.5;
-      context.strokeStyle = palette.ring;
-      context.stroke();
+      context.arc(point.x, point.y, Math.max(1, point.radius - MARKER_RIM_PX), 0, Math.PI * 2);
+      context.fillStyle = palette.ring;
+      context.fill();
     }
   }
 }

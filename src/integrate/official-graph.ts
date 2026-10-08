@@ -81,25 +81,13 @@ const FOCUS_NODE_DIM = 0.12;
  */
 export const FOCUS_EDGE_DRAWN = 0.10;
 /**
- * Focus ring geometry.
+ * Radius of the focus marker, in CSS pixels.
  *
- * The radius is the node's own `getSize()` plus a gap, put through exactly the
- * transform the POSITION uses — `(value * scale) / dpr` — and nothing else.
- *
- * Three attempts settled this, each contradicted by what was on screen:
- * `size + gap` alone left the ring a fixed size while the node grew and shrank;
- * `size * nodeScale + gap` made it grow as the graph zoomed OUT, because
- * `nodeScale` is inverse to zoom (it multiplies by 10.6 across the range while
- * `scale` divides by 111). Since the position formula is known correct, reusing
- * it for the radius is the one option that does not require knowing how the
- * renderer computes the drawn size — which is not readable from `nodeLookup`.
- *
- * The bounds only stop a degenerate case; they are wide enough not to interfere
- * across the normal zoom range.
+ * Ours rather than the node's. Four attempts to derive the node's drawn radius
+ * were each contradicted by what was on screen — it is not readable from
+ * \`nodeLookup\` — and a marker pinned at the centre never needed it.
  */
-export const RING_GAP_PX = 3;
-export const RING_MIN_PX = 4;
-export const RING_MAX_PX = 60;
+export const MARKER_RADIUS_PX = 6;
 /** Shown in the line-colour picker while the theme's own colour is in use. */
 const LINE_COLOR_FALLBACK = "#888888";
 /**
@@ -1218,8 +1206,7 @@ export class OfficialGraphEnhancer {
    *
    * Projection mirrors the render loop's own maths: it maps a node with
    * `(x * scale + panX) / devicePixelRatio`, and draws it at
-   * `getSize() * nodeScale`. Anything else puts the ring off the node as soon as
-   * the camera moves.
+     * the camera moves.
    */
   private drawMarkers(renderer: OfficialRenderer): void {
     const focused = this.focusIds.get(renderer);
@@ -1251,16 +1238,15 @@ export class OfficialGraphEnhancer {
       const officialId = officialIdOf.get(id);
       const node = officialId ? lookup[officialId] : undefined;
       if (!node || typeof node.x !== "number" || typeof node.y !== "number") continue;
-      const size = typeof node.getSize === "function" ? node.getSize() : 6;
       points.push({
         x: (node.x * scale + panX) / dpr,
         y: (node.y * scale + panY) / dpr,
-        // The radius goes through the same transform as the position above —
-        // `* scale / dpr` — and nothing else. See `RING_GAP_PX`.
-        radius: Math.min(
-          RING_MAX_PX,
-          Math.max(RING_MIN_PX, ((size + RING_GAP_PX) * scale) / dpr),
-        ),
+        // A fixed size of our own, in CSS pixels, and deliberately not derived
+        // from the node. Pinned at the centre it does not have to match anything,
+        // which is the point: four attempts to compute the node's drawn radius
+        // were each contradicted by what was on screen, because the renderer
+        // does not expose it.
+        radius: MARKER_RADIUS_PX,
       });
     }
     attachment.markers.draw(points, this.markerPalette());
