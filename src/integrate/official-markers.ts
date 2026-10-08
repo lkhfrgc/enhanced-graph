@@ -108,11 +108,16 @@ export class OfficialMarkerLayer {
       // at 5px against a 2.5px core the dark stroke dominated and the focus came
       // out as black spokes. A single bright line is what the built-in graph's own
       // highlighted edges look like, which is what these are standing in for.
-      // `halo` is the LIGHT of the two: the marker draws a light outer disc and a
-      // dark inner one, so using `ring` here painted the edges black. Measured by
-      // looking at the result, after the first attempt came out as black spokes.
+      // `ring` is the theme-aware one, and that is the whole requirement: light
+      // ink on a dark canvas, dark ink on a light one. The palette already sets it
+      // that way — #f4f8fa in dark, #0a141c in light — so the edge colour follows
+      // the theme without anything further here.
+      //
+      // `halo` is the opposite of it by design (the marker needs a disc that
+      // separates it from the node underneath), and using it for the edges made
+      // them white on a light background, where they disappeared entirely.
       context.lineWidth = EDGE_WIDTH_PX;
-      context.strokeStyle = palette.halo;
+      context.strokeStyle = palette.ring;
       context.stroke();
     }
 
