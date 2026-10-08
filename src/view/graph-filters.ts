@@ -34,13 +34,13 @@ export interface FilterOptions {
   readonly onToggleType: (type: PageType, visible: boolean) => void;
   readonly onToggleTag: (tag: string, visible: boolean) => void;
   /**
-   * Put every filter back at once.
+   * Un-hide every tag at once.
    *
-   * The button says "restore all" and sits in the filters panel, so it has to
-   * undo the type checkboxes and the two visibility switches as well as the tags.
-   * It used to clear only the tags, which is what the label promised not to do.
+   * Tags only, deliberately: the button sits in the tag group and undoes what
+   * that group did. The hidden-type and visibility switches are decisions made
+   * elsewhere, and clearing them here would overrule the user silently.
    */
-  readonly onRestoreAll: () => void;
+  readonly onClearTags: () => void;
   readonly onToggleIsolated: (value: boolean) => void;
   readonly onToggleStructural: (value: boolean) => void;
   /**
@@ -160,17 +160,12 @@ function renderTagSection(container: HTMLElement, options: FilterOptions): void 
    * needed. `options.hiddenTags` is the view's live set, so reading its size
    * after a toggle is enough to know whether to show it.
    */
-  const anyFilterActive = (): boolean =>
-    options.hiddenTags.size > 0 ||
-    options.hiddenTypes.size > 0 ||
-    options.hideIsolated ||
-    options.hideStructural;
   const syncClear = (): void => {
-    clear.classList.toggle("is-hidden", !anyFilterActive());
+    clear.classList.toggle("is-hidden", options.hiddenTags.size === 0);
   };
   clear.addEventListener("click", () => {
-    if (!anyFilterActive()) return;
-    options.onRestoreAll();
+    if (options.hiddenTags.size === 0) return;
+    options.onClearTags();
     for (const input of Array.from(list.querySelectorAll<HTMLInputElement>("input[type=checkbox]"))) {
       input.checked = true;
     }

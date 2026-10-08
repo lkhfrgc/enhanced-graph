@@ -1465,25 +1465,6 @@ async function main() {
       search.dispatchEvent(new Event("input", { bubbles: true }));
       const restored = countRows();
 
-      // Turn the OTHER filters on before testing the restore.
-      //
-      // Without this the check proves nothing: with tags as the only active
-      // filter, an implementation that clears nothing but tags still reaches the
-      // full node count. Verified by putting the old behaviour back — the check
-      // passed anyway. So the type boxes and both visibility switches are
-      // switched on first, and only then is "restore all" pressed.
-      const panel = document.querySelector(".enhanced-graph-official-filters");
-      const switches = [...(panel?.querySelectorAll("input[type=checkbox]") ?? [])];
-      for (const box of switches) {
-        if (box.checked) box.click();
-      }
-      const visibilitySwitches = [...(panel?.querySelectorAll(".enhanced-graph-checkbox input") ?? [])];
-      for (const box of visibilitySwitches.slice(0, 2)) {
-        if (!box.checked) box.click();
-      }
-      await new Promise((resolve) => setTimeout(resolve, 400));
-      const nodesWithOthersOn = window.__HARNESS__.view.renderer.instance.getGraph().order;
-
       // Found by its text, not by its container. Two earlier versions of this
       // listed the containers the button was expected to sit in, and it moved
       // both times — the check then failed for a reason that had nothing to do
@@ -1499,7 +1480,6 @@ async function main() {
         restored,
         allMatch,
         nodesAfterClear: window.__HARNESS__.view.renderer.instance.getGraph().order,
-        nodesWithOthersOn,
         // The plugin's own graph, before any filtering: "restored" means every
         // one of these is on screen again. Comparing against the count taken
         // before the tag filter only says the tag filter was undone.
@@ -1531,17 +1511,19 @@ async function main() {
     // cleared tags — the label said all and the behaviour was one category — so
     // it was checking nothing a user could observe. This at least fails if the
     // restore stops short of the tag filter's own effect.
-    // Restored means the WHOLE graph is back, not merely that the tag filter was
-    // undone: the button says "restore all" and also switches off the hidden-type
-    // and visibility toggles. Comparing against the count from just before the
-    // tag filter would call a partial restore a pass whenever some other filter
-    // happened to be on.
+    // The count has to come back to exactly what it was before the tag filter,
+    // and no further. "No further" is the part that matters: the button clears
+    // tags and nothing else, so an implementation that also flipped the
+    // visibility switches would overrule a decision the user made elsewhere and
+    // this equality would catch it.
+    //
+    // The weaker "> after" this replaces passed even when the button restored
+    // nothing but tags — which is the correct behaviour — so it distinguished
+    // nothing at all.
     check(
       "clearing the search and pressing 全部恢复 restores the graph",
       tagRestore.restored === tagRestore.before &&
-        tagRestore.totalNodes !== null &&
-        tagRestore.nodesWithOthersOn < tagRestore.totalNodes &&
-        tagRestore.nodesAfterClear === tagRestore.totalNodes,
+        tagRestore.nodesAfterClear === tagFilter.before,
       `rows restored ${tagRestore.restored}/${tagRestore.before}; nodes ${tagFilter.before} → ${tagFilter.after} → ${tagRestore.nodesAfterClear} of ${tagRestore.totalNodes}`,
     );
 

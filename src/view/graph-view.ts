@@ -906,12 +906,8 @@ export class EnhancedGraphView extends ItemView {
         void this.applyGraphData();
         this.renderLegend();
       },
-      onRestoreAll: () => {
+      onClearTags: () => {
         this.hiddenTags.clear();
-        this.hiddenTypes.clear();
-        this.plugin.settings.hideIsolated = false;
-        this.plugin.settings.hideStructural = false;
-        this.hiddenTypes = new Set();
         void this.applyGraphData();
         this.renderLegend();
       },
