@@ -1065,10 +1065,20 @@ export class OfficialGraphEnhancer {
       pairs.push([a, b]);
     };
 
-    if (focused.size === 1) {
-      for (const edge of graph.edges) {
-        if (focused.has(edge.source) || focused.has(edge.target)) push(edge.source, edge.target);
-      }
+    // Edges incident to a focused note, for ANY number of focused notes.
+    //
+    // This ran only when exactly one note was focused. Everything else lights
+    // only the routes BETWEEN focused notes, while the bright NODE set has always
+    // included their neighbours — so with two notes selected, a neighbour was
+    // drawn bright with the edge joining it to the focus left dark. On screen
+    // that reads as a route with pieces missing, which is exactly how it was
+    // reported.
+    //
+    // The function's own documentation has said "everything incident to a
+    // focused note, plus every step of the routes between them" all along; only
+    // the second half was implemented for the multi-node case.
+    for (const edge of graph.edges) {
+      if (focused.has(edge.source) || focused.has(edge.target)) push(edge.source, edge.target);
     }
     const ids = [...focused];
     for (let i = 0; i < ids.length; i += 1) {
