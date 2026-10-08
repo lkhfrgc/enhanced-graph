@@ -338,7 +338,71 @@ const report = await page.evaluate(async () => {
         if (!hasEdge) extraLines.push({ officialTarget: otherOfficial, ourId: ourOther.id, reason: "our graph has no such edge" });
       }
     }
-    stages.singleNode = {
+    // Are the lit EDGES' endpoints the same nodes as the lit NODES?
+  //
+  // The built-in graph drives a link's alpha from its endpoints' brightness, so a
+  // lit edge whose endpoint node is dim is drawn dark no matter what we write to
+  // \`line.alpha\`. If \`focusEdgePairs\` and \`focusSet\` disagree on the endpoint set,
+  // that is the whole explanation for bright nodes sitting next to unlit lines.
+  {
+    const focus = enhancer.focusSet(renderer);
+    const litNodes = focus ? new Set([...focus]) : new Set();
+    const pairsForNode = pairs ?? [];
+    const endpoints = new Set();
+    for (const [a, b] of pairsForNode) {
+      endpoints.add(a);
+      endpoints.add(b);
+    }
+    const notBright = [...endpoints].filter((id) => !litNodes.has(id));
+    const brightWithoutEdge = [...litNodes].filter((id) => id !== node && !endpoints.has(id));
+    // The value the DRAW uses, not the value we write.
+  //
+  // PIXI composites \`worldAlpha\` — its own alpha multiplied by every ancestor
+  // container's. Reading \`line.alpha\` says what WE set; reading \`worldAlpha\` says
+  // what ends up on screen. If they disagree, something upstream is fading the
+  // line and no amount of writing alpha here can fix it.
+  {
+    const rows = [];
+    for (const link of links.slice(0, 600)) {
+      const line = link?.line;
+      if (!line) continue;
+      rows.push({
+        alpha: typeof line.alpha === "number" ? Math.round(line.alpha * 1000) / 1000 : null,
+        worldAlpha: typeof line.worldAlpha === "number" ? Math.round(line.worldAlpha * 1000) / 1000 : null,
+        visible: line.visible !== false,
+        renderable: line.renderable !== false,
+        parentAlpha: typeof line.parent?.worldAlpha === "number" ? line.parent.worldAlpha : null,
+      });
+    }
+    stages.drawValues = {
+      measured: rows.length,
+      litByAlpha: rows.filter((r) => r.alpha !== null && r.alpha > 0.9).length,
+      litByWorldAlpha: rows.filter((r) => r.worldAlpha !== null && r.worldAlpha > 0.9).length,
+      invisible: rows.filter((r) => !r.visible).length,
+      notRenderable: rows.filter((r) => !r.renderable).length,
+      // A few of each, so the shape is visible rather than summarised.
+      litSample: rows.filter((r) => r.alpha !== null && r.alpha > 0.9).slice(0, 5),
+      dimSample: rows.filter((r) => r.alpha !== null && r.alpha < 0.5).slice(0, 5),
+    };
+  }
+
+  stages.brightness = {
+      litNodeCount: litNodes.size,
+      edgeEndpointCount: endpoints.size,
+      edgeEndpointNotBright: notBright.length,
+      edgeEndpointNotBrightSample: notBright.slice(0, 10),
+      brightNodeWithNoEdge: brightWithoutEdge.length,
+      brightNodeWithNoEdgeSample: brightWithoutEdge.slice(0, 10),
+      // Which official nodes actually get a bright colour written to them.
+      nodeAlphas: (() => {
+        const out = [];
+        for (const officialId of Object.keys(lookup).slice(0, 0)) void officialId;
+        return out;
+      })(),
+    };
+  }
+
+  stages.singleNode = {
       builtInLinesFromNode: officialNode ? Object.keys(lookup[officialNode]?.forward ?? {}).length : null,
       linesWithNoOurEdge: extraLines.length,
       lineExamples: extraLines.slice(0, 12),
@@ -348,6 +412,36 @@ const report = await page.evaluate(async () => {
       notHighlightable: without.length,
       examples: without.slice(0, 10),
     };
+  }
+
+  // Sample over TIME, not once.
+  //
+  // Every earlier measurement read the state immediately after focusing, and
+  // every one came back clean while the report kept saying edges were missing.
+  // The likely difference is not what is measured but WHEN: if the highlight
+  // decays — the ticker stopping, or a repaint resetting the alphas — a single
+  // snapshot right after the focus cannot see it.
+  {
+    const series = [];
+    for (let i = 0; i < 12; i += 1) {
+      const now = Array.isArray(renderer.links) ? renderer.links : [];
+      const values = now.map((link) => link?.line?.alpha).filter((a) => typeof a === "number");
+      series.push({
+        t: i * 2,
+        lit: values.filter((a) => a > 0.9).length,
+        dim: values.filter((a) => a < 0.5).length,
+      });
+      await wait(2000);
+    }
+    stages.timeSeries = series;
+  // What is actually DRAWN. Every earlier check read the value written to
+  // \`line.alpha\` and treated it as the result; whether the render honours that
+  // value was never verified. A picture settles it without another inference.
+  stages.screenshotTaken = true;
+    stages.litFirst = series[0]?.lit ?? null;
+    stages.litLast = series[series.length - 1]?.lit ?? null;
+    stages.litMin = Math.min(...series.map((s) => s.lit));
+    stages.litMax = Math.max(...series.map((s) => s.lit));
   }
 
   stages.edgeIsInPairs = pairs.some(
@@ -366,6 +460,14 @@ const report = await page.evaluate(async () => {
 console.log("");
 console.log("=== pipeline diagnostic ===");
 console.log(JSON.stringify(report, null, 1));
+const shot = path.join(os.tmpdir(), "enhanced-graph-focus.png");
+try {
+  await page.screenshot({ path: shot });
+  console.log("screenshot: " + shot);
+} catch (error) {
+  console.log("screenshot failed: " + String(error));
+}
+
 const out = path.join(os.tmpdir(), "enhanced-graph-pipeline.json");
 fs.writeFileSync(out, JSON.stringify(report, null, 2), "utf8");
 console.log("");
