@@ -25,6 +25,7 @@
     "verify": "npm run typecheck && npm test && npm run verify:vault && npm run harness && npm run verify:view && npm run build && npm run verify:bundle && npm run build:vault",
     "verify:bundle": "node scripts/smoke-load.cjs",
     "verify:obsidian": "npm run build:vault && node scripts/obsidian-check.mjs --attach",
+    "verify:paths": "node node_modules/esbuild/bin/esbuild scripts/verify-paths-real-vault.mjs --bundle --platform=node --format=esm --outfile=scripts/_verify-paths.mjs --log-level=warning && node scripts/_verify-paths.mjs",
     "verify:vault": "node node_modules/esbuild/bin/esbuild scripts/verify-vault.ts --bundle --platform=node --format=cjs --outfile=scripts/verify-vault.cjs --log-level=warning && node scripts/verify-vault.cjs",
     "verify:view": "node scripts/harness-check.mjs"
   },
