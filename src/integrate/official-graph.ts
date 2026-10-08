@@ -1342,12 +1342,17 @@ export class OfficialGraphEnhancer {
     // Every edge of the focus, as a segment. See the note in OfficialMarkerLayer:
     // the built-in graph's own edge brightness is not something this plugin can
     // reliably drive, so the focus draws its edges here instead.
+    // Centre to centre. Insetting the ends so they finish under the node discs was
+    // tried and dropped: the drawn radius is not readable, so the inset can only be
+    // a guess, and a guess that is wrong leaves the edge the wrong length at every
+    // node. A line that reaches the centre is at least consistently right about
+    // where the edge is.
     const lines: MarkerLine[] = [];
     for (const [a, b] of this.focusEdgePairs(renderer)) {
-      const from = screenOf(a);
-      const to = screenOf(b);
-      if (!from || !to) continue;
-      lines.push({ x1: from.x, y1: from.y, x2: to.x, y2: to.y });
+      const start = screenOf(a);
+      const end = screenOf(b);
+      if (!start || !end) continue;
+      lines.push({ x1: start.x, y1: start.y, x2: end.x, y2: end.y });
     }
 
     const points: MarkerPoint[] = [];

@@ -26,11 +26,14 @@ export interface MarkerLine {
   y2: number;
 }
 
+/** How strongly a highlighted edge is drawn, relative to full opacity. */
+export const EDGE_OPACITY = 0.55;
+
 /** Thickness of the dark rim that separates the dot from the node beneath it. */
 export const MARKER_RIM_PX = 2;
 
-/** Stroke width of a highlighted edge, and of the dark outline under it. */
-export const EDGE_WIDTH_PX = 2.5;
+/** Stroke width of a highlighted edge. Thin: the graph's own lines are hairlines. */
+export const EDGE_WIDTH_PX = 1.5;
 
 export interface MarkerPalette {
   readonly ring: string;
@@ -118,7 +121,11 @@ export class OfficialMarkerLayer {
       // them white on a light background, where they disappeared entirely.
       context.lineWidth = EDGE_WIDTH_PX;
       context.strokeStyle = palette.ring;
+      // Not at full strength: the edges are a background to the nodes, and at full
+      // opacity they read as the loudest thing on screen.
+      context.globalAlpha = EDGE_OPACITY;
       context.stroke();
+      context.globalAlpha = 1;
     }
 
     if (points.length === 0) return;
