@@ -1141,6 +1141,32 @@ describe("focus on the built-in graph", () => {
     expect(drawn(otherLink.line.alpha)).toBeCloseTo(FOCUS_EDGE_DRAWN, 6);
     expect(drawn(routeLink.line.alpha)).toBeGreaterThan(drawn(otherLink.line.alpha));
   });
+
+  it("lights a route whose links are stored on the far endpoint", async () => {
+    const h = chain();
+    h.enhancer.start();
+    // `setData` puts a link on ONE endpoint and which one has nothing to do with
+    // the order a route walks it. Here both are stored on the far side, so
+    // looking only at `from.forward[to]` finds neither and the route stays dark.
+    // The fixture could not express this before, which is why it went unnoticed.
+    const aToX = { line: { alpha: 1 } };
+    const xToB = { line: { alpha: 1 } };
+    h.renderer.nodeLookup["x.md"].forward = { "a.md": aToX };
+    h.renderer.nodeLookup["b.md"].forward = { "x.md": xToB };
+    h.renderer.links = [aToX, xToB];
+
+    // BOTH endpoints, so the route a -> x -> b is what is being lit. Focusing a
+    // single node only lights that node's own edges, and asserting on the far
+    // edge of the chain then fails for a reason that has nothing to do with
+    // storage direction — which is what the first version of this test did.
+    focusViaMenu(h, "concepts/a");
+    focusViaMenu(h, "concepts/b");
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+    const drawn = (written: number): number => written * 0.9 + 0.1;
+    expect(drawn(aToX.line.alpha)).toBeCloseTo(1, 6);
+    expect(drawn(xToB.line.alpha)).toBeCloseTo(1, 6);
+  });
   it("survives the pointer travelling to another node", async () => {
     const h = chain();
     h.enhancer.start();

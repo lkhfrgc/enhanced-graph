@@ -1101,8 +1101,18 @@ export class OfficialGraphEnhancer {
       const from = officialIdOf.get(a);
       const to = officialIdOf.get(b);
       if (!from || !to) continue;
-      const link = (lookup[from] as { forward?: Record<string, { line?: { alpha: number } }> } | undefined)
-        ?.forward?.[to];
+      // Both directions. `setData` stores a link on ONE endpoint as
+      // `forward[other]`, and which endpoint that is has nothing to do with the
+      // order a route happens to walk it. Looking only at `from.forward[to]`
+      // silently skipped every edge the route traversed the other way, which is
+      // why a focused pair lit only a handful of its edges.
+      const forward = lookup[from] as
+        | { forward?: Record<string, { line?: { alpha: number } }> }
+        | undefined;
+      const backward = lookup[to] as
+        | { forward?: Record<string, { line?: { alpha: number } }> }
+        | undefined;
+      const link = forward?.forward?.[to] ?? backward?.forward?.[from];
       if (link?.line) out.add(link.line);
     }
     return out;
