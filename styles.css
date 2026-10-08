@@ -276,6 +276,14 @@
   cursor: default;
 }
 
+/* A cluster held lit by a click. The row's state is how the toggle is
+   discoverable: without it there is nothing to say a second click will let go. */
+.enhanced-graph-legend-row.is-active {
+  background: var(--background-modifier-hover);
+  border-radius: var(--radius-s, 4px);
+  font-weight: var(--font-medium, 500);
+}
+
 .enhanced-graph-legend-row:hover {
   background: var(--background-modifier-hover);
 }

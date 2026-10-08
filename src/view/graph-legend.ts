@@ -29,7 +29,13 @@ export interface LegendOptions {
   readonly onToggleCollapsed: () => void;
   readonly onToggleType: (type: PageType) => void;
   readonly onShowAllTypes: () => void;
-  readonly onFocusNodes: (nodeIds: readonly string[]) => void;
+  /**
+   * A cluster row was clicked. Receives the id as well as the members so the
+   * caller can tell "this cluster again" from "a different one" and toggle.
+   */
+  readonly onFocusNodes: (nodeIds: readonly string[], communityId?: number) => void;
+  /** The cluster currently held lit, so its row can say so. */
+  readonly activeCommunityId?: number | null;
 }
 
 export function renderLegend(container: HTMLElement, options: LegendOptions): void {
@@ -114,7 +120,10 @@ function renderCommunityRows(body: HTMLElement, options: LegendOptions): void {
     });
     if (community.isSparse) setIcon(cohesion.createSpan({ cls: "enhanced-graph-legend-warn" }), "alert-triangle");
 
-    row.addEventListener("click", () => options.onFocusNodes(community.nodeIds));
+    // Clicking a cluster keeps it lit; clicking it again lets go. The class is
+    // what says which of the two the next click will do.
+    if (options.activeCommunityId === community.id) row.addClass("is-active");
+    row.addEventListener("click", () => options.onFocusNodes(community.nodeIds, community.id));
   }
 }
 

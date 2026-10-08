@@ -36,7 +36,8 @@ export interface OfficialPanelOptions {
   readonly insights: () => GraphInsights;
   readonly dismissed: () => ReadonlySet<string>;
   readonly mode: () => OfficialGraphMode;
-  readonly onFocusNodes: (nodeIds: readonly string[]) => void;
+  /** A legend row was clicked; `communityId` is set for cluster rows only. */
+  readonly onFocusNodes: (nodeIds: readonly string[], communityId?: number) => void;
   readonly onDismiss: (key: string, nodeIds: readonly string[]) => void;
   /** How many notes are focused; the hop control only matters for a pair. */
   readonly focusCount: () => number;
