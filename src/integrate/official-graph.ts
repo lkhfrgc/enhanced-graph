@@ -255,6 +255,15 @@ export class OfficialGraphEnhancer {
    */
   private readonly focusIds = new Map<OfficialRenderer, Set<string>>();
   private focusTicker: number | null = null;
+  /**
+   * What the last colour pass was computed from, per renderer.
+   *
+   * The safety net runs every \`SAFETY_NET_MS\` and used to recolour the graph
+   * unconditionally, so edges were rewritten once a second even with nothing
+   * focused and nothing changed — visible as the lines being repainted for no
+   * reason. The pass is now skipped unless one of these actually differs.
+   */
+  private readonly colorSignature = new WeakMap<OfficialRenderer, string>();
   /** Re-applies the focus the moment the window becomes visible again. */
   private visibilityHandler: (() => void) | null = null;
   /**
@@ -515,6 +524,16 @@ export class OfficialGraphEnhancer {
   private applyColors(attachment: Attachment): void {
     const mode = this.deps.getMode();
     const { renderer } = attachment;
+    // Nothing to do when neither the mode, the focus, nor the graph has moved.
+    const focus = this.focusSet(renderer);
+    const signature = [
+      mode,
+      this.deps.getLineColor() ?? "",
+      focus ? [...focus].sort().join(",") : "",
+      this.deps.getData().graph.nodes.length,
+    ].join("|");
+    if (this.colorSignature.get(renderer) === signature) return;
+    this.colorSignature.set(renderer, signature);
     try {
       // The line colour is independent of the node-colouring mode, so it is
       // applied (or restored) before that mode is considered.
@@ -534,7 +553,6 @@ export class OfficialGraphEnhancer {
       const { graph } = this.deps.getData();
       if (graph.nodes.length === 0) return;
       const resolve = this.resolverFor(graph);
-      const focus = this.focusSet(renderer);
 
       for (const node of nodesWithRestore(renderer)) {
         // Tags, unresolved links and attachments are virtual nodes with no
