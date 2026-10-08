@@ -24,7 +24,7 @@
 
 import { App, Menu, Notice, TFile, WorkspaceLeaf } from "obsidian";
 import type { GraphInsights } from "../core/insights";
-import { edgeKeyEndpoints } from "../core/graph-keys";
+import { edgeKey, edgeKeyEndpoints } from "../core/graph-keys";
 import { findConnectingPaths } from "../core/paths";
 import { renderFilters } from "../view/graph-filters";
 import { renderWeights } from "../view/graph-weights";
@@ -255,8 +255,19 @@ export class OfficialGraphEnhancer {
    */
   private readonly focusIds = new Map<OfficialRenderer, Set<string>>();
   private focusTicker: number | null = null;
-  /** Link graphics on the focused route, kept bright by the ticker. */
-  private readonly litEdges = new Map<OfficialRenderer, Set<object>>();
+  /**
+   * Edges of the focused route, as `edgeKey` strings rather than link graphics.
+   *
+   * It used to hold the `line` objects, and `forceLitEdges` matched them against
+   * `renderer.links` by reference. That silently broke whenever the graph was
+   * rebuilt: the objects reachable through `nodeLookup[..].forward[..]` come from
+   * one `setData` and `renderer.links` holds another, so almost nothing matched.
+   * Measured in a real vault: 49 edges collected, **2** ended up lit.
+   *
+   * A key is stable across rebuilds; the graphics object is resolved fresh each
+   * frame instead.
+   */
+  private readonly litEdges = new Map<OfficialRenderer, Set<string>>();
 
   constructor(private readonly deps: OfficialGraphDeps) {}
 
@@ -1084,7 +1095,8 @@ export class OfficialGraphEnhancer {
    * `setData` stores each link on its source node as `forward[targetId]`, so the
    * object is reachable without touching anything private to the render loop.
    */
-  private collectLitEdges(renderer: OfficialRenderer): Set<object> {
+  /** Edge keys of the focused route, for {@link forceLitEdges} to resolve. */
+  private collectLitEdges(renderer: OfficialRenderer): Set<string> {
     const { graph } = this.deps.getData();
     const resolve = this.resolverFor(graph);
     const lookup = renderer.nodeLookup ?? {};
@@ -1093,11 +1105,19 @@ export class OfficialGraphEnhancer {
       const ours = resolve(officialId);
       if (ours) officialIdOf.set(ours.id, officialId);
     }
-    const out = new Set<object>();
+    const out = new Set<string>();
     for (const [a, b] of this.focusEdgePairs(renderer)) {
       const from = officialIdOf.get(a);
       const to = officialIdOf.get(b);
       if (!from || !to) continue;
+      // The key is recorded whether or not a graphics object exists right now.
+      // Whether the built-in graph has drawn the edge is a rendering question,
+      // and answering it here is what made the result depend on rebuild timing.
+      //
+      // Built from the OFFICIAL ids, not ours: `forceLitEdges` resolves these
+      // against `renderer.nodeLookup`, which is keyed by official id. Mixing the
+      // two id spaces there silently matched nothing.
+      out.add(edgeKey(from, to));
       // Both directions. `setData` stores a link on ONE endpoint as
       // `forward[other]`, and which endpoint that is has nothing to do with the
       // order a route happens to walk it. Looking only at `from.forward[to]`
@@ -1110,7 +1130,7 @@ export class OfficialGraphEnhancer {
         | { forward?: Record<string, { line?: { alpha: number } }> }
         | undefined;
       const link = forward?.forward?.[to] ?? backward?.forward?.[from];
-      if (link?.line) out.add(link.line);
+      void link;
     }
     return out;
   }
@@ -1129,6 +1149,7 @@ export class OfficialGraphEnhancer {
   }
   /** Recompute which edges stay lit, and make sure the graph repaints. */
   private refreshLitEdges(renderer: OfficialRenderer): void {
+    // Keys, so a rebuild only changes what they resolve to.
     this.litEdges.set(renderer, this.collectLitEdges(renderer));
   }
 
@@ -1149,13 +1170,31 @@ export class OfficialGraphEnhancer {
     if (!lit || lit.size === 0) return;
     const litWritten = (1 - (1 - EDGE_ALPHA_LERP)) / EDGE_ALPHA_LERP;
     const dimWritten = (FOCUS_EDGE_DRAWN - (1 - EDGE_ALPHA_LERP)) / EDGE_ALPHA_LERP;
+
+    // Resolve the lit keys against the CURRENT graphics, every call.
+    //
+    // This is the whole fix: the set holds keys, and the objects they refer to
+    // are looked up here rather than stored. Storing them meant a graph rebuild
+    // left the set pointing at the previous `setData`'s objects while
+    // `renderer.links` held the new ones, and the reference comparison then
+    // matched almost nothing.
+    const litLines = new Set<object>();
+    const lookup = renderer.nodeLookup ?? {};
+    for (const key of lit) {
+      const [a, b] = edgeKeyEndpoints(key);
+      const link =
+        (lookup[a] as { forward?: Record<string, { line?: object }> } | undefined)?.forward?.[b] ??
+        (lookup[b] as { forward?: Record<string, { line?: object }> } | undefined)?.forward?.[a];
+      if (link?.line) litLines.add(link.line);
+    }
+
     for (const link of links) {
       const line = link?.line;
       if (!line) continue;
       try {
-        line.alpha = lit.has(line) ? litWritten : dimWritten;
+        line.alpha = litLines.has(line) ? litWritten : dimWritten;
       } catch {
-        /* the link was rebuilt; the next refresh recollects it */
+        /* the link was rebuilt mid-iteration; the next frame resolves again */
       }
     }
   }

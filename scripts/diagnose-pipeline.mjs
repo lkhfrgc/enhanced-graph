@@ -75,8 +75,30 @@ if (!(await endpointAlive())) {
 
 const browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
 const context = browser.contexts()[0];
-const page = context.pages().find((candidate) => candidate.url().startsWith("app://obsidian.md"));
-await page.waitForFunction(() => Boolean(window.app?.workspace), null, { timeout: 60000 });
+let page = context.pages().find((candidate) => candidate.url().startsWith("app://obsidian.md"));
+// A closed page is not necessarily fatal: Obsidian can swap the page while the
+// vault opens. Retry, and pick the page up again each time.
+const waitForApp = async (attempts = 6) => {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const pages = context.pages().filter((candidate) => candidate.url().startsWith("app://obsidian.md"));
+    for (const candidate of pages) {
+      try {
+        await candidate.waitForFunction(() => Boolean(window.app?.workspace), null, { timeout: 15000 });
+        return candidate;
+      } catch {
+        /* try the next page, or wait and look again */
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+  }
+  return null;
+};
+page = await waitForApp();
+if (!page) {
+  console.error("Obsidian never presented a usable page. Nothing was read.");
+  await browser.close();
+  process.exit(1);
+}
 await page.waitForFunction(() => Boolean(window.app.plugins?.plugins?.["enhanced-graph"]), null, { timeout: 60000 });
 await page.evaluate(async () => {
   if (window.app.workspace.getLeavesOfType("graph").length === 0) {
@@ -178,14 +200,16 @@ const report = await page.evaluate(async () => {
   stages.litEdgesMapSize = enhancer.litEdges ? [...enhancer.litEdges.values()].reduce((s, v) => s + v.size, 0) : null;
 
   // Stage 6: what the link objects' alpha actually is right now.
+  // Every link, not the first forty: sampling 40 of 542 and reporting the count
+  // as if it described the graph made the previous run look far worse than it
+  // was, and would have done the same in the other direction.
   const links = Array.isArray(renderer.links) ? renderer.links : [];
-  const alphas = links
-    .slice(0, 40)
-    .map((link) => link?.line?.alpha)
-    .filter((a) => typeof a === "number");
-  stages.alphaSample = alphas.slice(0, 20);
-  stages.highAlphaCount = alphas.filter((a) => a > 0.9).length;
+  const alphas = links.map((link) => link?.line?.alpha).filter((a) => typeof a === "number");
   stages.linkCount = links.length;
+  stages.alphasMeasured = alphas.length;
+  stages.highAlphaCount = alphas.filter((a) => a > 0.9).length;
+  stages.dimAlphaCount = alphas.filter((a) => a < 0.5).length;
+  stages.alphaSample = alphas.slice(0, 12);
 
   // Stage 7: does the searched edge itself appear among the pairs?
   const wanted = [candidate.source, candidate.target];
