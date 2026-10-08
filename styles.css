@@ -617,6 +617,24 @@
   padding: 3px 6px;
 }
 
+/* The search box and its restore button on one line: the button undoes what the
+   search and the checkboxes below it did, so it sits with them. */
+.enhanced-graph-tag-search-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.enhanced-graph-tag-search-row .enhanced-graph-tag-search {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.enhanced-graph-tag-search-row > .enhanced-graph-link {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
 /* A vault can carry hundreds of tags; cap the list so the rest of the panel
    stays reachable, and let the search box do the narrowing. */
 .enhanced-graph-tag-list {

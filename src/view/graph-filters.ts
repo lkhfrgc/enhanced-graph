@@ -127,24 +127,21 @@ function renderTagSection(container: HTMLElement, options: FilterOptions): void 
   const section = container.createDiv({ cls: "enhanced-graph-section" });
   const all = collectTags(options.graph.nodes);
 
-  // A row, not a title: the clear button sits beside the fold control, and a
-  // button nested inside a button is invalid markup.
-  const header = section.createDiv({ cls: "enhanced-graph-section-title-row" });
-  sectionHeader(header, options, "tags", `${t("filter.tags")} (${all.length})`);
-  const clear = header.createEl("button", { cls: "enhanced-graph-link", text: t("filter.clearTags") });
+  sectionHeader(section, options, "tags", `${t("filter.tags")} (${all.length})`);
 
   if (options.collapsedSections?.has("tags")) {
     section.addClass("is-collapsed");
-    // The button is still placed, and its visibility kept in step, or it would
-    // read "show all" while the list is not on screen at all.
-    clear.classList.toggle("is-hidden", options.hiddenTags.size === 0);
     return;
   }
 
-  const search = section.createEl("input", { cls: "enhanced-graph-tag-search" });
+  // The restore button rides in the search row, on the right: it undoes what the
+  // search and the checkboxes below it did, so it belongs with them.
+  const searchRow = section.createDiv({ cls: "enhanced-graph-tag-search-row" });
+  const search = searchRow.createEl("input", { cls: "enhanced-graph-tag-search" });
   search.type = "search";
   search.placeholder = t("filter.tagSearch");
   search.value = tagQuery;
+  const clear = searchRow.createEl("button", { cls: "enhanced-graph-link", text: t("filter.clearTags") });
 
   const list = section.createDiv({ cls: "enhanced-graph-tag-list" });
 

@@ -1465,16 +1465,13 @@ async function main() {
       search.dispatchEvent(new Event("input", { bubbles: true }));
       const restored = countRows();
 
-      // The button no longer lives INSIDE the title: the title is the fold
-      // control now, and a button nested in a button is invalid markup. It sits
-      // in the same heading row instead, so look there.
-      const button = [
-        ...document.querySelectorAll(
-          ".enhanced-graph-section-title, .enhanced-graph-section-title-row",
-        ),
-      ]
-        .flatMap((el) => [...el.querySelectorAll("button")])
-        .find((el) => el.textContent?.includes("全部恢复"));
+      // Found by its text, not by its container. Two earlier versions of this
+      // listed the containers the button was expected to sit in, and it moved
+      // both times — the check then failed for a reason that had nothing to do
+      // with what it is testing.
+      const button = [...document.querySelectorAll("button")].find((el) =>
+        el.textContent?.includes("全部恢复"),
+      );
       button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       await new Promise((resolve) => setTimeout(resolve, 450));
       return {

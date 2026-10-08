@@ -718,13 +718,11 @@ export class OfficialGraphEnhancer {
       },
       onSearch: (query) => {
         this.searchQuery = query.trim().toLowerCase();
-        // Re-apply the data so the filter takes effect: the built-in engine has
-        // no idea our query changed.
+        // Marked, not filtered. Redrawing here rather than waiting for a tick,
+        // because the focus ticker only runs while something is focused.
         for (const attachment of this.attachments.values()) {
           if (attachment.renderer !== renderer) continue;
-          if (attachment.lastData != null && typeof renderer.setData === "function") {
-            renderer.setData(attachment.lastData);
-          }
+          this.drawMarkers(attachment.renderer);
           return;
         }
       },
@@ -1339,7 +1337,9 @@ export class OfficialGraphEnhancer {
       (candidate) => candidate.renderer === renderer,
     );
     if (!attachment) return;
-    if (!focused || focused.size === 0) {
+    const query = this.searchQuery;
+    const hasFocus = Boolean(focused && focused.size > 0);
+    if (!hasFocus && query === "") {
       attachment.markers.draw([], [], this.markerPalette());
       return;
     }
@@ -1382,7 +1382,7 @@ export class OfficialGraphEnhancer {
     }
 
     const points: MarkerPoint[] = [];
-    for (const id of focused) {
+    for (const id of focused ?? []) {
       const position = screenOf(id);
       if (!position) continue;
       points.push({
@@ -1396,6 +1396,19 @@ export class OfficialGraphEnhancer {
         radius: MARKER_RADIUS_PX,
       });
     }
+
+    // Search matches, marked the same way. A search says where the matches are
+    // rather than taking everything else off the screen, so the picture keeps its
+    // context and the matches stand out against it.
+    if (query !== "") {
+      for (const node of graph.nodes) {
+        if (!node.label.toLowerCase().includes(query)) continue;
+        const position = screenOf(node.id);
+        if (!position) continue;
+        points.push({ x: position.x, y: position.y, radius: MARKER_RADIUS_PX });
+      }
+    }
+
     attachment.markers.draw(points, lines, this.markerPalette());
   }
 
@@ -1504,13 +1517,15 @@ export class OfficialGraphEnhancer {
     if (!nodes) return payload;
 
     const filters = this.deps.getVisibility();
-    const query = this.searchQuery;
     const anyHidden =
       filters.hiddenTypes.size > 0 ||
       filters.hiddenTags.size > 0 ||
       filters.hideStructural ||
       filters.hideIsolated;
-    if (!anyHidden && query === "") {
+    // The search query is deliberately NOT part of this. Searching marks the
+    // matching nodes instead of removing the rest, so what is on screen keeps
+    // showing where the matches sit relative to everything else.
+    if (!anyHidden) {
       return payload;
     }
 
@@ -1522,11 +1537,6 @@ export class OfficialGraphEnhancer {
       for (const officialId of Object.keys(nodes)) {
         const ours = resolve(officialId);
         if (ours && !visible.has(ours.id)) continue;
-        if (query !== "" && ours) {
-          // Virtual nodes (tags, unresolved links) have no label of ours, so a
-          // search hides them rather than leaving unsearchable clutter behind.
-          if (!ours.label.toLowerCase().includes(query)) continue;
-        }
         kept[officialId] = nodes[officialId];
       }
       return { ...source, nodes: kept };

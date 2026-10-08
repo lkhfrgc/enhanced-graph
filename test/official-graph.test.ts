@@ -1662,22 +1662,56 @@ describe("the built-in graph's toolbar", () => {
     expect(panel.querySelectorAll(".enhanced-graph-colour-row").length).toBeGreaterThan(0);
   });
 
-  it("filters the built-in graph by the search box", () => {
-    const h = setup(
-      [{ id: "a.md" }, { id: "b.md" }],
-      [makeNode({ id: "a", label: "alpha" }), makeNode({ id: "b", label: "beta" })],
-    );
-    h.enhancer.start();
-    const input = toolbarOf(h).querySelector<HTMLInputElement>(".enhanced-graph-search input");
-    expect(input).toBeTruthy();
-    input!.value = "alpha";
-    input!.dispatchEvent(new Event("input", { bubbles: true }));
+  it("marks the pages matching the search box instead of filtering the graph", () => {
+    const draw = vi.spyOn(OfficialMarkerLayer.prototype, "draw").mockImplementation(() => {});
+    try {
+      const h = setup(
+        [{ id: "a.md" }, { id: "b.md" }],
+        [makeNode({ id: "a", label: "alpha" }), makeNode({ id: "b", label: "beta" })],
+      );
+      h.enhancer.start();
+      const input = toolbarOf(h).querySelector<HTMLInputElement>(".enhanced-graph-search input");
+      expect(input).toBeTruthy();
+      input!.value = "alpha";
+      input!.dispatchEvent(new Event("input", { bubbles: true }));
 
-    // The search reaches the renderer through the same data filter the hidden
-    // types use, so the node really leaves the graph.
-    const payload = { nodes: { "a.md": { type: "concept" }, "b.md": { type: "concept" } } };
-    h.renderer.setData(payload);
-    expect(Object.keys(received(h).nodes)).toEqual(["a.md"]);
+      // The graph keeps every node. Searching says where things are; removing
+      // everything else would answer a different question.
+      const payload = { nodes: { "a.md": { type: "concept" }, "b.md": { type: "concept" } } };
+      h.renderer.setData(payload);
+      expect(Object.keys(received(h).nodes).sort()).toEqual(["a.md", "b.md"]);
+
+      // And the match is marked, at the same transform the focus marker uses.
+      const calls = draw.mock.calls;
+      const points = calls[calls.length - 1]?.[0] ?? [];
+      const dpr = window.devicePixelRatio || 1;
+      expect(points).toHaveLength(1);
+      expect(points[0].x).toBeCloseTo((10 * 2 + 100) / dpr, 6);
+      expect(points[0].y).toBeCloseTo((20 * 2 + 50) / dpr, 6);
+    } finally {
+      draw.mockRestore();
+    }
+  });
+
+  it("stops marking once the search box is cleared", () => {
+    const draw = vi.spyOn(OfficialMarkerLayer.prototype, "draw").mockImplementation(() => {});
+    try {
+      const h = setup(
+        [{ id: "a.md" }, { id: "b.md" }],
+        [makeNode({ id: "a", label: "alpha" }), makeNode({ id: "b", label: "beta" })],
+      );
+      h.enhancer.start();
+      const input = toolbarOf(h).querySelector<HTMLInputElement>(".enhanced-graph-search input");
+      input!.value = "alpha";
+      input!.dispatchEvent(new Event("input", { bubbles: true }));
+      expect((draw.mock.calls[draw.mock.calls.length - 1]?.[0] ?? []).length).toBe(1);
+
+      input!.value = "";
+      input!.dispatchEvent(new Event("input", { bubbles: true }));
+      expect((draw.mock.calls[draw.mock.calls.length - 1]?.[0] ?? []).length).toBe(0);
+    } finally {
+      draw.mockRestore();
+    }
   });
 });
 describe("the built-in graph's legend", () => {
