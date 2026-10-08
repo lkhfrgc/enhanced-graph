@@ -17,14 +17,13 @@ import { isEditingWithin } from "./dom-focus";
  * `renderLegend` only hides itself for an empty graph; "colouring is off" is our
  * own reason to hide, so it is passed in explicitly.
  */
-export interface OfficialLegendOptions extends Omit<LegendOptions, "collapsed" | "onToggleCollapsed"> {
+export interface OfficialLegendOptions extends LegendOptions {
   readonly visible: boolean;
 }
 
 export class OfficialLegend {
   private readonly el: HTMLElement;
   private mounted = false;
-  private collapsed = false;
 
   constructor(
     private readonly container: HTMLElement,
@@ -56,11 +55,6 @@ export class OfficialLegend {
     if (!options.visible) return;
     renderLegend(this.el, {
       ...options,
-      collapsed: this.collapsed,
-      onToggleCollapsed: () => {
-        this.collapsed = !this.collapsed;
-        this.render();
-      },
     });
   }
 }

@@ -53,8 +53,6 @@ const zh = {
   "legend.core": "核心节点",
   "legend.showAll": "显示全部",
   "legend.hint": "双击切换该类型的可见性",
-  "legend.expand": "展开图例",
-  "legend.collapse": "收起图例",
 
   "type.entity": "实体",
   "type.concept": "概念",
@@ -255,8 +253,6 @@ const en: Record<MessageKey, string> = {
   "legend.core": "Core nodes",
   "legend.showAll": "Show all",
   "legend.hint": "Double-click to toggle visibility",
-  "legend.expand": "Expand legend",
-  "legend.collapse": "Collapse legend",
 
   "type.entity": "Entity",
   "type.concept": "Concept",

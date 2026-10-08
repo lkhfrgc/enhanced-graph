@@ -25,15 +25,13 @@ export interface LegendOptions {
   /** Per-type colour overrides, so the swatches match the canvas. */
   readonly typeColorOverrides: Readonly<Record<string, string>>;
   readonly hiddenTypes: ReadonlySet<PageType>;
-  readonly collapsed: boolean;
-  readonly onToggleCollapsed: () => void;
   readonly onToggleType: (type: PageType) => void;
   readonly onShowAllTypes: () => void;
   readonly onFocusNodes: (nodeIds: readonly string[]) => void;
 }
 
 export function renderLegend(container: HTMLElement, options: LegendOptions): void {
-  const { graph, colorMode, hiddenTypes, collapsed } = options;
+  const { graph, colorMode, hiddenTypes } = options;
   container.empty();
   if (graph.nodes.length === 0) {
     container.addClass("is-hidden");
@@ -53,14 +51,6 @@ export function renderLegend(container: HTMLElement, options: LegendOptions): vo
     const showAll = header.createEl("button", { cls: "enhanced-graph-link", text: t("legend.showAll") });
     showAll.addEventListener("click", () => options.onShowAllTypes());
   }
-
-  const collapse = header.createEl("button", {
-    cls: "enhanced-graph-link",
-    attr: { "aria-label": collapsed ? t("legend.expand") : t("legend.collapse") },
-  });
-  setIcon(collapse, collapsed ? "chevron-up" : "chevron-down");
-  collapse.addEventListener("click", () => options.onToggleCollapsed());
-  if (collapsed) return;
 
   const body = container.createDiv({ cls: "enhanced-graph-legend-body" });
   if (colorMode !== "community") renderTypeRows(body, options);

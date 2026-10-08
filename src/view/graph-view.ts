@@ -105,7 +105,6 @@ export class EnhancedGraphView extends ItemView {
   private hiddenTags = new Set<string>();
   private showLabels = true;
   private panelMode: PanelMode = "insights";
-  private legendCollapsed = false;
   private showDismissed = false;
   /** Insight sections the user folded away; see `InsightSection`. */
   private collapsedSections: ReadonlySet<InsightSection> = new Set();
@@ -783,11 +782,6 @@ export class EnhancedGraphView extends ItemView {
       customNodeColor: this.plugin.settings.customNodeColor,
       typeColorOverrides: this.plugin.settings.typeColorOverrides,
       hiddenTypes: this.hiddenTypes,
-      collapsed: this.legendCollapsed,
-      onToggleCollapsed: () => {
-        this.legendCollapsed = !this.legendCollapsed;
-        this.renderLegend();
-      },
       onToggleType: (type) => {
         if (this.hiddenTypes.has(type)) this.hiddenTypes.delete(type);
         else this.hiddenTypes.add(type);
