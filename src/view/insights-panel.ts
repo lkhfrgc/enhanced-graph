@@ -45,12 +45,61 @@ export interface InsightsPanelOptions {
   readonly onDismiss: (key: string, nodeIds: readonly string[]) => void;
   readonly onToggleShowDismissed: () => void;
   /**
+   * Which insight sections are collapsed.
+   *
+   * Held by the caller rather than here: this function runs on every repaint, so
+   * state kept inside it would be forgotten the moment anything else redraws the
+   * panel — the section would spring open again on its own.
+   *
+   * Optional along with {@link onToggleSection}: with neither, the headings stay
+   * plain labels, which is what a caller that has no panel state to keep wants.
+   */
+  readonly collapsedSections?: ReadonlySet<InsightSection>;
+  readonly onToggleSection?: (section: InsightSection) => void;
+  /**
    * Icon renderer override, defaulting to Obsidian's `setIcon`.
    *
    * The seam exists so the emitted glyphs can be asserted (and so a consumer
    * can draw them differently); production callers can simply omit it.
    */
   readonly setIconImpl?: SetIconImpl;
+}
+
+/** The two insight groups, each of which can be folded away. */
+export type InsightSection = "connections" | "gaps";
+
+/**
+ * The clickable section header. Returns the element the icon is drawn into.
+ *
+ * A button rather than a plain heading: the whole title is the target, which is
+ * what makes it read as something to press rather than a label that happens to be
+ * clickable, and it carries `aria-expanded` for the same reason.
+ */
+function sectionTitle(
+  section: HTMLElement,
+  options: InsightsPanelOptions,
+  which: InsightSection,
+): HTMLElement {
+  const collapsed = options.collapsedSections?.has(which) ?? false;
+  const toggle = options.onToggleSection;
+  if (!toggle) {
+    const plain = section.createDiv({ cls: "enhanced-graph-section-title" });
+    const plainIcon = plain.createSpan({
+      cls: which === "connections" ? "enhanced-graph-icon-connection" : "enhanced-graph-icon-gap",
+    });
+    plain.createSpan({ text: t(which === "connections" ? "insights.connections" : "insights.gaps") });
+    return plainIcon;
+  }
+  const title = section.createEl("button", { cls: "enhanced-graph-section-title is-toggle" });
+  title.setAttribute("aria-expanded", String(!collapsed));
+  const icon = title.createSpan({
+    cls: which === "connections" ? "enhanced-graph-icon-connection" : "enhanced-graph-icon-gap",
+  });
+  title.createSpan({ text: t(which === "connections" ? "insights.connections" : "insights.gaps") });
+  const chevron = title.createSpan({ cls: "enhanced-graph-section-chevron" });
+  chevron.setAttribute("data-chevron", collapsed ? "right" : "down");
+  title.addEventListener("click", () => toggle(which));
+  return icon;
 }
 
 /**
@@ -85,20 +134,24 @@ export function renderInsightsPanel(container: HTMLElement, options: InsightsPan
 
   if (connections.length > 0) {
     const section = container.createDiv({ cls: "enhanced-graph-section" });
-    const title = section.createDiv({ cls: "enhanced-graph-section-title" });
-    setIconImpl(title.createSpan({ cls: "enhanced-graph-icon-connection" }), "link-2");
-    title.createSpan({ text: t("insights.connections") });
-    for (const connection of connections) {
-      renderConnectionCard(section, connection, dismissed.has(connection.key), options, setIconImpl);
+    const collapsed = options.collapsedSections?.has("connections") ?? false;
+    if (collapsed) section.addClass("is-collapsed");
+    setIconImpl(sectionTitle(section, options, "connections"), "link-2");
+    if (!collapsed) {
+      for (const connection of connections) {
+        renderConnectionCard(section, connection, dismissed.has(connection.key), options, setIconImpl);
+      }
     }
   }
 
   if (gaps.length > 0) {
     const section = container.createDiv({ cls: "enhanced-graph-section" });
-    const title = section.createDiv({ cls: "enhanced-graph-section-title" });
-    setIconImpl(title.createSpan({ cls: "enhanced-graph-icon-gap" }), "alert-triangle");
-    title.createSpan({ text: t("insights.gaps") });
-    for (const gap of gaps) renderGapCard(section, gap, options, setIconImpl);
+    const collapsed = options.collapsedSections?.has("gaps") ?? false;
+    if (collapsed) section.addClass("is-collapsed");
+    setIconImpl(sectionTitle(section, options, "gaps"), "alert-triangle");
+    if (!collapsed) {
+      for (const gap of gaps) renderGapCard(section, gap, options, setIconImpl);
+    }
   }
 
   // The count is the difference between "everything the analysis found" and

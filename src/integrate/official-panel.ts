@@ -20,7 +20,7 @@ import type { GraphInsights } from "../core/insights";
 import type { OfficialGraphMode, WikiGraph } from "../types";
 import { t } from "../i18n";
 import { colourRow } from "../view/controls";
-import { renderInsightsPanel } from "../view/insights-panel";
+import { type InsightSection, renderInsightsPanel } from "../view/insights-panel";
 
 /** Hop budgets offered for a focused pair; mirrors the standalone view's list. */
 const FOCUS_INTERMEDIATE_CHOICES = [0, 1, 2, 3] as const;
@@ -72,6 +72,8 @@ export class OfficialSidePanel {
   private mounted = false;
   /** The node ids the insights cards should mark as active. */
   private activeNodeIds: ReadonlySet<string> = new Set();
+  /** Insight sections the user folded away; see `InsightSection`. */
+  private collapsedSections: ReadonlySet<InsightSection> = new Set();
 
   constructor(
     private readonly container: HTMLElement,
@@ -229,6 +231,16 @@ export class OfficialSidePanel {
       },
       onDismiss: (key, nodeIds) => void this.options.onDismiss(key, nodeIds),
       onToggleShowDismissed: () => this.render(),
+      // Kept on the panel, not in the renderer: the renderer runs on every repaint
+      // and would forget which sections the user folded away.
+      collapsedSections: this.collapsedSections,
+      onToggleSection: (section) => {
+        const next = new Set(this.collapsedSections);
+        if (next.has(section)) next.delete(section);
+        else next.add(section);
+        this.collapsedSections = next;
+        this.render();
+      },
     });
   }
 

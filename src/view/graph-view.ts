@@ -44,7 +44,7 @@ import { renderFilters } from "./graph-filters";
 import { renderAppearance } from "./graph-appearance";
 import { renderLegend } from "./graph-legend";
 import { renderToolbar, renderZoomControls, type PanelMode } from "./graph-toolbar";
-import { countUndismissed, renderInsightsPanel } from "./insights-panel";
+import { countUndismissed, renderInsightsPanel, type InsightSection } from "./insights-panel";
 import type { EdgeScoreSummary } from "./renderer";
 import {
   GraphRenderer,
@@ -107,6 +107,8 @@ export class EnhancedGraphView extends ItemView {
   private panelMode: PanelMode = "insights";
   private legendCollapsed = false;
   private showDismissed = false;
+  /** Insight sections the user folded away; see `InsightSection`. */
+  private collapsedSections: ReadonlySet<InsightSection> = new Set();
 
   private highlightNodes: ReadonlySet<string> = new Set<string>();
   private highlightEdges: ReadonlySet<string> = new Set<string>();
@@ -1080,6 +1082,14 @@ export class EnhancedGraphView extends ItemView {
       onDismiss: (key, ids) => void this.toggleDismissed(key, new Set(ids)),
       onToggleShowDismissed: () => {
         this.showDismissed = !this.showDismissed;
+        this.renderPanel();
+      },
+      collapsedSections: this.collapsedSections,
+      onToggleSection: (section) => {
+        const next = new Set(this.collapsedSections);
+        if (next.has(section)) next.delete(section);
+        else next.add(section);
+        this.collapsedSections = next;
         this.renderPanel();
       },
     });

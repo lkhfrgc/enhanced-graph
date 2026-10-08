@@ -850,3 +850,54 @@ describe("renderInsightsPanel / structure", () => {
     expect(one(container, "enhanced-graph-card-title").textContent).toBe("Alpha ↔ Beta");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Collapsible sections
+// ---------------------------------------------------------------------------
+
+describe("collapsible insight sections", () => {
+  const populated = { connections: [makeConnection(GRAPH.nodes[0], GRAPH.nodes[1])], gaps: [makeGap()] };
+
+  it("makes each section heading a button that reports its state", () => {
+    const sections: string[] = [];
+    const fixture = render({
+      insights: populated,
+      collapsedSections: new Set(),
+      onToggleSection: (section) => sections.push(section),
+    });
+
+    const headings = byClass(fixture.container, "enhanced-graph-section-title", "is-toggle");
+    expect(headings.length).toBe(2);
+    for (const heading of headings) expect(heading.attributes.get("aria-expanded")).toBe("true");
+
+    headings[0].click();
+    expect(sections).toEqual(["connections"]);
+    headings[1].click();
+    expect(sections).toEqual(["connections", "gaps"]);
+  });
+
+  it("hides a collapsed section's cards but keeps its heading", () => {
+    const open = render({ insights: populated });
+    expect(open.cards().length).toBeGreaterThan(0);
+
+    const folded = render({
+      insights: populated,
+      collapsedSections: new Set(["connections", "gaps"] as const),
+      onToggleSection: () => {},
+    });
+    // Both headings survive, so either section can be opened again.
+    expect(byClass(folded.container, "enhanced-graph-section-title").length).toBe(2);
+    expect(folded.cards()).toEqual([]);
+    for (const heading of byClass(folded.container, "enhanced-graph-section-title", "is-toggle")) {
+      expect(heading.attributes.get("aria-expanded")).toBe("false");
+    }
+  });
+
+  it("falls back to a plain heading when no toggle handler is given", () => {
+    const fixture = render({ insights: populated });
+    expect(byClass(fixture.container, "enhanced-graph-section-title", "is-toggle")).toEqual([]);
+    expect(byClass(fixture.container, "enhanced-graph-section-title").length).toBe(2);
+    // And the cards are all still rendered, as before this change.
+    expect(fixture.cards().length).toBeGreaterThan(0);
+  });
+});
