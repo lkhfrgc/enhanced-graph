@@ -600,13 +600,27 @@
    Connection range control (status bar)
    -------------------------------------------------------------------------- */
 
-/* Sits inside the status bar, right after the "shortest N hops" text it
-   controls, so cause and effect are in the same place. */
+/* The hop budget for a multi-node focus.
+   In the built-in graph's panel it is its own block, because it changes what the
+   highlight means and only exists while several notes are focused. In the
+   standalone view it sits in the status bar, right after the "shortest N hops"
+   text it controls, so cause and effect stay in the same place — the block
+   styling below is scoped to the panel for that reason. */
 .enhanced-graph-focus-range {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   margin-left: 10px;
+}
+
+.enhanced-graph-official-panel .enhanced-graph-focus-range {
+  display: flex;
+  flex-wrap: wrap;
+  margin: 8px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background: var(--background-secondary);
 }
 
 .enhanced-graph-focus-range-label {
