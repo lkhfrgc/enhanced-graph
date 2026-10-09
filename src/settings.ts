@@ -80,6 +80,20 @@ export class EnhancedGraphSettingTab extends PluginSettingTab {
     }
 
     new Setting(containerEl)
+      .setName(t("settings.workingFolder"))
+      .setDesc(t("settings.workingFolderDesc"))
+      .addText((text) =>
+        text
+          .setPlaceholder(t("settings.workingFolderPlaceholder"))
+          .setValue(this.plugin.settings.workingFolder)
+          .onChange(async (value) => {
+            this.plugin.settings.workingFolder = value.trim();
+            await this.plugin.saveSettings();
+            this.plugin.requestGraphRebuild();
+          }),
+      );
+
+    new Setting(containerEl)
       .setName(t("settings.excludeFolders"))
       .setDesc(t("settings.excludeFoldersDesc"))
       .addTextArea((text) =>

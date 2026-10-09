@@ -161,6 +161,40 @@ async function main(): Promise<void> {
     },
   ];
 
+  // The working folder, measured on the real vault rather than on a memory one:
+  // scoping to the folder that holds most of its notes has to return exactly those
+  // notes and nothing else.
+  const scoped = await (async () => {
+    const folders = new Map<string, number>();
+    for (const node of graph.nodes) {
+      const folder = node.path.includes("/") ? node.path.slice(0, node.path.indexOf("/")) : "";
+      if (folder) folders.set(folder, (folders.get(folder) ?? 0) + 1);
+    }
+    const [folder, expected] = [...folders.entries()].sort((a, b) => b[1] - a[1])[0] ?? ["", 0];
+    if (!folder) return { folder: "", expected, actual: graph.nodes.length, stray: [] as string[] };
+    const scopedGraph = await buildWikiGraph({ vault: new NodeVault(), workingFolder: folder });
+    return {
+      folder,
+      expected,
+      actual: scopedGraph.nodes.length,
+      stray: scopedGraph.nodes.filter((node) => !node.path.startsWith(`${folder}/`)).map((node) => node.path),
+    };
+  })();
+  checks.push({
+    name: "working folder narrows the graph to that folder",
+    pass:
+      scoped.folder !== "" &&
+      scoped.expected > 0 &&
+      scoped.expected < graph.nodes.length &&
+      scoped.actual === scoped.expected &&
+      scoped.stray.length === 0,
+    detail:
+      scoped.folder === ""
+        ? "no subfolder to scope to"
+        : `"${scoped.folder}/": ${scoped.actual} nodes of ${graph.nodes.length} ` +
+          `(want ${scoped.expected}), ${scoped.stray.length} stray`,
+  });
+
   fs.mkdirSync(path.dirname(outFile), { recursive: true });
   fs.writeFileSync(
     outFile,

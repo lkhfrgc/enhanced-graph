@@ -43,6 +43,13 @@ export interface BuildGraphOptions {
   readonly hiddenTypes?: ReadonlySet<PageType>;
   /** Skip files whose path starts with these prefixes. */
   readonly excludeFolders?: readonly string[];
+  /**
+   * Only read notes under this folder; empty or absent means the whole vault.
+   *
+   * Applied before {@link excludeFolders}: this decides what the plugin is about,
+   * and the exclusion list then trims templates and archives out of it.
+   */
+  readonly workingFolder?: string;
   readonly weights?: RelevanceWeights;
   /** Parallel file reads. Default 16. */
   readonly concurrency?: number;
@@ -167,9 +174,22 @@ function isExcludedPath(
   return excludeFolders.some((prefix) => path.startsWith(prefix));
 }
 
+/**
+ * Whether a note is inside the working folder. Empty means the whole vault.
+ *
+ * Matched on the folder BOUNDARY: `notes` covers `notes/a.md` and not
+ * `notes-archive/a.md`, which a plain prefix test would have swept in.
+ */
+export function isInWorkingFolder(path: string, workingFolder: string): boolean {
+  const folder = workingFolder.replace(/^\/+|\/+$/g, "");
+  if (folder === "") return true;
+  return path.startsWith(`${folder}/`);
+}
+
 async function discoverMarkdownFiles(
   vault: VaultAdapter,
   excludeFolders: readonly string[],
+  workingFolder: string,
 ): Promise<string[]> {
   let listed: readonly string[];
   try {
@@ -184,6 +204,10 @@ async function discoverMarkdownFiles(
   for (const raw of listed) {
     const path = normalizeVaultPath(raw);
     if (!/\.md$/i.test(path)) continue;
+    // The working folder first: it is the cheaper test and the narrower question
+    // ("is this ours at all?"), so a vault-wide listing is cut down before the
+    // per-file exclusion list is consulted.
+    if (!isInWorkingFolder(path, workingFolder)) continue;
     if (isExcludedPath(path, excludeFolders, configDir)) continue;
     unique.add(path);
   }
@@ -210,12 +234,13 @@ export async function loadNotes(
   const excludeFolders = (options.excludeFolders ?? [])
     .map((prefix) => normalizeVaultPath(prefix))
     .filter(Boolean);
+  const workingFolder = normalizeVaultPath(options.workingFolder ?? "");
   const hiddenTypes = options.hiddenTypes ?? DEFAULT_HIDDEN_TYPES;
   const maxFileBytes = options.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES;
   const concurrency = clampConcurrency(options.concurrency, DEFAULT_CONCURRENCY);
   const { onProgress } = options;
 
-  const paths = await discoverMarkdownFiles(vault, excludeFolders);
+  const paths = await discoverMarkdownFiles(vault, excludeFolders, workingFolder);
   const total = paths.length;
   let done = 0;
 

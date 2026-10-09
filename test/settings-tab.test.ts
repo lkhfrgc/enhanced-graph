@@ -97,6 +97,24 @@ describe("EnhancedGraphSettingTab", () => {
     expect(h.rebuilds).toBeGreaterThan(0);
   });
 
+  it("stores the working folder trimmed, and rebuilds for it", async () => {
+    const h = makeHost();
+    const tab = render(h.host);
+
+    const box = settingNamed(tab.containerEl, "工作文件夹")?.querySelector<HTMLInputElement>(
+      "input[type=text]",
+    );
+    expect(box).toBeTruthy();
+    box!.value = "  notes/  ";
+    box!.dispatchEvent(new Event("input", { bubbles: true }));
+    await Promise.resolve();
+
+    // Trailing spaces in a folder name would silently match nothing.
+    expect(h.settings.workingFolder).toBe("notes/");
+    // Which nodes exist changes, so a rebuild is required.
+    expect(h.rebuilds).toBeGreaterThan(0);
+  });
+
   it("offers the language choices and shows the stored one", () => {
     const { host } = makeHost({ settings: { language: "en" } });
     const tab = render(host);

@@ -100,7 +100,7 @@ Verified against real Obsidian **1.9.10** and **1.14.4**. `minAppVersion` is 1.9
 
 ## Settings
 
-The settings tab holds: interface language, association weights, built-in graph enhancement, reuse of the built-in graph's layout, and excluded folders — plus two buttons that clear dismissed insights and the layout cache.
+The settings tab holds: interface language, association weights, built-in graph enhancement, reuse of the built-in graph's layout, a working folder, and excluded folders — plus two buttons that clear dismissed insights and the layout cache. The working folder narrows the plugin to one subfolder of the vault (empty means all of it); excluded folders are then trimmed out of that.
 
 Everything else (colours, filters, appearance — and, in the standalone view, the weights) is edited inside the graph itself, where the effect is visible while you change it.
 

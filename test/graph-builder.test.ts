@@ -464,6 +464,48 @@ describe("discovery and loading", () => {
     expect(graph.nodes.map((node) => node.id)).toEqual(["keep"]);
   });
 
+  it("reads only the working folder, and the whole vault when it is empty", async () => {
+    const vault = new MemoryVault({
+      "keep.md": "# Root note",
+      "notes/a.md": "# In the folder",
+      "notes/deep/b.md": "# Deeper in",
+      // Shares the prefix without being inside: a plain `startsWith` would sweep
+      // it in, which is why the match is on the folder boundary.
+      "notes-archive/c.md": "# Not ours",
+    });
+
+    const whole = await buildWikiGraph({ vault });
+    expect(whole.nodes.map((node) => node.id).sort()).toEqual([
+      "keep",
+      "notes-archive/c",
+      "notes/a",
+      "notes/deep/b",
+    ]);
+
+    const scoped = await buildWikiGraph({ vault, workingFolder: "notes" });
+    expect(scoped.nodes.map((node) => node.id).sort()).toEqual(["notes/a", "notes/deep/b"]);
+    // Same answer whether or not the folder is written with its slashes.
+    const slashed = await buildWikiGraph({ vault, workingFolder: "/notes/" });
+    expect(slashed.nodes.map((node) => node.id).sort()).toEqual(["notes/a", "notes/deep/b"]);
+
+    // Empty is the default and means "everything", not "nothing".
+    expect((await buildWikiGraph({ vault, workingFolder: "" })).nodes.length).toBe(whole.nodes.length);
+  });
+
+  it("applies the working folder first, then the exclusions inside it", async () => {
+    const vault = new MemoryVault({
+      "notes/keep.md": "# Keep",
+      "notes/templates/daily.md": "# Template",
+      "elsewhere/x.md": "# Outside",
+    });
+    const graph = await buildWikiGraph({
+      vault,
+      workingFolder: "notes",
+      excludeFolders: ["notes/templates"],
+    });
+    expect(graph.nodes.map((node) => node.id)).toEqual(["notes/keep"]);
+  });
+
   it("skips oversized notes by UTF-8 byte count, not character count", async () => {
     const ascii = "# Big\n\n" + "x".repeat(400);
     const cjk = "# 标题\n\n" + "知".repeat(40); // 46 chars, 130 UTF-8 bytes

@@ -432,6 +432,7 @@ export default class EnhancedGraphPlugin extends Plugin implements PluginHost, S
     const build = (async () => {
       const graph = await buildWikiGraph({
         vault: this.vaultAdapter,
+        workingFolder: this.settings.workingFolder,
         excludeFolders: this.settings.excludeFolders,
         weights: this.settings.weights,
         // Re-using the previous community ids keeps cluster colours stable

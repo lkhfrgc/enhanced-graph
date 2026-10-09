@@ -19,6 +19,15 @@ export interface EnhancedGraphSettings {
   weights: RelevanceWeights;
   /** Folder prefixes excluded from the graph. */
   excludeFolders: string[];
+  /**
+   * Only notes under this subfolder are read; empty means the whole vault.
+   *
+   * A single folder rather than a list, and an INCLUDE where `excludeFolders` is an
+   * exclude: it narrows the plugin to one part of a vault that holds more than the
+   * graph is about — a work folder inside a personal vault, say. Empty is the
+   * default and keeps the previous behaviour exactly.
+   */
+  workingFolder: string;
   /** Page types hidden from the graph. */
   hiddenTypes: string[];
   /**
@@ -119,6 +128,7 @@ export const DEFAULT_SETTINGS: EnhancedGraphSettings = {
   language: "auto",
   weights: { ...DEFAULT_RELEVANCE_WEIGHTS },
   excludeFolders: [],
+  workingFolder: "",
   hiddenTypes: [],
   hiddenCommunities: [],
   hiddenTags: [],
@@ -165,6 +175,7 @@ export function mergeSettings(raw: unknown): EnhancedGraphSettings {
     positions: source.positions ?? {},
     dismissedInsights: source.dismissedInsights ?? [],
     excludeFolders: source.excludeFolders ?? [],
+    workingFolder: source.workingFolder ?? DEFAULT_SETTINGS.workingFolder,
     hiddenTypes: source.hiddenTypes ?? [],
     hiddenCommunities: source.hiddenCommunities ?? [],
     hiddenTags: legacyTagMode === "include" ? [] : (source.hiddenTags ?? []),
