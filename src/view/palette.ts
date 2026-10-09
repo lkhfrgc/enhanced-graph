@@ -20,26 +20,54 @@
  * enhancement this plugin adds.
  */
 
-import type { ColorMode, PageType } from "../types";
+import type { ColorMode } from "../types";
 
 /** Base radius of a degree-0 node, in graph units. */
 export const BASE_NODE_SIZE = 8;
 /** Radius of the highest-degree node, before density scaling and user scale. */
 export const MAX_NODE_SIZE = 28;
 
-export const NODE_TYPE_COLORS: Record<PageType, string> = {
-  thesis: "#dd527d",
-  source: "#e46352",
-  overview: "#c9834c",
-  finding: "#518f4e",
-  methodology: "#3b9072",
-  query: "#00a1ad",
-  comparison: "#009fcb",
-  entity: "#0088e2",
-  concept: "#7e82e5",
-  synthesis: "#bf66b6",
-  other: "#7d8d9c",
-};
+/**
+ * The ramp every declared page type draws from, searched by `npm run palette`.
+ *
+ * There is no semantic set and no "standard spelling". There used to be eleven hand-placed
+ * hues with meaning attached — source warm, findings green, arguments red — plus a hash
+ * fallback for everything else, and the split was invisible from inside a vault: a user
+ * writing `type: 实验记录` has no idea the plugin considers `concept` the standard spelling
+ * of anything. Writing one idea two ways was painted two colours, while two unrelated
+ * custom types could land on the same one.
+ *
+ * A vault's types are simply the strings it declares. `assignTypeColors` hands each one its
+ * own entry from this ramp — 22 colours, worst pair ΔE 19.0, every one clearing 3:1 on both
+ * the dark and the light canvas.
+ */
+export const TYPE_COLORS: readonly string[] = [
+  "#c8547e",
+  "#ba7187",
+  "#e26c74",
+  "#ae6a5d",
+  "#c06141",
+  "#b47a43",
+  "#937a1e",
+  "#a19058",
+  "#8b9839",
+  "#6b844f",
+  "#4d8a3c",
+  "#2ea46b",
+  "#41896a",
+  "#00a49b",
+  "#0090a6",
+  "#008cc3",
+  "#1a7fd2",
+  "#667bb1",
+  "#8489e1",
+  "#9a67b9",
+  "#a684b9",
+  "#cd71b5",
+];
+
+/** Used where a page genuinely has no type to colour by. */
+const NEUTRAL_NODE_COLOR = "#7d8d9c";
 
 /**
  * Twelve cluster colours at even 30° hue steps; index = community id % 12.
@@ -63,35 +91,8 @@ export const COMMUNITY_COLORS: readonly string[] = [
   "#bd6aa4",
 ];
 
-/**
- * Colours for page types the plugin does not know — the ones a vault invents.
- *
- * Searched rather than hand-spread (`npm run palette` prints the numbers). The eight
- * colours this replaces were fine among themselves — worst pair ΔE 29.5 — and bad next
- * to the semantic palette: one sat ΔE 4.4 from `query`, so a custom type and a known one
- * were painted the same colour. A rigid ramp cannot know what it will sit beside, so the
- * generator sweeps hue, lightness and chroma and keeps only what clears ΔE 19 of the
- * other entries AND ΔE 15 of all eleven semantic colours, on both canvases.
- *
- * Ten entries: enough for the custom types a vault realistically declares. Past that the
- * assignment wraps, and two custom types share a colour — reported rather than hidden,
- * because there is no eight-colour answer that is also distinct.
- */
-export const CUSTOM_TYPE_COLORS: readonly string[] = [
-  "#b2657d",
-  "#d1656c",
-  "#af6a56",
-  "#9b7544",
-  "#a4903c",
-  "#778145",
-  "#0088c5",
-  "#7e8eca",
-  "#896ebc",
-  "#b180b4",
-];
-
 export function communityColor(community: number): string {
-  if (!Number.isFinite(community) || community < 0) return NODE_TYPE_COLORS.other;
+  if (!Number.isFinite(community) || community < 0) return NEUTRAL_NODE_COLOR;
   return COMMUNITY_COLORS[community % COMMUNITY_COLORS.length];
 }
 
@@ -99,37 +100,20 @@ export function communityColor(community: number): string {
  * One colour per declared page type, all different.
  *
  * Assigning per vault rather than per key is the whole point: a hash cannot know which
- * other types are present, so two custom types collided about as often as not — on a real
- * vault, 13 declared types produced 12 colours, with `实体` and `资料` identical. Here the
- * keys are sorted (so the same vault always gets the same colours, across views and across
- * sessions) and each takes the next ramp entry nobody else has.
+ * other types are present, so two types collided about as often as not — on a real vault,
+ * 13 declared types produced 12 colours, with `实体` and `资料` identical. Here the keys are
+ * sorted (so the same vault always gets the same colours, across views and across sessions)
+ * and each takes the next ramp entry nobody else has.
  *
- * Canonical types keep their semantic colour; the ramp is searched to stay clear of those,
- * and an entry a canonical type already owns is skipped.
+ * No spelling is privileged: `concept` and `概念` are two declared types like any others,
+ * and the plugin does not decide that one of them is the standard form.
  */
 export function assignTypeColors(keys: readonly string[]): ReadonlyMap<string, string> {
   const assigned = new Map<string, string>();
-  const taken = new Set<string>();
-  const custom: string[] = [];
-  for (const key of keys) {
-    if (Object.prototype.hasOwnProperty.call(NODE_TYPE_COLORS, key)) {
-      const colour = NODE_TYPE_COLORS[key as PageType];
-      if (!assigned.has(key)) {
-        assigned.set(key, colour);
-        taken.add(colour);
-      }
-      continue;
-    }
-    if (!assigned.has(key)) custom.push(key);
-  }
+  const custom = [...new Set(keys)];
   custom.sort();
-  let cursor = 0;
-  for (const key of custom) {
-    while (cursor < CUSTOM_TYPE_COLORS.length && taken.has(CUSTOM_TYPE_COLORS[cursor])) cursor += 1;
-    const colour = CUSTOM_TYPE_COLORS[cursor % CUSTOM_TYPE_COLORS.length];
-    cursor += 1;
-    assigned.set(key, colour);
-    taken.add(colour);
+  for (const [index, key] of custom.entries()) {
+    assigned.set(key, TYPE_COLORS[index % TYPE_COLORS.length]);
   }
   return assigned;
 }
@@ -145,13 +129,17 @@ export function assignTypeColors(keys: readonly string[]): ReadonlyMap<string, s
  */
 export const MARKER_DOT_RADIUS_PX = 6;
 
+/**
+ * A type's colour when nothing better is known.
+ *
+ * The views always have the graph, and therefore an assignment; this is for a single key
+ * with no vault to go on (a test, a swatch, a report line). Deterministic, and deliberately
+ * not the assignment: the same name always answers the same way.
+ */
 export function typeColor(type: string): string {
-  if (Object.prototype.hasOwnProperty.call(NODE_TYPE_COLORS, type)) {
-    return NODE_TYPE_COLORS[type as PageType];
-  }
   let hash = 0;
   for (const char of type) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
-  return CUSTOM_TYPE_COLORS[hash % CUSTOM_TYPE_COLORS.length];
+  return TYPE_COLORS[hash % TYPE_COLORS.length];
 }
 
 /**

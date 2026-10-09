@@ -38,7 +38,7 @@ import {
   type UnexpectedLink,
   type WikiGraph,
 } from "../src/types";
-import { communityColor, hexToRgbInt, NODE_TYPE_COLORS } from "../src/view/palette";
+import { communityColor, hexToRgbInt } from "../src/view/palette";
 import { setLanguage } from "../src/i18n";
 
 // `setIcon` comes from "obsidian", which is types-only in this project, so the
@@ -450,10 +450,14 @@ describe("OfficialGraphEnhancer colouring", () => {
     expect(h.renderer.nodeLookup["b.md"].color).toEqual({ a: 1, rgb: hexToRgbInt(communityColor(1)) });
   });
 
-  it("uses the type palette when the mode says so", () => {
+  it("uses the vault's type colour when the mode says so", () => {
     const h = setup([{ id: "a.md" }], [makeNode({ id: "a", type: "source" })], "type");
     h.enhancer.start();
-    expect(h.renderer.nodeLookup["a.md"].color?.rgb).toBe(hexToRgbInt(NODE_TYPE_COLORS.source));
+    // The colour is the vault's assignment, not a palette entry reserved for `source`:
+    // the plugin has no notion of a standard spelling for a type.
+    expect(h.renderer.nodeLookup["a.md"].color?.rgb).toBe(
+      hexToRgbInt(assignTypeColors(["source"]).get("source")!),
+    );
   });
 
   it("gives a custom type its own colour instead of the one for `other`", () => {
@@ -477,9 +481,7 @@ describe("OfficialGraphEnhancer colouring", () => {
     const reading = h.renderer.nodeLookup["b.md"].color?.rgb;
     expect(experiment).toBe(hexToRgbInt(assignment.get("实验记录")!));
     expect(reading).toBe(hexToRgbInt(assignment.get("读书笔记")!));
-    // The point: neither is painted as plain `other`, and they differ from each other.
-    expect(experiment).not.toBe(hexToRgbInt(NODE_TYPE_COLORS.other));
-    expect(reading).not.toBe(hexToRgbInt(NODE_TYPE_COLORS.other));
+    // The point: the two are told apart on the canvas rather than sharing one colour.
     expect(experiment).not.toBe(reading);
   });
 
@@ -1501,10 +1503,12 @@ describe("colour options on the built-in graph", () => {
     expect(h.renderer.nodeLookup["a.md"].color?.rgb).toBe(hexToRgbInt("#ff0000"));
   });
 
-  it("falls back to the palette while no override is set", () => {
+  it("falls back to the vault's assignment while no override is set", () => {
     const h = setup([{ id: "a.md" }], [makeNode({ id: "a", type: "concept" })], "type");
     h.enhancer.start();
-    expect(h.renderer.nodeLookup["a.md"].color?.rgb).toBe(hexToRgbInt(typeColor("concept")));
+    expect(h.renderer.nodeLookup["a.md"].color?.rgb).toBe(
+      hexToRgbInt(assignTypeColors(["concept"]).get("concept")!),
+    );
   });
 
   it("uses the user's per-community colour in community mode", () => {

@@ -101,27 +101,16 @@ const DARK_CANVAS = "#0f172a";
 const LIGHT_CANVAS = "#ffffff";
 
 /**
- * Eleven page types. Hue carries the meaning (source is warm, findings green,
- * arguments red); lightness is held in a band that clears 3:1 on BOTH canvases,
- * which one shared set of colours has to do.
+ * No semantic set any more.
  *
- * `meta: true` marks the types that should recede — a summary or an
- * unclassified page is not what the eye should land on first — so they get
- * lower chroma rather than a different hue.
+ * There used to be eleven hand-placed hues with meaning attached — source warm,
+ * findings green, arguments red — and every other declared type fell back to a hash.
+ * That split is invisible from inside a vault: a user writes `type: 实验记录` and has no
+ * idea the plugin considers `concept` the standard spelling of anything, so the same
+ * idea written two ways was painted two colours while two unrelated custom types could
+ * collide. Types are now simply the strings a vault declares, and they all draw from one
+ * searched ramp, assigned per vault by `assignTypeColors`.
  */
-const TYPES = [
-  { type: "thesis", hue: 5, chroma: 58, L: 55, note: "arguments: red" },
-  { type: "source", hue: 35, chroma: 60, L: 58, note: "raw material: orange" },
-  { type: "overview", hue: 62, chroma: 46, L: 61, note: "summaries: gold", meta: true },
-  { type: "finding", hue: 140, chroma: 44, L: 54, note: "results: green" },
-  { type: "methodology", hue: 166, chroma: 34, L: 54, note: "process: teal" },
-  { type: "query", hue: 205, chroma: 44, L: 59, note: "questions: cyan" },
-  { type: "comparison", hue: 230, chroma: 46, L: 59, note: "side by side: azure" },
-  { type: "entity", hue: 262, chroma: 58, L: 53, note: "named things: indigo" },
-  { type: "concept", hue: 295, chroma: 56, L: 58, note: "ideas: violet" },
-  { type: "synthesis", hue: 330, chroma: 54, L: 56, note: "combining: magenta" },
-  { type: "other", hue: 255, chroma: 10, L: 58, note: "unclassified: neutral", meta: true },
-];
 
 /** Twelve cluster colours: no meaning to carry, so spread the hues evenly. */
 const COMMUNITIES = Array.from({ length: 12 }, (_, index) => ({
@@ -203,41 +192,35 @@ function report(label, colours, oldColours) {
   return { worst: worst.d, failing: failing.length };
 }
 
-const types = build(TYPES);
 const communities = build(COMMUNITIES);
 
-/** The eight hand-spread fallbacks this ramp replaces, for the comparison below. */
+/** The eight hand-spread fallbacks that used to colour unknown types, for comparison. */
 const FALLBACK_HEXES = Array.from({ length: 8 }, (_, index) =>
   toHex(lchToRgb(55 + (index % 2) * 4, 44, (index * 360) / 8 + 22)),
 );
 
 /**
- * A ramp for page types the plugin does not know — the ones a vault invents.
+ * The ramp every declared page type draws from.
  *
- * The eight hand-spread fallbacks were fine among themselves (worst pair ΔE 29.5) and
- * bad next to the semantic palette: hue 202 sat ΔE 4.4 from `query` (205), so a custom
- * type and a known one were painted the same colour. Rigid ramps cannot know what they
- * will sit beside, so this one is searched instead: sweep hue and lightness, keep what
- * clears a distance from the eleven semantic colours AND from the colours already kept,
- * and stop when the wheel runs out.
+ * Searched rather than hand-placed: sweep hue, lightness and chroma, and keep only what
+ * clears a distance from the colours already kept and 3:1 contrast on both canvases. No
+ * meaning is attached to any hue — which is the point. A vault declares `实验记录` or
+ * `concept` or `我的概念`, and the plugin has no business deciding that one of those
+ * spellings is the standard one and deserves a reserved colour.
  *
  * The distances are the point of the exercise, so they are printed rather than assumed.
  */
-const CUSTOM_MIN_INTERNAL = 19;
-const CUSTOM_MIN_AGAINST_TYPES = 15;
+const TYPE_MIN_INTERNAL = 19;
 
-const customRamp = (() => {
+const typeRamp = (() => {
   const kept = [];
-  const hexes = types.map((type) => type.hex);
   // Sweep hue first, then the lightness/chroma bands, so the first entries are spread
-  // around the wheel rather than clustered in whichever band came first. Two chroma
-  // levels as well as two lightnesses: a custom type does not have to be as saturated as
-  // a semantic one, and the extra room is what lets the ramp cover a vault that invents
-  // a dozen types.
+  // around the wheel rather than clustered in whichever band came first. Several bands
+  // because a ramp that has to cover a whole vault needs the room.
   const candidates = [];
   for (let hueStep = 0; hueStep < 360; hueStep += 3) {
     for (const L of [52, 56, 60]) {
-      for (const chroma of [46, 34]) {
+      for (const chroma of [50, 42, 32]) {
         candidates.push({ hue: hueStep, chroma, L });
       }
     }
@@ -246,36 +229,16 @@ const customRamp = (() => {
     const contrastOk =
       contrast(candidate.hex, DARK_CANVAS) >= 3 && contrast(candidate.hex, LIGHT_CANVAS) >= 3;
     if (!contrastOk) continue;
-    if (hexes.some((hex) => deltaE(candidate.hex, hex) < CUSTOM_MIN_AGAINST_TYPES)) continue;
-    if (kept.some((entry) => deltaE(candidate.hex, entry.hex) < CUSTOM_MIN_INTERNAL)) continue;
+    if (kept.some((entry) => deltaE(candidate.hex, entry.hex) < TYPE_MIN_INTERNAL)) continue;
     kept.push(candidate);
   }
   return kept;
 })();
 
-report("custom type ramp (searched)", customRamp, FALLBACK_HEXES);
-const customWorstAgainstTypes = (() => {
-  let worst = { d: Infinity, pair: null };
-  for (const custom of customRamp) {
-    for (const type of types) {
-      const d = deltaE(custom.hex, type.hex);
-      if (d < worst.d) worst = { d, pair: [custom.hex, type.hex] };
-    }
-  }
-  return worst;
-})();
-console.log(
-  `\n  closest custom-vs-semantic pair: ΔE ${customWorstAgainstTypes.d.toFixed(1)} ` +
-    `(${customWorstAgainstTypes.pair.join(" vs ")}) — required ≥ ${CUSTOM_MIN_AGAINST_TYPES}`,
-);
-
-report("page types (11)", types, Object.values(OLD.types));
+report("page type ramp (searched)", typeRamp, FALLBACK_HEXES);
 report("community colours (12)", communities, OLD.communities);
 
 console.log("\n=== TS source ===\n");
-console.log("export const NODE_TYPE_COLORS: Record<PageType, string> = {");
-for (const c of types) console.log(`  ${c.type}: "${c.hex}",`);
-console.log("};\n");
 console.log("export const COMMUNITY_COLORS: readonly string[] = [");
 for (const c of communities) console.log(`  "${c.hex}",`);
 console.log("];");
@@ -296,12 +259,9 @@ const edges = [
 ].map(({ id, hue }) => ({ id, hex: toHex(lchToRgb(58, 46, hue)) }));
 
 console.log("");
-console.log("const FALLBACK_TYPE_COLORS = [");
-console.log("  " + fallbacks.map((h) => `"${h}"`).join(", "));
-console.log("];\n");
-console.log("// Searched ramp for page types the plugin does not know; see `palette.ts`.");
-console.log("export const CUSTOM_TYPE_COLORS: readonly string[] = [");
-for (const colour of customRamp) console.log(`  "${colour.hex}",`);
+console.log("// Searched ramp every declared page type draws from; see `palette.ts`.");
+console.log("export const TYPE_COLORS: readonly string[] = [");
+for (const colour of typeRamp) console.log(`  "${colour.hex}",`);
 console.log("];");
 console.log("export const EDGE_STRONG_PRESETS = [");
 for (const edge of edges) console.log(`  { id: "${edge.id}", color: "${edge.hex}" },`);
