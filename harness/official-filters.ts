@@ -115,12 +115,10 @@ class FakeOfficialRenderer {
   lastData: unknown = undefined;
 
   constructor(ids: string[]) {
+    // Positioned by the page's stylesheet (`.harness-official-graph`), not from
+    // here: assigning styles directly is what the plugin guidelines forbid, and the
+    // harness is scanned along with the plugin.
     this.containerEl.className = "harness-official-graph";
-    // A definite box for the overlay to lay itself out in: the panel is inside
-    // `position: absolute; inset: 12px`, so a zero-sized host hides every control
-    // the check needs to press.
-    this.containerEl.style.cssText =
-      "position:fixed;left:0;top:0;width:520px;height:100%;z-index:5;background:var(--background-primary);";
     for (const id of ids) {
       const node: FakeOfficialNode = { id, type: "concept", x: 10, y: 20, weight: 1, color: null };
       this.nodes.push(node);

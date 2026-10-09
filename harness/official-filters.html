@@ -34,6 +34,21 @@
         background: var(--background-primary);
         color: var(--text-normal);
       }
+
+      /* A definite box for the overlay to lay itself out in: the panel sits inside
+         `position: absolute; inset: 12px`, so a zero-sized host would hide every
+         control the checks need to press. In the stylesheet rather than set from
+         script — the plugin guidelines forbid assigning styles directly, and the
+         harness is scanned like the rest of the repository. */
+      .harness-official-graph {
+        position: fixed;
+        left: 0;
+        top: 0;
+        width: 520px;
+        height: 100%;
+        z-index: 5;
+        background: var(--background-primary);
+      }
     </style>
     <link rel="stylesheet" href="../styles.css" />
   </head>

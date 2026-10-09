@@ -499,7 +499,7 @@ export class EnhancedGraphView extends ItemView {
       return false;
     }
 
-    const result = applyExternalLayout(sigmaGraph, external.positions);
+    applyExternalLayout(sigmaGraph, external.positions);
     this.layoutSource = "official";
     this.layoutSourceDetail = external.source;
     this.lastLayoutKey = dataKey;

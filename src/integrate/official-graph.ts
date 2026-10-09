@@ -27,7 +27,6 @@ import type { GraphInsights } from "../core/insights";
 import { edgeKey, edgeKeyEndpoints } from "../core/graph-keys";
 import { findConnectingPaths } from "../core/paths";
 import { type FilterSection, renderFilters } from "../view/graph-filters";
-import { renderWeights } from "../view/graph-weights";
 import { collectTags, filterNodes, type TagFilterMode, type VisibilityFilters } from "../view/visibility";
 import type { GraphNode, OfficialGraphMode, RelevanceWeights, WikiGraph } from "../types";
 import { t } from "../i18n";

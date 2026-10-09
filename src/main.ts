@@ -13,9 +13,7 @@ import { DEFAULT_SETTINGS, applyLanguage, mergeSettings, type EnhancedGraphSetti
 import { t } from "./i18n";
 import { VIEW_TYPE_ENHANCED_GRAPH, EnhancedGraphView } from "./view/graph-view";
 import {
-  DEFAULT_RELEVANCE_WEIGHTS,
   EMPTY_GRAPH,
-  type GraphNode,
   type OfficialGraphMode,
   type WikiGraph,
 } from "./types";
@@ -25,7 +23,7 @@ import type { VaultAdapter } from "./core/vault";
 import { GRAPH_MENU_SOURCE, OfficialGraphEnhancer, probeOfficialGraph } from "./integrate/official-graph";
 import { captureOfficialLayout } from "./integrate/official-layout";
 import { hasOfficialGraphView } from "./integrate/official-internals";
-import type { GraphSnapshot, PluginHost, SettingsHost } from "./plugin-host";
+import type { PluginHost, SettingsHost } from "./plugin-host";
 import type { ExternalLayout, LayoutSource } from "./view/layout";
 import { ObsidianVaultAdapter } from "./vault-adapter";
 import { INSIGHTS_REPORT_PATH, buildInsightsReport, buildRelevanceReport } from "./reports";

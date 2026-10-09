@@ -23,6 +23,10 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      # For the build-provenance attestation below: it is signed with a short-lived
+      # OIDC identity and written to the repository's attestation store.
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v4
 
@@ -67,6 +71,16 @@ jobs:
       - name: Build into the checkout
         run: npm run build:ci
 
+      - name: Attest the build provenance of the shipped files
+        # Users can then verify that main.js and styles.css were built from this
+        # repository by this workflow, rather than uploaded by hand. `gh attestation
+        # verify` checks it; the plugin directory asks for it too.
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            main.js
+            styles.css
+
       - name: Create the release as a draft
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -90,14 +104,18 @@ jobs:
 
           # Draft first: the next step refuses to publish a release whose assets
           # did not land, and an asset-less release is uninstallable.
+          #
+          # Exactly the three files Obsidian installs. The third-party notices
+          # that used to ride along as a fourth asset are still in the repository
+          # (and in the bundle's own footer), but an asset the installer never
+          # fetches is flagged by the directory as an unsupported extra file.
           gh release create "$tag" \
             --title="Enhanced Graph $tag" \
             --draft \
             "${notes[@]}" \
             main.js \
             manifest.json \
-            styles.css \
-            THIRD-PARTY-NOTICES.md
+            styles.css
 
           # `::notice::` annotations are readable through the API without a
           # token, unlike the step log. This is how the title/notes get inspected
@@ -114,13 +132,13 @@ jobs:
           # styles.css FROM THE RELEASE ASSETS. `gh release create` still exits 0
           # when an asset is silently missing, and the failure then surfaces much
           # later, as "the plugin will not install". So read the release back and
-          # refuse to go further if any of the four is absent or empty.
+          # refuse to go further if any of the three is absent or empty.
           gh release view "$tag" --json assets \
             --jq '.assets[] | "\(.name) \(.size)"' > /tmp/assets.txt
           echo "assets reported by the API:"
           cat /tmp/assets.txt
 
-          for name in main.js manifest.json styles.css THIRD-PARTY-NOTICES.md; do
+          for name in main.js manifest.json styles.css; do
             size="$(awk -v want="$name" '$1 == want { print $2 }' /tmp/assets.txt)"
             if [ -z "$size" ]; then
               echo "::error::$name is missing from the release assets"
