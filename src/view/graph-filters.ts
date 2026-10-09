@@ -205,21 +205,17 @@ function renderVisibilityRows(section: HTMLElement, options: FilterOptions): voi
  */
 let pendingWorkspace: { folder: string; excluded: Set<string>; from: string } | null = null;
 
-/** Folders the user has folded shut. Expanded is the default; see the renderer. */
-const collapsedFolders = new Set<string>();
-
-/** The folder tree's search box text; module-level for the same reason as the tags'. */
-let workspaceQuery = "";
+/**
+ * Id for the `<datalist>` of folder paths.
+ *
+ * Per render, because both views can have their panel open at once and an id has to
+ * point at one list; the fields are also rebuilt whenever the section repaints.
+ */
+let datalistCounter = 0;
 
 /** `archive/old/` and `/archive/old` are the same folder to a reader. */
 function folderKey(prefix: string): string {
   return prefix.replace(/^\/+|\/+$/g, "");
-}
-
-/** `a/b/c` → `a/b`; a top-level folder and the root both have `""`. */
-function parentOf(path: string): string {
-  const cut = path.lastIndexOf("/");
-  return cut === -1 ? "" : path.slice(0, cut);
 }
 
 /**
@@ -237,165 +233,93 @@ function renderWorkspaceRows(section: HTMLElement, options: FilterOptions): void
   const appliedKey = `${applied.folder}\u0000${appliedExcluded.join("\u0000")}`;
   if (pendingWorkspace === null || pendingWorkspace.from !== appliedKey) {
     pendingWorkspace = { folder: applied.folder, excluded: new Set(appliedExcluded), from: appliedKey };
-    // A folder list that shrank (or a stored root that no longer exists) would
-    // otherwise leave a staged root with no row to show for it.
-    collapsedFolders.clear();
   }
   const pending = pendingWorkspace;
 
   section.createDiv({ cls: "enhanced-graph-hint", text: t("filter.workspaceHint") });
 
-  // --- the search box -----------------------------------------------------
-  const searchRow = section.createDiv({ cls: "enhanced-graph-tag-search-row" });
-  const search = searchRow.createEl("input", { cls: "enhanced-graph-tag-search" });
-  search.type = "search";
-  search.placeholder = t("filter.workspaceSearch");
-  search.value = workspaceQuery;
-
-  // --- the tree -----------------------------------------------------------
-  // One row per folder, nested by depth, and ONE model behind it: a single root to
-  // read, minus any number of excluded subtrees. A tree rather than two lists
-  // because the two halves are not independent — excluding `templates` excludes
-  // everything under it, and a flat list of checkboxes showed those children as if
-  // they were still being read.
-  const tree = section.createDiv({ cls: "enhanced-graph-folder-tree" });
-
-  /** Folders to draw: the query's matches, plus the ancestors that lead to them. */
-  const visible = (): FolderInfo[] => {
-    const query = workspaceQuery.trim().toLowerCase();
-    if (query === "") return [...applied.folders];
-    const matched = new Set<string>();
-    for (const entry of applied.folders) {
-      if (entry.path.toLowerCase().includes(query)) {
-        matched.add(entry.path);
-        // The path down to a match, so a deep match is still reachable.
-        const parts = entry.path.split("/");
-        for (let depth = 1; depth <= parts.length; depth += 1) matched.add(parts.slice(0, depth).join("/"));
-      }
-    }
-    return applied.folders.filter((entry) => matched.has(entry.path));
-  };
-
-  const rows = visible();
-  /** Children of a folder among the rows actually drawn. */
-  const childrenOf = (path: string): FolderInfo[] =>
-    rows.filter((entry) => entry.path !== path && parentOf(entry.path) === path);
-  /** Folders the settings exclude that the vault no longer has, drawn as leaves. */
-  const extra = appliedExcluded
-    .filter((key) => key !== "" && !applied.folders.some((folder) => folder.path === key))
-    .map((path) => ({ path, count: 0 }));
-
-  /**
-   * Excluded by its own tick or by any ancestor's — the rule the UI has to show.
-   *
-   * A prefix excludes its whole subtree, so a child of an excluded folder is not
-   * read whether or not it is ticked itself. Reporting that (checked and disabled)
-   * is the difference between a tree the user can predict and one that lies.
-   */
-  const excludedWithAncestors = (path: string): boolean => {
-    if (path === "") return false;
-    const parts = path.split("/");
-    for (let depth = 1; depth <= parts.length; depth += 1) {
-      if (pending.excluded.has(parts.slice(0, depth).join("/"))) return true;
-    }
-    return false;
-  };
-  /** Inside the staged root — the only folders an exclusion can act on. */
-  const inRoot = (path: string): boolean =>
-    pending.folder === "" || path === pending.folder || path.startsWith(`${pending.folder}/`);
-  const redraw = (): void => {
-    section.empty();
-    renderWorkspaceRows(section, options);
-  };
-
-  /**
-   * Draws one row and, unless it is folded shut, its children beneath it.
-   *
-   * Nesting is real DOM nesting rather than an indent computed per row: the
-   * indentation is a stylesheet rule on the children container, so it stays out of
-   * the code and out of the inline styles the plugin guidelines forbid.
-   */
-  const drawRow = (entry: FolderInfo, container: HTMLElement): void => {
-    const { path, count } = entry;
-    const row = container.createDiv({ cls: "enhanced-graph-folder-row" });
-    row.dataset.folder = path;
-    row.dataset.depth = String(path === "" ? 0 : path.split("/").length - 1);
-    if (path === pending.folder) row.classList.add("is-root");
-    if (!inRoot(path)) row.classList.add("is-outside");
-
-    const children = childrenOf(path);
-    const collapsed = collapsedFolders.has(path);
-    // The twisty, or the gap where one would be, so names line up.
-    if (children.length > 0) {
-      const twisty = row.createEl("button", { cls: "enhanced-graph-folder-twisty" });
-      twisty.setText(collapsed ? "▸" : "▾");
-      twisty.setAttribute("aria-label", collapsed ? t("filter.workspaceExpand") : t("filter.workspaceCollapse"));
-      twisty.addEventListener("click", () => {
-        if (collapsed) collapsedFolders.delete(path);
-        else collapsedFolders.add(path);
-        redraw();
-      });
-    } else {
-      row.createSpan({ cls: "enhanced-graph-folder-twisty" });
-    }
-
-    // The name chooses the root: one click, and it says which one is chosen.
-    const name = row.createEl("button", {
-      cls: `enhanced-graph-folder-name${path === pending.folder ? " is-active" : ""}`,
-      text: path === "" ? t("filter.workspaceWholeVault") : `${path}/`,
-    });
-    name.addEventListener("click", () => {
-      pending.folder = path;
-      // The choice's own path is opened up, so the row that is now the root cannot
-      // be hidden behind a folded ancestor.
-      const parts = path.split("/");
-      for (let depth = 1; depth <= parts.length; depth += 1) {
-        collapsedFolders.delete(parts.slice(0, depth).join("/"));
-      }
-      redraw();
-    });
-
-    row.createSpan({ cls: "enhanced-graph-legend-count", text: String(count) });
-
-    if (path !== "") {
-      const box = row.createEl("input", { cls: "enhanced-graph-folder-exclude", type: "checkbox" });
-      const inherited = excludedWithAncestors(path) && !pending.excluded.has(path);
-      box.checked = excludedWithAncestors(path);
-      // Disabled in the two states where ticking would say something the model
-      // cannot do: outside the root there is nothing to exclude, and under an
-      // exclusion the ancestor wins — untick that one instead.
-      box.disabled = !inRoot(path) || inherited;
-      if (inherited) box.title = t("filter.workspaceInherited");
-      box.addEventListener("change", () => {
-        if (box.checked) pending.excluded.add(path);
-        else pending.excluded.delete(path);
-        redraw();
-      });
-    }
-
-    // Folded shut means the children are not drawn at all, which is what makes a
-    // vault with dozens of nested folders navigable: what is on screen is the path
-    // to the choice, and the rest stays one twisty away.
-    if (children.length > 0 && !collapsed) {
-      const nested = container.createDiv({ cls: "enhanced-graph-folder-children" });
-      nested.dataset.parent = path;
-      for (const child of children) drawRow(child, nested);
-    }
-  };
-
-  const roots = [rows.find((entry) => entry.path === "") ?? { path: "", count: 0 }, ...extra];
-  for (const entry of roots) drawRow(entry, tree);
-
-  if (rows.length === 0 && extra.length === 0) {
-    tree.createDiv({ cls: "enhanced-graph-tag-empty", text: t("filter.workspaceNoFolders") });
+  // The suggestion list both fields draw from: every folder the vault has, with the
+  // notes it stands for, so the path can be recognised rather than remembered.
+  datalistCounter += 1;
+  const listId = `enhanced-graph-folders-${datalistCounter}`;
+  const suggestions = section.createEl("datalist", { attr: { id: listId } });
+  for (const entry of applied.folders) {
+    if (entry.path === "") continue;
+    suggestions.createEl("option", { value: entry.path, text: `${entry.path}/ · ${entry.count}` });
   }
 
-  search.addEventListener("input", () => {
-    workspaceQuery = search.value;
-    // A search answers "where is that folder?", so anything it matches is opened.
-    collapsedFolders.clear();
-    redraw();
+  // --- which folder to read -----------------------------------------------
+  // Typed, not picked from a list. A path is what the setting IS, and a vault that
+  // nests five deep has more folders than a chooser can show without becoming a
+  // tree to navigate; typing `notes/deep` is one gesture, and the suggestion list
+  // covers not remembering the exact path.
+  const folderRow = section.createDiv({ cls: "enhanced-graph-workspace-field" });
+  folderRow.createSpan({ cls: "enhanced-graph-workspace-label", text: t("filter.workspaceFolder") });
+  const folderInput = folderRow.createEl("input", {
+    cls: "enhanced-graph-folder-input",
+    attr: { list: listId, spellcheck: "false", placeholder: t("filter.workspaceWholeVault") },
   });
+  folderInput.type = "text";
+  folderInput.value = pending.folder;
+  // Typing must not redraw: the input would lose the caret on every keystroke. The
+  // staged value, the button and the note under the field are updated in place
+  // instead — the same reason the tag search box keeps its own text.
+  folderInput.addEventListener("input", () => {
+    pending.folder = folderKey(folderInput.value);
+    syncStatus();
+  });
+
+  // What the typed path stands for, or that nothing matches it. The builder matches
+  // by prefix, so a partial path is legitimate — but a typo silently empties the
+  // graph, and this is where that is caught rather than in an empty panel.
+  const status = folderRow.createDiv({ cls: "enhanced-graph-workspace-status" });
+
+  // --- which folders to leave out -----------------------------------------
+  const excludeRow = section.createDiv({ cls: "enhanced-graph-workspace-field" });
+  excludeRow.createSpan({ cls: "enhanced-graph-workspace-label", text: t("filter.workspaceExcluded") });
+  const chips = excludeRow.createDiv({ cls: "enhanced-graph-chips" });
+  const excludeInput = excludeRow.createEl("input", {
+    cls: "enhanced-graph-folder-input",
+    attr: { list: listId, spellcheck: "false", placeholder: t("filter.workspaceExcludePlaceholder") },
+  });
+  excludeInput.type = "text";
+  excludeInput.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    addExclusion(excludeInput.value);
+  });
+  // Picking a suggestion fires `input`, not Enter, so the value is read when it
+  // changes to something the vault actually has.
+  excludeInput.addEventListener("change", () => {
+    if (applied.folders.some((entry) => entry.path === folderKey(excludeInput.value))) {
+      addExclusion(excludeInput.value);
+    }
+  });
+
+  function addExclusion(raw: string): void {
+    const path = folderKey(raw);
+    if (path === "") return;
+    pending.excluded.add(path);
+    excludeInput.value = "";
+    // In place: no redraw, so the input keeps focus for the next path.
+    drawChips();
+    syncStatus();
+  }
+
+  function drawChips(): void {
+    chips.empty();
+    for (const path of [...pending.excluded].sort()) {
+      const chip = chips.createDiv({ cls: "enhanced-graph-chip" });
+      chip.createSpan({ cls: "enhanced-graph-chip-text", text: `${path}/` });
+      const remove = chip.createEl("button", { cls: "enhanced-graph-chip-remove", text: "✕" });
+      remove.setAttribute("aria-label", t("filter.workspaceRemove"));
+      remove.addEventListener("click", () => {
+        pending.excluded.delete(path);
+        drawChips();
+        syncStatus();
+      });
+    }
+  }
 
   // --- apply ---------------------------------------------------------------
   const actions = section.createDiv({ cls: "enhanced-graph-workspace-actions" });
@@ -408,8 +332,16 @@ function renderWorkspaceRows(section: HTMLElement, options: FilterOptions): void
     pending.excluded.size !== appliedExcluded.length ||
     [...pending.excluded].some((folder) => !appliedExcluded.includes(folder));
 
-  apply.disabled = !isDirty();
-  reset.classList.toggle("is-hidden", !isDirty());
+  /** Refreshes everything that follows from the staged value, without redrawing. */
+  function syncStatus(): void {
+    apply.disabled = !isDirty();
+    reset.classList.toggle("is-hidden", !isDirty());
+    status.setText(describePath(pending.folder, applied.folders));
+    status.classList.toggle("is-warning", pending.folder !== "" && !matchesAnything(pending.folder, applied.folders));
+  }
+
+  drawChips();
+  syncStatus();
 
   apply.addEventListener("click", () => {
     if (!isDirty()) return;
@@ -427,12 +359,42 @@ function renderWorkspaceRows(section: HTMLElement, options: FilterOptions): void
 
   reset.addEventListener("click", () => {
     pendingWorkspace = null;
-    // Redrawn in place: the staged ticks have to go back to the applied ones, and
+    // Redrawn in place: the staged paths have to go back to the applied ones, and
     // only a fresh render puts them there. Reusing the element keeps the section's
     // `data-section`, which the switcher and the checks read.
     section.empty();
     renderWorkspaceRows(section, options);
   });
+}
+
+/** True when the path names or leads to a folder the vault has. */
+function matchesAnything(path: string, folders: readonly FolderInfo[]): boolean {
+  const key = folderKey(path).toLowerCase();
+  if (key === "") return true;
+  return folders.some((entry) => entry.path.toLowerCase().startsWith(key));
+}
+
+/**
+ * What the typed path stands for, said plainly.
+ *
+ * Two different answers are useful: the folder's own size when the path names one,
+ * and "nothing here" when it does not — the case where the graph would come back
+ * empty and the reason would otherwise be invisible.
+ */
+function describePath(path: string, folders: readonly FolderInfo[]): string {
+  const key = folderKey(path);
+  if (key === "") {
+    const whole = folders.find((entry) => entry.path === "")?.count ?? 0;
+    return t("filter.workspaceWhole", { count: String(whole) });
+  }
+  const exact = folders.find((entry) => entry.path === key);
+  if (exact) return t("filter.workspaceMatched", { count: String(exact.count) });
+  const below = folders.filter((entry) => entry.path.startsWith(`${key}/`));
+  if (below.length > 0) {
+    const total = below.reduce((sum, entry) => sum + entry.count, 0);
+    return t("filter.workspaceUnder", { folders: String(below.length), count: String(total) });
+  }
+  return t("filter.workspaceNoMatch");
 }
 
 /**
