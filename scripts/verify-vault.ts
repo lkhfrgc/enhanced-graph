@@ -13,7 +13,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { buildWikiGraph } from "../src/core/graph-builder";
 import { analyzeGraph } from "../src/core/insights";
-import { SPARSE_COHESION_THRESHOLD } from "../src/core/communities";
+import { SPARSE_DENSITY_RATIO, computeGraphDensity } from "../src/core/communities";
 import type { VaultAdapter } from "../src/core/vault";
 
 const vaultRoot = path.resolve(process.argv[2] ?? path.join(process.cwd(), "..", "插件开发"));
@@ -71,6 +71,9 @@ async function main(): Promise<void> {
   const sparse = graph.communities.filter((community) => community.isSparse);
   const bridges = insights.gaps.filter((gap) => gap.type === "bridge");
   const connections = insights.connections;
+  // The baseline every sparseness question is asked against, and the same one the
+  // community engine used.
+  const vaultDensity = computeGraphDensity(graph.nodes.length, graph.edges.length);
 
   const checks: Check[] = [
     {
@@ -111,11 +114,16 @@ async function main(): Promise<void> {
       detail: isolated.map((node) => `${node.label}(${node.linkCount})`).join(", ") || "none",
     },
     {
-      name: "at least one sparse community (cohesion < 0.15, ≥ 3 pages)",
+      name: `at least one sparse community (< ${SPARSE_DENSITY_RATIO}× vault density, ≥ 3 pages)`,
       pass: sparse.length >= 1,
-      detail: sparse
-        .map((c) => `#${c.id} ${c.topNodes[0]} n=${c.nodeCount} cohesion=${c.cohesion.toFixed(3)}`)
-        .join(" | ") || "none",
+      detail:
+        sparse
+          .map(
+            (c) =>
+              `#${c.id} ${c.topNodes[0]} n=${c.nodeCount} cohesion=${c.cohesion.toFixed(3)} ` +
+              `(${(c.cohesion / vaultDensity).toFixed(2)}×)`,
+          )
+          .join(" | ") || "none",
     },
     {
       name: "bridge nodes connect 3+ clusters",
@@ -257,7 +265,9 @@ async function main(): Promise<void> {
   for (const community of graph.communities) {
     console.log(
       `  #${String(community.id).padStart(2)} n=${String(community.nodeCount).padStart(3)} ` +
-        `cohesion=${community.cohesion.toFixed(3)}${community.isSparse ? " SPARSE" : ""} ` +
+        `cohesion=${community.cohesion.toFixed(3)} ` +
+        `×${(vaultDensity > 0 ? community.cohesion / vaultDensity : 0).toFixed(2)} vault density` +
+        `${community.isSparse ? "  SPARSE" : ""} ` +
         `meanDeg=${community.meanIntraDegree.toFixed(2)} core=${community.topNodes[0] ?? "-"}`,
     );
   }
@@ -281,7 +291,10 @@ async function main(): Promise<void> {
     console.log(`  ${check.pass ? "PASS" : "FAIL"}  ${check.name}: ${check.detail}`);
   }
 
-  console.log(`\nthreshold used for sparse communities: ${SPARSE_COHESION_THRESHOLD}`);
+  console.log(
+    `\nsparse rule: cohesion < ${SPARSE_DENSITY_RATIO} × the vault's own density ` +
+      `(${vaultDensity.toFixed(4)}) → below ${(vaultDensity * SPARSE_DENSITY_RATIO).toFixed(4)}`,
+  );
   console.log(`snapshot written to ${outFile}`);
   console.log(failed.length === 0 ? "\nALL CHECKS PASSED" : `\n${failed.length} CHECK(S) FAILED`);
 

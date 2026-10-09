@@ -8,7 +8,7 @@ import type {
   PageType,
   WikiGraph,
 } from "../src/types";
-import { SPARSE_COHESION_THRESHOLD, SPARSE_MIN_MEMBERS, computeCommunityConnectivity } from "../src/core/communities";
+import { SPARSE_MIN_MEMBERS, computeCommunityConnectivity } from "../src/core/communities";
 import {
   analyzeGraph,
   connectionKey,
@@ -82,9 +82,9 @@ function makeCommunity(
     cohesion,
     meanIntraDegree,
     topNodes: overrides.topNodes ?? nodeIds.slice(0, 5),
-    isSparse:
-      overrides.isSparse ??
-      (cohesion < SPARSE_COHESION_THRESHOLD && nodeCount >= SPARSE_MIN_MEMBERS),
+    // This fixture builds communities by hand, so it decides the flag the same way
+    // the engine does: relative to the density of the graph it is put into.
+    isSparse: overrides.isSparse ?? false,
     nodeIds,
   };
 }
@@ -399,11 +399,10 @@ describe("findCoverageGaps / sparse-community", () => {
     return ids.map((id) => makeNode({ id, label: id.toUpperCase(), community: 0, linkCount: 3 }));
   }
 
-  it("does not flag a 4-page cluster with one internal edge (cohesion 1/6 > 0.15)", () => {
+  it("does not flag a 4-page cluster with one internal edge (cohesion 1/6)", () => {
     const community = makeCommunity(0, ["a", "b", "c", "d"], 1);
 
     expect(community.cohesion).toBeCloseTo(1 / 6, 6);
-    expect(community.cohesion).toBeGreaterThan(SPARSE_COHESION_THRESHOLD);
     expect(community.isSparse).toBe(false);
 
     const gaps = findCoverageGaps(makeGraph(sparseFixture(["a", "b", "c", "d"]), [], [community]));
@@ -411,10 +410,15 @@ describe("findCoverageGaps / sparse-community", () => {
   });
 
   it("flags the same 4-page cluster once it has no internal edges", () => {
-    const community = makeCommunity(0, ["a", "b", "c", "d"], 0, { topNodes: ["Alpha"] });
+    // `isSparse` is what the community engine decides — now against the graph's own
+    // density — so this fixture states it rather than deriving it. The derivation
+    // itself is covered in `communities.test.ts`, including the two-vault case.
+    const community = makeCommunity(0, ["a", "b", "c", "d"], 0, {
+      topNodes: ["Alpha"],
+      isSparse: true,
+    });
 
     expect(community.cohesion).toBe(0);
-    expect(community.isSparse).toBe(true);
 
     const gaps = findCoverageGaps(makeGraph(sparseFixture(["a", "b", "c", "d"]), [], [community]));
 
@@ -426,8 +430,11 @@ describe("findCoverageGaps / sparse-community", () => {
     expect(gaps[0]?.suggestion).toContain("[[wikilinks]]");
   });
 
-  it("flags a 5-page cluster with one internal edge (cohesion 0.1 < 0.15)", () => {
-    const community = makeCommunity(0, ["v", "w", "x", "y", "z"], 1, { topNodes: ["V"] });
+  it("flags a 5-page cluster with one internal edge (cohesion 0.1)", () => {
+    const community = makeCommunity(0, ["v", "w", "x", "y", "z"], 1, {
+      topNodes: ["V"],
+      isSparse: true,
+    });
 
     expect(community.cohesion).toBeCloseTo(0.1, 6);
 
@@ -440,7 +447,6 @@ describe("findCoverageGaps / sparse-community", () => {
   it("ignores clusters below the minimum member count", () => {
     const community = makeCommunity(0, ["a", "b"], 0);
 
-    expect(community.cohesion).toBeLessThan(SPARSE_COHESION_THRESHOLD);
     expect(community.nodeCount).toBeLessThan(SPARSE_MIN_MEMBERS);
     expect(community.isSparse).toBe(false);
 
@@ -449,15 +455,18 @@ describe("findCoverageGaps / sparse-community", () => {
   });
 
   it("falls back to 社区 <id> when a cluster has no top nodes", () => {
-    const community = makeCommunity(7, ["a", "b", "c"], 0, { topNodes: [] });
+    const community = makeCommunity(7, ["a", "b", "c"], 0, { topNodes: [], isSparse: true });
 
     const gaps = findCoverageGaps(makeGraph(sparseFixture(["a", "b", "c"]), [], [community]));
     expect(gaps[0]?.title).toBe("稀疏知识领域：社区 7");
   });
 
   it("reports the worst cohesion first", () => {
-    const worst = makeCommunity(0, ["a", "b", "c"], 0, { topNodes: ["Worst"] });
-    const better = makeCommunity(1, ["d", "e", "f", "g", "h"], 1, { topNodes: ["Better"] });
+    const worst = makeCommunity(0, ["a", "b", "c"], 0, { topNodes: ["Worst"], isSparse: true });
+    const better = makeCommunity(1, ["d", "e", "f", "g", "h"], 1, {
+      topNodes: ["Better"],
+      isSparse: true,
+    });
 
     const gaps = findCoverageGaps(
       makeGraph(sparseFixture(["a", "b", "c", "d", "e", "f", "g", "h"]), [], [better, worst]),

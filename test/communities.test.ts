@@ -4,10 +4,11 @@ import type { CommunityInfo } from "../src/types";
 import {
   MAX_RESOLUTION,
   MIN_RESOLUTION,
-  SPARSE_COHESION_THRESHOLD,
+  SPARSE_DENSITY_RATIO,
   SPARSE_MIN_MEMBERS,
   clampResolution,
   computeCommunityConnectivity,
+  computeGraphDensity,
   deriveCommunities,
   isSparseCommunity,
 } from "../src/core/communities";
@@ -155,21 +156,54 @@ describe("computeCommunityConnectivity", () => {
 
 describe("isSparseCommunity", () => {
   it("uses the documented thresholds", () => {
-    expect(SPARSE_COHESION_THRESHOLD).toBe(0.15);
+    expect(SPARSE_DENSITY_RATIO).toBe(1.5);
     expect(SPARSE_MIN_MEMBERS).toBe(3);
   });
 
-  it("is a strict < comparison against the cohesion threshold", () => {
-    expect(isSparseCommunity(0.1499, 3)).toBe(true);
-    expect(isSparseCommunity(0.15, 3)).toBe(false);
-    expect(isSparseCommunity(0.1500001, 3)).toBe(false);
-    expect(isSparseCommunity(0.5, 10)).toBe(false);
+  it("is a strict < comparison against a multiple of the graph's own density", () => {
+    // Baseline 0.2 → the bar is 0.3. The values stay clear of the exact boundary:
+    // 0.2 × 1.5 is 0.30000000000000004 in binary floating point, and a test that
+    // asserted equality there would be testing IEEE 754 rather than the rule.
+    expect(isSparseCommunity(0.29, 3, 0.2)).toBe(true);
+    expect(isSparseCommunity(0.31, 3, 0.2)).toBe(false);
+    expect(isSparseCommunity(0.9, 10, 0.2)).toBe(false);
   });
 
   it("requires the minimum member count", () => {
-    expect(isSparseCommunity(0.0, 2)).toBe(false);
-    expect(isSparseCommunity(0.0, 3)).toBe(true);
-    expect(isSparseCommunity(0.1499, 2)).toBe(false);
+    expect(isSparseCommunity(0.0, 2, 0.2)).toBe(false);
+    expect(isSparseCommunity(0.0, 3, 0.2)).toBe(true);
+    expect(isSparseCommunity(0.1, 2, 0.2)).toBe(false);
+  });
+
+  it("has no baseline to compare against when the graph has no links at all", () => {
+    // Density 0: nothing is "sparser than the graph", not even a cluster with no
+    // internal edges. That is the honest answer to a relative question, and a vault
+    // with no links is reported by the isolated-page gap instead.
+    expect(computeGraphDensity(4, 0)).toBe(0);
+    expect(isSparseCommunity(0, 4, 0)).toBe(false);
+  });
+
+  it("measures density as edges over possible undirected edges", () => {
+    // A 5-node graph with 5 edges: 5 / 10.
+    expect(computeGraphDensity(5, 5)).toBe(0.5);
+    // Degenerate sizes cannot express a density.
+    expect(computeGraphDensity(1, 0)).toBe(0);
+    expect(computeGraphDensity(0, 0)).toBe(0);
+  });
+
+  it("flags the same structural situation in a dense vault and a thin one", () => {
+    // The point of a relative baseline, in one assertion: a cluster with 0.2
+    // cohesion is a genuine island in a densely linked vault (density 0.6) and is
+    // merely average in a thin one (density 0.1). The absolute 0.15 threshold this
+    // replaced got both backwards — it said "fine" to the island and "sparse" to the
+    // average cluster.
+    expect(isSparseCommunity(0.2, 6, 0.6)).toBe(true);
+    expect(isSparseCommunity(0.2, 6, 0.1)).toBe(false);
+    // ...which is exactly what the old rule did, and why it was replaced.
+    const absolute = (cohesion: number, nodeCount: number) =>
+      nodeCount >= SPARSE_MIN_MEMBERS && cohesion < 0.15;
+    expect(absolute(0.2, 6)).toBe(false);
+    expect(absolute(0.1, 6)).toBe(true);
   });
 });
 
@@ -459,7 +493,9 @@ describe("deriveCommunities / degenerate input", () => {
     expect(result.communities[0].nodeCount).toBe(4);
     expect(result.communities[0].intraEdges).toBe(0);
     expect(result.communities[0].cohesion).toBe(0);
-    expect(result.communities[0].isSparse).toBe(true);
+    // Not flagged: with no links anywhere there is no density to be sparse against,
+    // and the cluster is "the whole vault" rather than an island in it.
+    expect(result.communities[0].isSparse).toBe(false);
     expect([...result.assignments.entries()]).toEqual([
       ["a", 0], ["b", 0], ["c", 0], ["d", 0],
     ]);

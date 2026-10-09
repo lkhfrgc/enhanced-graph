@@ -181,6 +181,28 @@ function adamicAdarRaw(a: GraphNode, b: GraphNode, ctx: RelevanceContext): numbe
   }
   return sum;
 }
+
+/**
+ * Tag overlap, as a Jaccard ratio — a candidate signal, not a shipped one.
+ *
+ * Every other signal is derived from links: direct links, shared sources, shared
+ * neighbours, co-citation. None of them can connect two notes that are about the
+ * same thing and simply have not been linked yet, which is exactly what a
+ * "related notes" model is for. Tags are already parsed into the graph
+ * (`GraphNode.tags`), so this asks whether they carry information the link signals
+ * do not — and answers it with the same AUC protocol that retired the old
+ * type-affinity signal (AUC 0.54).
+ */
+function tagJaccard(a: GraphNode, b: GraphNode): number {
+  const ta = a.tags;
+  const tb = b.tags;
+  if (ta.length === 0 || tb.length === 0) return 0;
+  const setA = new Set(ta);
+  let shared = 0;
+  for (const tag of tb) if (setA.has(tag)) shared += 1;
+  if (shared === 0) return 0;
+  return shared / new Set([...ta, ...tb]).size;
+}
 async function main() {
   const vault = new NodeVault();
   const files = await vault.listMarkdownFiles();
@@ -265,15 +287,19 @@ async function main() {
       sources: countSharedSourcesPublic(a, b),
       adamicAdar: adamicAdarRaw(a, b, ctx),
       coCitation: coCitation(a, b, ctx),
+      tags: tagJaccard(a, b),
     };
   };
 
-  type Vector = [number, number, number, number];
+  // Five slots: the four link-derived signals, plus tags as a candidate. A zero in
+  // the last slot is the model as it ships today.
+  type Vector = [number, number, number, number, number];
   const applyVector = (signals: ReturnType<typeof rawSignals>, v: Vector) =>
     signals.direct * v[0] +
     signals.sources * v[1] +
     signals.adamicAdar * v[2] +
-    signals.coCitation * v[3];
+    signals.coCitation * v[3] +
+    signals.tags * v[4];
 
   // --- normalisation variants -------------------------------------------------
   //
@@ -365,21 +391,54 @@ async function main() {
     },
   ];
   const TRIALS = Number(process.env.EVAL_TRIALS ?? 10);
-  const NAMES = ["direct", "sources", "adamicAdar", "coCitation"] as const;
+  const NAMES = ["direct", "sources", "adamicAdar", "coCitation", "tags"] as const;
 
   type Candidate = { name: string; vector: Vector };
   const candidates: Candidate[] = [
-    { name: "sources-heavy  (3,4,1.5,0)", vector: [3, 4, 1.5, 0] },
-    { name: "sources-heavy+cc (3,4,1.5,2)", vector: [3, 4, 1.5, 2] },
-    { name: "no-affinity    (3,4,1.5,0)", vector: [3, 4, 1.5, 0] },
-    { name: "sources+cc     (3,4,1.5,2)", vector: [3, 4, 1.5, 2] },
-    { name: "adamic-led     (3,2,6,2)", vector: [3, 2, 6, 2] },
-    { name: "adamic-led+cc  (3,2,6,2)", vector: [3, 2, 6, 2] },
-    { name: "spread         (2,3,4,3)", vector: [2, 3, 4, 3] },
-    { name: "adamic alone   (0,0,1,0)", vector: [0, 0, 1, 0] },
+    { name: "sources-heavy  (3,4,1.5,0)", vector: [3, 4, 1.5, 0, 0] },
+    { name: "sources-heavy+cc (3,4,1.5,2)", vector: [3, 4, 1.5, 2, 0] },
+    { name: "no-affinity    (3,4,1.5,0)", vector: [3, 4, 1.5, 0, 0] },
+    { name: "sources+cc     (3,4,1.5,2)", vector: [3, 4, 1.5, 2, 0] },
+    { name: "adamic-led     (3,2,6,2)", vector: [3, 2, 6, 2, 0] },
+    { name: "adamic-led+cc  (3,2,6,2)", vector: [3, 2, 6, 2, 0] },
+    { name: "spread         (2,3,4,3)", vector: [2, 3, 4, 3, 0] },
+    { name: "adamic alone   (0,0,1,0)", vector: [0, 0, 1, 0, 0] },
+    // The tag question, asked against the model as it ships (4,2,2,1,0).
+    { name: "tags only      (0,0,0,0,1)", vector: [0, 0, 0, 0, 1] },
+    { name: "shipped+tags   (4,2,2,1,2)", vector: [4, 2, 2, 1, 2] },
+    { name: "shipped+tags×2 (4,2,2,1,4)", vector: [4, 2, 2, 1, 4] },
+    { name: "tags-heavy     (3,2,2,1,6)", vector: [3, 2, 2, 1, 6] },
   ];
 
   console.log(`=== AUC over ${TRIALS} independent 20% splits (mean ± sd) ===\n`);
+
+  // How often a held-out (genuinely related) pair shares a tag, against how often a
+  // random unrelated pair does. A signal can only help if those two differ.
+  {
+    const rng = mulberry32(SEED);
+    const sample = (pairs: Array<[GraphNode, GraphNode]>) =>
+      pairs.length === 0 ? 0 : pairs.filter(([a, b]) => tagJaccard(a, b) > 0).length / pairs.length;
+    const random = mulberry32(SEED + 1);
+    const ids = [...ctx.nodes.keys()];
+    const randomPairs: Array<[GraphNode, GraphNode]> = [];
+    while (randomPairs.length < NEGATIVE_SAMPLES) {
+      const a = ctx.nodes.get(ids[Math.floor(random() * ids.length)]);
+      const b = ctx.nodes.get(ids[Math.floor(random() * ids.length)]);
+      if (!a || !b || a.id === b.id) continue;
+      if (edgeKeys.has(pairKey(a.id, b.id))) continue;
+      randomPairs.push([a, b]);
+    }
+    const withTags = graph.nodes.filter((node) => node.tags.length > 0).length;
+    console.log("=== tag overlap: does it separate related pairs from random ones? ===");
+    console.log(
+      `  notes carrying at least one tag: ${withTags}/${graph.nodes.length} ` +
+        `(${((withTags / Math.max(1, graph.nodes.length)) * 100).toFixed(0)}%)`,
+    );
+    console.log(`  held-out links sharing a tag:    ${(sample(heldOutPairs) * 100).toFixed(1)}%`);
+    console.log(`  random unrelated pairs sharing:  ${(sample(randomPairs) * 100).toFixed(1)}%`);
+    console.log(`  distinct tags in the vault:      ${new Set(graph.nodes.flatMap((node) => node.tags)).size}\n`);
+    void rng;
+  }
 
   // signal scale, measured once on the retained graph
   const scaleSamples = new Map<string, number[]>(NAMES.map((name) => [name, []]));
@@ -395,6 +454,7 @@ async function main() {
       scaleSamples.get("sources")!.push(signals.sources);
       scaleSamples.get("adamicAdar")!.push(signals.adamicAdar);
       scaleSamples.get("coCitation")!.push(signals.coCitation);
+      scaleSamples.get("tags")!.push(signals.tags);
     }
   }
 

@@ -10,10 +10,26 @@ import Graph from "graphology";
 import louvain from "graphology-communities-louvain";
 import type { CommunityInfo } from "../types";
 
-/** Communities below this intra-community density are flagged as sparse. */
-export const SPARSE_COHESION_THRESHOLD = 0.15;
+/**
+ * How many times the graph's own density a community must reach to count as
+ * connected enough.
+ *
+ * An absolute cohesion does not travel between vaults: a densely linked vault puts
+ * every community above any fixed number, and a thinly linked one puts every
+ * community below it. Measured on the demo vault, the flagged cluster sat at 1.05×
+ * the vault's density while the next-lowest was 2.20×, so 1.5 separates them with
+ * room on both sides — and it says the same thing in any vault: "no denser than the
+ * graph it lives in".
+ */
+export const SPARSE_DENSITY_RATIO = 1.5;
 /** A community needs at least this many pages before sparseness is meaningful. */
 export const SPARSE_MIN_MEMBERS = 3;
+
+/** Undirected density: edges present over edges possible. */
+export function computeGraphDensity(nodeCount: number, edgeCount: number): number {
+  if (nodeCount < 2) return 0;
+  return edgeCount / ((nodeCount * (nodeCount - 1)) / 2);
+}
 
 /**
  * Bounds for the exposed resolution.
@@ -77,8 +93,20 @@ export function computeCommunityConnectivity(
   };
 }
 
-export function isSparseCommunity(cohesion: number, nodeCount: number): boolean {
-  return nodeCount >= SPARSE_MIN_MEMBERS && cohesion < SPARSE_COHESION_THRESHOLD;
+/**
+ * Whether a community is sparser than the graph it lives in.
+ *
+ * `graphDensity` comes from {@link computeGraphDensity} over the whole graph, so the
+ * question is relative: "this cluster is no denser than the vault as a whole", which
+ * is what makes the flag mean the same thing in a densely linked vault as in a
+ * thinly linked one.
+ */
+export function isSparseCommunity(
+  cohesion: number,
+  nodeCount: number,
+  graphDensity: number,
+): boolean {
+  return nodeCount >= SPARSE_MIN_MEMBERS && cohesion < graphDensity * SPARSE_DENSITY_RATIO;
 }
 
 export interface DetectCommunitiesOptions {
@@ -183,6 +211,8 @@ function summarise(
   }
 
   const communities: CommunityInfo[] = [];
+  // The baseline the sparseness question is asked against: this graph's own density.
+  const graphDensity = computeGraphDensity(nodes.length, edges.length);
   for (const [communityId, memberIds] of groups) {
     const nodeCount = memberIds.length;
     const intraEdges = intraEdgesByCommunity.get(communityId) ?? 0;
@@ -203,7 +233,7 @@ function summarise(
       cohesion,
       meanIntraDegree,
       topNodes,
-      isSparse: isSparseCommunity(cohesion, nodeCount),
+      isSparse: isSparseCommunity(cohesion, nodeCount, graphDensity),
       nodeIds: [...memberIds],
     });
   }

@@ -78,7 +78,8 @@ npm run verify            typecheck + unit tests + real-vault assertions
 npm run verify:obsidian   assertions inside a real Obsidian, printing the version
 npm run audit:policy      Obsidian developer policies, measured against the code
 npm run audit:submission  the plugin submission requirements
-npm run eval:weights      held-out link prediction, for evaluating the weights
+npm run eval:weights      held-out link prediction, for evaluating the weights and any candidate signal
+npm run eval:stability    how far the clustering moves when the input moves (ARI + core-note survival)
 npm run similarity:scan   line-by-line comparison across the repository
 npm run palette           regenerate and measure the palette (ΔE and WCAG contrast)
 npm run archive:terms     archive Obsidian's terms and report changes

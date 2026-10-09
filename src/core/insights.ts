@@ -15,7 +15,10 @@ import type {
   UnexpectedLink,
   WikiGraph,
 } from "../types";
-import { SPARSE_COHESION_THRESHOLD, SPARSE_MIN_MEMBERS } from "./communities";
+import {
+  computeGraphDensity,
+  isSparseCommunity as isSparseFromMetrics,
+} from "./communities";
 import { edgeKey } from "./graph-keys";
 
 export interface InsightOptions {
@@ -204,19 +207,26 @@ export function findCoverageGaps(
     });
   }
 
+  // Relative to this graph's own density, exactly as the community engine decides
+  // it: an absolute threshold would flag nothing in a densely linked vault.
+  const density = computeGraphDensity(graph.nodes.length, graph.edges.length);
   const sparse = graph.communities
-    .filter(isSparseCommunity)
+    .filter((community) => isSparseCommunity(community, density))
     .sort((a, b) => a.cohesion - b.cohesion || a.id - b.id);
 
   for (const community of sparse) {
     const title = `稀疏知识领域：${community.topNodes[0] ?? `社区 ${community.id}`}`;
+    // The ratio is what the flag is decided on, so it belongs in the card — but only
+    // when there is a baseline to divide by. A vault with no links at all has none.
+    const ratio =
+      density > 0 ? `；约为仓库平均密度的 ${(community.cohesion / density).toFixed(2)} 倍` : "";
     gaps.push({
       key: gapKey("sparse", title, community.nodeIds),
       type: "sparse",
       title,
       description:
         `${community.nodeCount} 个页面，内聚度 ${(community.cohesion * 100).toFixed(1)}%，` +
-        `平均每页 ${community.meanIntraDegree.toFixed(1)} 条内部链接`,
+        `平均每页 ${community.meanIntraDegree.toFixed(1)} 条内部链接${ratio}`,
       suggestion: SPARSE_SUGGESTION,
       nodeIds: community.nodeIds,
     });
@@ -280,13 +290,12 @@ function addCluster(clusters: Map<string, Set<number>>, id: string, community: n
   else clusters.set(id, new Set([community]));
 }
 
-function isSparseCommunity(community: CommunityInfo): boolean {
+function isSparseCommunity(community: CommunityInfo, graphDensity: number): boolean {
   // `isSparse` is precomputed by the community engine; recomputing from the raw
   // metrics keeps cached or hand-built graphs working when the flag is absent.
   return (
     community.isSparse ||
-    (community.cohesion < SPARSE_COHESION_THRESHOLD &&
-      community.nodeCount >= SPARSE_MIN_MEMBERS)
+    isSparseFromMetrics(community.cohesion, community.nodeCount, graphDensity)
   );
 }
 

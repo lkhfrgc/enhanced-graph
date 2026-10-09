@@ -5,6 +5,12 @@ import type { GraphEdge, GraphNode, PageType, WikiGraph } from "../src/types";
 import { MemoryVault } from "../src/core/vault";
 import type { VaultAdapter } from "../src/core/vault";
 import {
+  SPARSE_DENSITY_RATIO,
+  SPARSE_MIN_MEMBERS,
+  computeGraphDensity,
+  isSparseCommunity,
+} from "../src/core/communities";
+import {
   buildLinkIndex,
   buildWikiGraph,
   collectUnresolvedLinks,
@@ -440,6 +446,50 @@ describe("collectUnresolvedLinks", () => {
 // Discovery, loading and robustness
 // ---------------------------------------------------------------------------
 
+/**
+ * A vault whose notes link heavily: six notes in a clique, six in a near-island,
+ * and a few bridges between them.
+ */
+function denseVault(): Record<string, string> {
+  const files: Record<string, string> = {};
+  const clique = ["a", "b", "c", "d", "e", "f"];
+  for (const id of clique) {
+    files[`${id}.md`] = `# ${id}\n\n${clique.filter((other) => other !== id).map((o) => `[[${o}]]`).join(" ")}`;
+  }
+  // A six-note group with almost no internal linking: the island.
+  files["island-1.md"] = "# island-1\n\n[[island-2]] [[a]]";
+  for (const id of ["island-2", "island-3", "island-4", "island-5", "island-6"]) {
+    files[`${id}.md`] = `# ${id}\n\n[[island-1]] [[b]]`;
+  }
+  return files;
+}
+
+/**
+ * The same shape in a vault that barely links anything.
+ *
+ * A short chain, one loosely linked group, and a dozen notes with no links at all —
+ * the last of which is what makes the vault genuinely thin, and what makes a cluster
+ * of average cohesion here look sparse to an absolute threshold.
+ */
+function thinVault(): Record<string, string> {
+  const files: Record<string, string> = {};
+  const chain = ["a", "b", "c", "d", "e", "f"];
+  chain.forEach((id, index) => {
+    const next = chain[index + 1];
+    files[`${id}.md`] = `# ${id}\n\n${next ? `[[${next}]]` : ""}`;
+  });
+  // Five notes held together by a single link: cohesion 0.1, which is well above
+  // this vault's own density and below the old fixed 0.15.
+  files["loose-1.md"] = "# loose-1\n\n[[loose-2]] [[a]]";
+  for (const id of ["loose-2", "loose-3", "loose-4", "loose-5"]) {
+    files[`${id}.md`] = `# ${id}`;
+  }
+  for (let index = 1; index <= 12; index += 1) {
+    files[`solo-${index}.md`] = `# solo-${index}`;
+  }
+  return files;
+}
+
 describe("discovery and loading", () => {
   it("returns EMPTY_GRAPH for an empty vault", async () => {
     expect(await buildWikiGraph({ vault: new MemoryVault() })).toBe(EMPTY_GRAPH);
@@ -522,6 +572,79 @@ describe("discovery and loading", () => {
       excludeFolders: ["notes/templates"],
     });
     expect(graph.nodes.map((node) => node.id)).toEqual(["notes/keep"]);
+  });
+
+  it("flags relatively sparse clusters in vaults of very different link density", async () => {
+    // The same question asked of two vaults whose linking habits are nothing alike.
+    // An absolute cohesion threshold answers it wrong in both: it misses a genuine
+    // island in a densely linked vault, and it calls an average cluster sparse in a
+    // thinly linked one. The rule under test compares each cluster with the vault it
+    // lives in, so the answer travels.
+    const dense = new MemoryVault(denseVault());
+    const thin = new MemoryVault(thinVault());
+
+    const report = async (vault: MemoryVault) => {
+      const graph = await buildWikiGraph({ vault });
+      const density = computeGraphDensity(graph.nodes.length, graph.edges.length);
+      return {
+        density,
+        communities: graph.communities.map((community) => ({
+          id: community.id,
+          nodeCount: community.nodeCount,
+          cohesion: community.cohesion,
+          ratio: density > 0 ? community.cohesion / density : 0,
+          relative: community.isSparse,
+          // What the threshold this replaced would have said.
+          absolute: community.nodeCount >= SPARSE_MIN_MEMBERS && community.cohesion < 0.15,
+        })),
+      };
+    };
+
+    const denseReport = await report(dense);
+    const thinReport = await report(thin);
+
+    const lines = (report: typeof denseReport, label: string) =>
+      `\n  ${label}: density ${report.density.toFixed(3)}, ${report.communities.length} clusters\n` +
+      report.communities
+        // Singletons are the thin vault's whole story and say nothing about
+        // sparseness: the flag needs at least three members.
+        .filter((community) => community.nodeCount >= SPARSE_MIN_MEMBERS)
+        .map(
+          (c) =>
+            `    #${c.id} n=${c.nodeCount} cohesion=${c.cohesion.toFixed(3)} ` +
+            `${c.ratio.toFixed(2)}× ${c.relative ? "SPARSE" : "ok"}` +
+            `${c.relative !== c.absolute ? `  (the 0.15 rule said ${c.absolute ? "sparse" : "ok"})` : ""}`,
+        )
+        .join("\n");
+    console.log(lines(denseReport, "dense vault") + lines(thinReport, "thin vault"));
+
+    // The two vaults really are of different density — otherwise this measures nothing.
+    expect(denseReport.density).toBeGreaterThan(thinReport.density * 2);
+
+    // The rule holds in both vaults: decided against their own densities, not a
+    // fixed number.
+    for (const entry of [...denseReport.communities, ...thinReport.communities]) {
+      expect(entry.relative).toBe(
+        entry.nodeCount >= SPARSE_MIN_MEMBERS && entry.ratio < SPARSE_DENSITY_RATIO,
+      );
+    }
+
+    // Direction one, measured on a real vault: the dense vault contains a cluster no
+    // denser than the vault around it (1.21×) that the fixed 0.15 threshold passed
+    // over because its cohesion was a respectable-looking 0.476.
+    const missedByAbsolute = denseReport.communities.filter(
+      (community) => community.relative && !community.absolute,
+    );
+    expect(missedByAbsolute.length).toBeGreaterThan(0);
+
+    // Direction two, asked of the thin vault's OWN density: a cluster of ordinary
+    // cohesion there (0.1 — above 1.5 × 0.028, below 0.15) is one the fixed
+    // threshold called sparse. Louvain produces no such cluster in this vault — it
+    // isolates unlinked notes instead of grouping them — so the case is measured at
+    // the rule, with the density the vault actually has.
+    expect(isSparseCommunity(0.1, 5, thinReport.density)).toBe(false);
+    const absoluteWouldFlag = 5 >= SPARSE_MIN_MEMBERS && 0.1 < 0.15;
+    expect(absoluteWouldFlag).toBe(true);
   });
 
   it("skips oversized notes by UTF-8 byte count, not character count", async () => {
