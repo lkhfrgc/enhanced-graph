@@ -14,6 +14,7 @@ import { describe, expect, it } from "vitest";
 import {
   NO_FILTERS,
   collectTags,
+  collectTypes,
   filterEdges,
   filterNodes,
   isNodeVisible,
@@ -27,7 +28,7 @@ function node(id: string, overrides: Partial<GraphNode> = {}): GraphNode {
     id,
     label: id.toUpperCase(),
     type: "concept" as PageType,
-    rawType: "concept",
+    rawType: overrides.rawType ?? (overrides.type ?? "concept") as string,
     path: `${id}.md`,
     linkCount: 3,
     // The fixtures are their own vault, so the two counts agree unless a test says
@@ -56,6 +57,26 @@ describe("isNodeVisible", () => {
     const target = node("a", { type: "entity" as PageType });
     expect(isNodeVisible(target, filters({ hiddenTypes: new Set(["entity" as PageType]) }))).toBe(false);
     expect(isNodeVisible(target, filters({ hiddenTypes: new Set(["concept" as PageType]) }))).toBe(true);
+  });
+
+  it("filters by the type the user declared, not the one it normalises to", () => {
+    // A custom type is `other` as far as the analysis is concerned, and that used to
+    // be the only thing the filter could see: twenty custom types were one row.
+    const experiment = node("a", { rawType: "实验记录", type: "other" as PageType });
+    const reading = node("b", { rawType: "读书笔记", type: "other" as PageType });
+
+    expect(isNodeVisible(experiment, filters({ hiddenTypes: new Set(["实验记录"]) }))).toBe(false);
+    expect(isNodeVisible(reading, filters({ hiddenTypes: new Set(["实验记录"]) }))).toBe(true);
+    // Both remain hideable by the type they normalise to, which is what a setting
+    // written before custom types had rows of their own holds.
+    expect(isNodeVisible(experiment, filters({ hiddenTypes: new Set(["other"]) }))).toBe(false);
+    expect(isNodeVisible(reading, filters({ hiddenTypes: new Set(["other"]) }))).toBe(false);
+  });
+
+  it("keeps a stored canonical id working when the vault declares the localised name", () => {
+    const concept = node("a", { rawType: "概念", type: "concept" as PageType });
+    expect(isNodeVisible(concept, filters({ hiddenTypes: new Set(["concept"]) }))).toBe(false);
+    expect(isNodeVisible(concept, filters({ hiddenTypes: new Set(["实体"]) }))).toBe(true);
   });
 
   it("hides every page of an excluded knowledge cluster", () => {
@@ -219,6 +240,46 @@ describe("filterNodes and filterEdges", () => {
 
   it("keeps every edge when nothing is filtered", () => {
     expect(filterEdges(edges, nodes)).toHaveLength(3);
+  });
+});
+
+describe("collectTypes", () => {
+  it("lists the types the vault declares, custom ones included", () => {
+    // The point of the change: a vault with custom types gets a row per type, rather
+    // than the eleven the plugin knows about and one un-filterable `other`.
+    const types = collectTypes([
+      node("a", { rawType: "实验记录", type: "other" as PageType }),
+      node("b", { rawType: "实验记录", type: "other" as PageType }),
+      node("c", { rawType: "读书笔记", type: "other" as PageType }),
+      node("d", { rawType: "concept", type: "concept" as PageType }),
+    ]);
+    expect(types).toEqual([
+      { key: "实验记录", label: "实验记录", count: 2 },
+      { key: "concept", label: "concept", count: 1 },
+      { key: "读书笔记", label: "读书笔记", count: 1 },
+    ]);
+  });
+
+  it("keeps the spelling the user wrote, and falls back to the normalised type", () => {
+    const types = collectTypes([
+      node("a", { rawType: "Concept", type: "concept" as PageType }),
+      // No frontmatter type at all: the row is the normalised type, which is also the
+      // key every other row is compared against.
+      node("b", { rawType: "", type: "source" as PageType }),
+    ]);
+    expect(types).toEqual([
+      { key: "concept", label: "Concept", count: 1 },
+      { key: "source", label: "source", count: 1 },
+    ]);
+  });
+
+  it("merges the same declaration written with different case", () => {
+    const types = collectTypes([
+      node("a", { rawType: "Concept", type: "concept" as PageType }),
+      node("b", { rawType: "concept", type: "concept" as PageType }),
+    ]);
+    expect(types).toHaveLength(1);
+    expect(types[0].count).toBe(2);
   });
 });
 

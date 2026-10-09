@@ -14,13 +14,15 @@
  */
 
 import { t } from "../i18n";
-import { PAGE_TYPES, type CommunityInfo, type FolderInfo, type PageType, type WikiGraph } from "../types";
-import { collectTags, tagMatches, type TagFilterMode } from "./visibility";
+import type { CommunityInfo, FolderInfo, WikiGraph } from "../types";
+import { collectTags, collectTypes, tagMatches, type TagFilterMode } from "./visibility";
+import { typeLabel } from "./labels";
 import { checkboxRow, tabRow } from "./controls";
 
 export interface FilterOptions {
   readonly graph: WikiGraph;
-  readonly hiddenTypes: ReadonlySet<PageType>;
+  /** Hidden types, keyed by what the user declared (a canonical id also matches). */
+  readonly hiddenTypes: ReadonlySet<string>;
   /**
    * The knowledge clusters the graph is divided into, and which are excluded.
    *
@@ -41,7 +43,7 @@ export interface FilterOptions {
   readonly tagFilterMode: TagFilterMode;
   readonly hideIsolated: boolean;
   readonly hideStructural: boolean;
-  readonly onToggleType: (type: PageType, visible: boolean) => void;
+  readonly onToggleType: (type: string, visible: boolean) => void;
   readonly onToggleCommunity: (id: number, visible: boolean) => void;
   readonly onToggleTag: (tag: string, selected: boolean) => void;
   /**
@@ -124,8 +126,7 @@ interface FilterGroup {
  * `graph-appearance`, so the two panels do not both own a "node size" control.
  */
 export function renderFilters(container: HTMLElement, options: FilterOptions): void {
-  const counts = typeCounts(options.graph);
-  const types = PAGE_TYPES.filter((type) => (counts.get(type) ?? 0) > 0);
+  const types = collectTypes(options.graph.nodes);
   const tags = collectTags(options.graph.nodes);
   const clusters = options.communities;
 
@@ -137,10 +138,11 @@ export function renderFilters(container: HTMLElement, options: FilterOptions): v
         for (const type of types) {
           const row = section.createEl("label", { cls: "enhanced-graph-checkbox" });
           const input = row.createEl("input", { type: "checkbox" });
-          input.checked = !options.hiddenTypes.has(type);
-          input.addEventListener("change", () => options.onToggleType(type, input.checked));
-          row.createSpan({ text: t(`type.${type}` as never) });
-          row.createSpan({ cls: "enhanced-graph-legend-count", text: String(counts.get(type) ?? 0) });
+          const label = typeLabel(type.key, type.label);
+          input.checked = !options.hiddenTypes.has(type.key);
+          input.addEventListener("change", () => options.onToggleType(type.key, input.checked));
+          row.createSpan({ text: label });
+          row.createSpan({ cls: "enhanced-graph-legend-count", text: String(type.count) });
         }
       },
     },
@@ -577,11 +579,3 @@ function renderTagRows(
  */
 let tagQuery = "";
 
-/** Nodes per page type, over the whole graph (not the filtered view). */
-function typeCounts(graph: WikiGraph): Map<PageType, number> {
-  const counts = new Map<PageType, number>();
-  for (const node of graph.nodes) {
-    counts.set(node.type, (counts.get(node.type) ?? 0) + 1);
-  }
-  return counts;
-}

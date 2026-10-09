@@ -20,8 +20,10 @@
 import { setIcon } from "obsidian";
 
 import { t } from "../i18n";
-import { PAGE_TYPES, type ColorMode, type PageType, type WikiGraph } from "../types";
+import type { ColorMode, WikiGraph } from "../types";
 import { communityColor, nodeColorForMode } from "./palette";
+import { collectTypes } from "./visibility";
+import { typeLabel } from "./labels";
 
 /** The colour a row's dot takes while its subject is excluded. */
 const HIDDEN_DOT = "#94a3b8";
@@ -33,7 +35,7 @@ const HIDDEN_DOT = "#94a3b8";
  * row is not marked interactive, and no "show all" is drawn.
  */
 export interface LegendGestures {
-  readonly onToggleType?: (type: PageType) => void;
+  readonly onToggleType?: (type: string) => void;
   readonly onShowAllTypes?: () => void;
   readonly onToggleCommunity?: (id: number) => void;
   readonly onShowAllCommunities?: () => void;
@@ -46,7 +48,8 @@ export interface LegendOptions extends LegendGestures {
   readonly customNodeColor: string;
   /** Per-type colour overrides, so the swatches match the canvas. */
   readonly typeColorOverrides: Readonly<Record<string, string>>;
-  readonly hiddenTypes: ReadonlySet<PageType>;
+  /** Hidden types, keyed by what the user declared (a canonical id also matches). */
+  readonly hiddenTypes: ReadonlySet<string>;
   /** Clusters the user has excluded, by id. */
   readonly hiddenCommunities: ReadonlySet<number>;
 }
@@ -98,9 +101,11 @@ export function renderLegend(container: HTMLElement, options: LegendOptions): vo
 /** One row per page type actually present, with its node count. */
 function renderTypeRows(body: HTMLElement, options: LegendOptions): void {
   const { graph, hiddenTypes } = options;
-  const counts = typeCounts(graph);
-  for (const type of PAGE_TYPES.filter((candidate) => (counts.get(candidate) ?? 0) > 0)) {
-    const hidden = hiddenTypes.has(type);
+  // The types the vault declares, not the ones the plugin knows: a custom type is a
+  // row of its own with its own colour, and the count is of the pages that say so.
+  for (const type of collectTypes(graph.nodes)) {
+    const { key, label, count } = type;
+    const hidden = hiddenTypes.has(key);
     const row = body.createDiv({
       cls: `enhanced-graph-legend-row${hidden ? " is-hidden-type" : ""}`,
     });
@@ -109,20 +114,23 @@ function renderTypeRows(body: HTMLElement, options: LegendOptions): void {
       ? HIDDEN_DOT
       : nodeColorForMode({
           colorMode: options.colorMode,
-          pageType: type,
+          pageType: key,
           community: 0,
           customColor: options.customNodeColor,
           typeOverrides: options.typeColorOverrides,
         });
-    row.createSpan({ cls: "enhanced-graph-legend-label", text: t(`type.${type}` as never) });
-    row.createSpan({ cls: "enhanced-graph-legend-count", text: String(counts.get(type) ?? 0) });
+    row.createSpan({
+      cls: "enhanced-graph-legend-label",
+      text: typeLabel(key, label),
+    });
+    row.createSpan({ cls: "enhanced-graph-legend-count", text: String(count) });
     const toggle = options.onToggleType;
     if (toggle) {
       row.addClass("is-interactive");
       row.title = t("legend.hint");
       // A click, like the cluster rows: one gesture for both groups, and the
       // hidden row stays in place (shaded) so it can be clicked straight back.
-      row.addEventListener("click", () => toggle(type));
+      row.addEventListener("click", () => toggle(key));
     }
   }
 }
@@ -170,10 +178,3 @@ function renderCommunityRows(body: HTMLElement, options: LegendOptions): void {
 }
 
 /** Nodes per page type, over the whole graph (not the filtered view). */
-function typeCounts(graph: WikiGraph): Map<PageType, number> {
-  const counts = new Map<PageType, number>();
-  for (const node of graph.nodes) {
-    counts.set(node.type, (counts.get(node.type) ?? 0) + 1);
-  }
-  return counts;
-}

@@ -24,7 +24,9 @@ import {
   typeColor,
 } from "./palette";
 import { checkboxRow, colourRow, sliderRow } from "./controls";
-import { PAGE_TYPES, type ColorMode, type PageType, type WikiGraph } from "../types";
+import { collectTypes } from "./visibility";
+import { typeLabel } from "./labels";
+import type { ColorMode, WikiGraph } from "../types";
 
 /** Range of the 节点大小 slider. */
 const NODE_SCALE_RANGE = { min: 0.5, max: 2, step: 0.05 } as const;
@@ -74,7 +76,7 @@ export interface AppearanceOptions {
   readonly onColorMode: (mode: ColorMode) => void;
   readonly onCustomNodeColor: (color: string) => void;
   /** `null` clears the override and returns the type to the palette. */
-  readonly onTypeColor: (type: PageType, color: string | null) => void;
+  readonly onTypeColor: (type: string, color: string | null) => void;
   readonly onCommunityColor: (community: number, color: string | null) => void;
   readonly onNodeScale: (value: number) => void;
   readonly onGravity: (value: number) => void;
@@ -186,20 +188,29 @@ function renderNodes(container: HTMLElement, options: AppearanceOptions): void {
   renderTypeColors(section, options);
 }
 
-/** One colour row per page type, pre-filled with the palette colour in force. */
+/** One colour row per page type in the graph, pre-filled with the colour in force. */
 function renderTypeColors(section: HTMLElement, options: AppearanceOptions): void {
   const heading = section.createDiv({ cls: "enhanced-graph-subtitle" });
   heading.createSpan({ text: t("appearance.perType") });
 
-  for (const type of PAGE_TYPES) {
-    const override = options.typeColorOverrides[type];
-    const effective = override || typeColor(type);
+  // The types the vault declares. A custom type gets its own row and its own colour
+  // (the palette's fallback ramp, hashed by name) — twenty custom types used to share
+  // one row and one colour, since they all normalise to `other`.
+  const types = collectTypes(options.graph.nodes);
+  if (types.length === 0) {
+    section.createDiv({ cls: "enhanced-graph-tag-empty", text: t("appearance.noTypes") });
+    return;
+  }
+
+  for (const { key, label } of types) {
+    const override = options.typeColorOverrides[key];
+    const effective = override || typeColor(key);
     colourRow(
       section,
-      t(`type.${type}` as never),
+      typeLabel(key, label),
       effective,
-      (color) => options.onTypeColor(type, color),
-      { allowTheme: true, onTheme: () => options.onTypeColor(type, null), isTheme: !override },
+      (color) => options.onTypeColor(key, color),
+      { allowTheme: true, onTheme: () => options.onTypeColor(key, null), isTheme: !override },
     );
   }
 }

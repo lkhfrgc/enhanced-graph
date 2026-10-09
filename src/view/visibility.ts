@@ -12,6 +12,7 @@
  * {@link isNodeVisible}.
  */
 
+import { pageTypeKey } from "../core/parse";
 import type { GraphEdge, GraphNode, PageType } from "../types";
 
 /**
@@ -26,8 +27,14 @@ import type { GraphEdge, GraphNode, PageType } from "../types";
 export type TagFilterMode = "exclude" | "include";
 
 export interface VisibilityFilters {
-  /** Page types to exclude. */
-  readonly hiddenTypes: ReadonlySet<PageType>;
+  /**
+   * Page types to exclude, keyed by the type as the user declared it.
+   *
+   * A canonical id is also accepted, and checked as well, because settings written
+   * before custom types had rows of their own store canonical ids — a vault that
+   * declares `type: 概念` must still honour a stored `concept`.
+   */
+  readonly hiddenTypes: ReadonlySet<string>;
   /**
    * Louvain clusters to exclude, by id; every member of one is hidden.
    *
@@ -69,9 +76,50 @@ export interface TagCount {
   readonly count: number;
 }
 
+/** One row of the type list: the declared type, how it is written, and its size. */
+export interface TypeCount {
+  /** Lower-cased declared type; `node.type` when the note declares none. */
+  readonly key: string;
+  /** The declared spelling, for display — the user's own words, not a canonical id. */
+  readonly label: string;
+  readonly count: number;
+}
+
+/**
+ * The types present in the graph, by how many pages declare each one.
+ *
+ * Built from the nodes rather than from `PAGE_TYPES`: a vault with twenty custom
+ * types used to get one row (其他) that could not separate them. Sorted by size so
+ * the rows a user reaches for are at the top, with the key as the tie-break — by code
+ * unit, not `localeCompare`, so the order is the same on every machine.
+ */
+export function collectTypes(nodes: readonly GraphNode[]): TypeCount[] {
+  const byKey = new Map<string, TypeCount>();
+  for (const node of nodes) {
+    const declared = node.rawType.trim();
+    const key = pageTypeKey(declared, node.type);
+    const existing = byKey.get(key);
+    if (existing) {
+      byKey.set(key, { ...existing, count: existing.count + 1 });
+    } else {
+      byKey.set(key, { key, label: declared || node.type, count: 1 });
+    }
+  }
+  return [...byKey.values()].sort(
+    (a, b) => b.count - a.count || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0),
+  );
+}
+
+/** The type a node is filtered, coloured and listed by. */
+export function nodeTypeKey(node: Pick<GraphNode, "rawType" | "type">): string {
+  return pageTypeKey(node.rawType, node.type);
+}
+
 /** True when the page is not excluded by any rule. */
 export function isNodeVisible(node: GraphNode, filters: VisibilityFilters): boolean {
-  if (filters.hiddenTypes.has(node.type)) return false;
+  // The declared type, and the normalised one: a stored canonical id has to keep
+  // working now that the rows are keyed by what the user wrote.
+  if (filters.hiddenTypes.has(nodeTypeKey(node)) || filters.hiddenTypes.has(node.type)) return false;
   if (filters.hiddenCommunities.has(node.community)) return false;
   if (filters.hideStructural && node.isStructural) return false;
   // Vault-wide, not build-wide: a note whose only links point outside the current

@@ -770,6 +770,12 @@ async function main() {
         edgeNumbers: edgeSection?.querySelectorAll("input[type=number]").length ?? 0,
         // Per-type rows appear under the node section in type mode.
         typeRows: nodeSection?.querySelectorAll(".enhanced-graph-colour-row").length ?? 0,
+        // How many distinct types the vault declares, counted the way the panel does.
+        declaredTypes: new Set(
+          window.__HARNESS__.snapshot.graph.nodes.map(
+            (node) => (node.rawType ?? "").trim().toLowerCase() || node.type,
+          ),
+        ).size,
         colorMode: window.__HARNESS__.settings.colorMode,
       };
     });
@@ -783,12 +789,13 @@ async function main() {
         appearance.edgeRanges === 2 &&
         appearance.edgeNumbers === 2 &&
         appearance.modes.length === 3 &&
-        // one row per page type
-        appearance.typeRows === 11 &&
-        // 11 per-type rows + one colour per edge end. The label colour is gone from
+        // One row per type the vault declares — measured against the vault, not
+        // against a number: 13 in this snapshot, four of them custom.
+        appearance.typeRows === appearance.declaredTypes &&
+        // one row per type + one colour per edge end. The label colour is gone from
         // this count because it is no longer a colour: the theme decides it and the
         // slider above sets its opacity.
-        appearance.hexFields >= 13 &&
+        appearance.hexFields >= appearance.declaredTypes + 2 &&
         appearance.hexFields === appearance.colourPickers,
       `"${appearance.title}": ${appearance.sliders} sliders / ${appearance.numberFields} number fields / ` +
         `${appearance.hexFields} hex fields; edge section has ${appearance.edgePickers} pickers, ` +
@@ -2179,6 +2186,102 @@ async function main() {
         structural.afterOn.drawn.length === 0,
       `off → ${structural.afterOff.drawn.length}/${structural.atStart.total} drawn; ` +
         `on → ${structural.afterOn.drawn.length} drawn`,
+    );
+
+    // --- 11a-4. the type rows come from the vault --------------------------
+    // The snapshot declares both canonical and custom types (including a 概念 next to
+    // the 38 `concept` pages), so the rows, their counts and what hiding one does can
+    // all be checked against the vault rather than against the plugin's own list.
+    const typeRows = await page.evaluate(async () => {
+      const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const keyOf = (node) => ((node.rawType ?? "").trim().toLowerCase() || node.type);
+      const nodes = window.__HARNESS__.snapshot.graph.nodes;
+
+      const expected = [...nodes.reduce((byKey, node) => {
+        const key = keyOf(node);
+        const entry = byKey.get(key) ?? { key, count: 0, ids: [] };
+        entry.count += 1;
+        entry.ids.push(node.id);
+        return byKey.set(key, entry);
+      }, new Map()).values()].sort(
+        (a, b) => b.count - a.count || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0),
+      );
+
+      const tab = [...document.querySelectorAll(".enhanced-graph-panel-tabs button")].find((el) =>
+        el.textContent?.includes("类型"),
+      );
+      tab?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await sleep(400);
+      const rendered = [...document.querySelectorAll(".enhanced-graph-panel .enhanced-graph-checkbox")]
+        .map((row) => ({
+          label: row.querySelector("span")?.textContent ?? "",
+          count: Number(row.querySelector(".enhanced-graph-legend-count")?.textContent ?? "-1"),
+        }));
+      // What is drawn before the toggle: the structural switch is still on from an
+      // earlier check, so the vault itself is not the baseline.
+      const visibleBefore = window.__HARNESS__.visibleNodeIds().length;
+
+      // Hide the one page that declares 概念 — a type the plugin has no name for.
+      const custom = expected.find((entry) => entry.key === "概念");
+      const target = [...document.querySelectorAll(".enhanced-graph-panel .enhanced-graph-checkbox")]
+        .find((row) => row.textContent?.includes("概念 · concept"));
+      const box = target?.querySelector("input[type=checkbox]");
+      if (box) {
+        box.checked = false;
+        box.dispatchEvent(new Event("change", { bubbles: true }));
+        await sleep(450);
+      }
+
+      const visible = new Set(window.__HARNESS__.visibleNodeIds());
+      const hidExactly = custom ? custom.ids.filter((id) => visible.has(id)).length : -1;
+      const visibleAfter = visible.size;
+      const unticked = box ? box.checked === false : false;
+      // Restore, so the checks after this one see the whole vault again.
+      if (box) {
+        box.checked = true;
+        box.dispatchEvent(new Event("change", { bubbles: true }));
+        await sleep(450);
+      }
+      const restored = new Set(window.__HARNESS__.visibleNodeIds());
+
+      return {
+        expected: expected.map(({ key, count }) => ({ key, count })),
+        rendered,
+        customLabelFound: Boolean(target),
+        hidExactly,
+        visibleAfter,
+        unticked,
+        visibleBefore,
+        restoredCount: restored.size,
+      };
+    });
+
+    console.log(
+      `\n  type rows: vault declares ${typeRows.expected.length} types ` +
+        `(${typeRows.expected.map((t) => `${t.key}:${t.count}`).join(", ")})\n` +
+        `    panel drew: ${typeRows.rendered.map((t) => `${t.label}=${t.count}`).join(", ")}\n`,
+    );
+    check(
+      "the type rows are the types the vault declares, custom ones included",
+      typeRows.rendered.length === typeRows.expected.length &&
+        typeRows.expected.every(
+          (expected) => typeRows.rendered.filter((row) => row.count === expected.count).length > 0,
+        ) &&
+        typeRows.expected.some((entry) => entry.key === "概念"),
+      `drew ${typeRows.rendered.length} rows for ${typeRows.expected.length} declared types`,
+    );
+    check(
+      "a custom type is its own row, and hiding it hides exactly its pages",
+      typeRows.customLabelFound &&
+        typeRows.unticked &&
+        typeRows.hidExactly === 0 &&
+        // ...and only those: one page left the graph, not the 38 that share its
+        // normalised type.
+        typeRows.visibleAfter === typeRows.visibleBefore - 1 &&
+        typeRows.restoredCount === typeRows.visibleBefore,
+      `label found ${typeRows.customLabelFound}, ticked off ${typeRows.unticked}, ` +
+        `visible 概念 pages after hiding ${typeRows.hidExactly}, drawn ${typeRows.visibleBefore} → ` +
+        `${typeRows.visibleAfter} → ${typeRows.restoredCount}`,
     );
 
     // --- 11b. the "no matching nodes" message ------------------------------

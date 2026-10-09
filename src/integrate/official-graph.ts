@@ -28,12 +28,20 @@ import { edgeKey, edgeKeyEndpoints } from "../core/graph-keys";
 import { findConnectingPaths } from "../core/paths";
 import { type FilterSection, renderFilters } from "../view/graph-filters";
 import { renderClustering } from "../view/graph-clustering";
-import { collectTags, filterNodes, type TagFilterMode, type VisibilityFilters } from "../view/visibility";
+import {
+  collectTags,
+  collectTypes,
+  filterNodes,
+  nodeTypeKey,
+  type TagFilterMode,
+  type VisibilityFilters,
+} from "../view/visibility";
 import { isInWorkspace } from "../core/workspace";
 import type { GraphNode, OfficialGraphMode, RelevanceWeights, WikiGraph } from "../types";
 import { t } from "../i18n";
 import { countUndismissed } from "../view/insights-panel";
 import { communityColor, hexToRgbInt, themePalette, typeColor } from "../view/palette";
+import { typeLabel } from "../view/labels";
 import { OfficialHoverTooltip, type HoverTooltipOptions } from "./official-hover";
 import { OfficialLegend } from "./official-legend";
 import { OfficialMarkerLayer, type MarkerLine, type MarkerPoint } from "./official-markers";
@@ -611,7 +619,7 @@ export class OfficialGraphEnhancer {
         // which is what makes an arbitrary focus set expressible at all.
         const wanted: OfficialColor = {
           a: focus && !focus.has(graphNode.id) ? FOCUS_NODE_DIM : 1,
-          rgb: hexToRgbInt(this.nodeColorFor(mode, graphNode.community, graphNode.type)),
+          rgb: hexToRgbInt(this.nodeColorFor(mode, graphNode.community, nodeTypeKey(graphNode))),
         };
 
         if (!(ORIGINAL_COLOR in node)) {
@@ -647,11 +655,13 @@ export class OfficialGraphEnhancer {
       });
     }
     const overrides = this.deps.getTypeColors();
-    return [...new Set(graph.nodes.map((node) => node.type))].sort().map((type) => ({
-      key: type,
-      label: t(`type.${type}` as never),
-      color: overrides[type] ?? typeColor(type as Parameters<typeof typeColor>[0]),
-      isOverride: overrides[type] !== undefined,
+    // The types the vault declares, each with its own colour: a custom type used to
+    // be folded into `other` and could not be coloured apart from it.
+    return collectTypes(graph.nodes).map(({ key, label }) => ({
+      key,
+      label: typeLabel(key, label),
+      color: overrides[key] ?? typeColor(key),
+      isOverride: overrides[key] !== undefined,
     }));
   }
   /**
@@ -675,7 +685,12 @@ export class OfficialGraphEnhancer {
   private renderFiltersBody(el: HTMLElement): void {
     const { graph } = this.deps.getData();
     const filters = this.deps.getVisibility();
-    const hiddenTypes = new Set([...filters.hiddenTypes].filter((type) => graph.nodes.some((n) => n.type === type)));
+    // A stored canonical id and a declared type both mean something: keep either.
+    const hiddenTypes = new Set(
+      [...filters.hiddenTypes].filter((type) =>
+        graph.nodes.some((node) => nodeTypeKey(node) === type || node.type === type),
+      ),
+    );
     const excluding = filters.tagFilterMode === "exclude";
     /** The ticks on screen: whichever list the mode on screen reads. */
     const selection = (): ReadonlySet<string> => {
@@ -1065,7 +1080,7 @@ export class OfficialGraphEnhancer {
     if (this.deps.getMode() === "off") return;
     const node = this.nodeForFile(file);
     if (!node) return;
-    const hidden = this.deps.getHiddenTypes().includes(node.type);
+    const hidden = this.deps.getHiddenTypes().includes(nodeTypeKey(node));
     try {
       menu.addItem((item) =>
         item

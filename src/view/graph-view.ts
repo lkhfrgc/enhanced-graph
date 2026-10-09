@@ -62,7 +62,13 @@ import {
   runLayoutAsync,
   runLayoutSync,
 } from "./layout";
-import { collectTags, filterEdges, filterNodes, type VisibilityFilters } from "./visibility";
+import {
+  collectTags,
+  filterEdges,
+  filterNodes,
+  nodeTypeKey,
+  type VisibilityFilters,
+} from "./visibility";
 
 /**
  * ForceAtlas2 steps taken per gravity-drag event.
@@ -95,7 +101,8 @@ export class EnhancedGraphView extends ItemView {
 
   private colorMode: ColorMode = "type";
   private searchQuery = "";
-  private hiddenTypes = new Set<PageType>();
+  // Keyed by the type the user declared, which is what the rows and the colour list use.
+  private hiddenTypes = new Set<string>();
   /** Tags to exclude; only read while the tag filter is in exclude mode. */
   private hiddenTags = new Set<string>();
   /** Tags to keep, or `null` before anything has been ticked in include mode. */
@@ -558,7 +565,10 @@ export class EnhancedGraphView extends ItemView {
           maxLinkCount: maxLinks,
           nodeCount: nodes.length,
           nodeScale: this.plugin.settings.nodeScale,
-          pageType: node.type,
+          // The declared type, not the normalised one: that is what the colour rows,
+          // the legend and the filters are keyed by, so a custom type keeps its own
+          // colour instead of sharing `other` with every other custom type.
+          pageType: nodeTypeKey(node),
           pageTitle: node.label,
           nodePath: node.path,
           community: node.community,
@@ -1150,7 +1160,7 @@ export class EnhancedGraphView extends ItemView {
     this.renderLegend();
   }
 
-  private async setTypeColor(type: PageType, color: string | null): Promise<void> {
+  private async setTypeColor(type: string, color: string | null): Promise<void> {
     const overrides = { ...this.plugin.settings.typeColorOverrides };
     if (color === null) delete overrides[type];
     else overrides[type] = color;

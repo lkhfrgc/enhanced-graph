@@ -75,6 +75,24 @@ export function normalizePageType(raw: unknown): PageType {
 }
 
 /**
+ * The page type as the user declared it, lower-cased for comparison.
+ *
+ * A custom type — anything not in `TYPE_ALIASES` — normalises to `other`, so before
+ * this every custom type in a vault shared one row: twenty of them were a single
+ * un-filterable 其他, all one colour, and the panels listed only the eleven types the
+ * plugin knows about. What the user actually wrote is already on the node as
+ * `rawType`; this is the key the panels filter, legend and colour by.
+ *
+ * Canonical declarations keep their canonical key (`type: concept` → `concept`), so
+ * existing settings and the palette are unaffected. `node.type` remains the
+ * normalised type, which is what the analysis reasons about.
+ */
+export function pageTypeKey(rawType: string, fallback: string): string {
+  const raw = (rawType ?? "").trim();
+  return (raw || fallback).toLowerCase();
+}
+
+/**
  * Ids that are navigational scaffolding rather than knowledge.
  *
  * The Chinese entries include every word the visibility switch names — 索引, 概览,

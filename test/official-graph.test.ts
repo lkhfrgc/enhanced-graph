@@ -125,7 +125,7 @@ function makeNode(overrides: Partial<GraphNode> & { id: string }): GraphNode {
   return {
     label: overrides.id,
     type: "concept" as PageType,
-    rawType: "concept",
+    rawType: overrides.rawType ?? (overrides.type ?? "concept") as string,
     path: `${overrides.id}.md`,
     linkCount: 3,
     inLinks: 2,
@@ -425,6 +425,44 @@ describe("OfficialGraphEnhancer colouring", () => {
     const h = setup([{ id: "a.md" }], [makeNode({ id: "a", type: "source" })], "type");
     h.enhancer.start();
     expect(h.renderer.nodeLookup["a.md"].color?.rgb).toBe(hexToRgbInt(NODE_TYPE_COLORS.source));
+  });
+
+  it("gives a custom type its own colour instead of the one for `other`", () => {
+    // A custom type normalises to `other`; before, every custom type in the vault
+    // shared that colour, so the built-in graph could not tell them apart either.
+    const h = setup(
+      [{ id: "a.md" }, { id: "b.md" }],
+      [
+        makeNode({ id: "a", rawType: "实验记录", type: "other" as PageType }),
+        makeNode({ id: "b", rawType: "读书笔记", type: "other" as PageType }),
+      ],
+      "type",
+    );
+    h.enhancer.start();
+
+    const experiment = h.renderer.nodeLookup["a.md"].color?.rgb;
+    const reading = h.renderer.nodeLookup["b.md"].color?.rgb;
+    expect(experiment).toBe(hexToRgbInt(typeColor("实验记录")));
+    expect(reading).toBe(hexToRgbInt(typeColor("读书笔记")));
+    // The point: neither is painted as plain `other`, and they differ from each other.
+    expect(experiment).not.toBe(hexToRgbInt(NODE_TYPE_COLORS.other));
+    expect(reading).not.toBe(hexToRgbInt(NODE_TYPE_COLORS.other));
+    expect(experiment).not.toBe(reading);
+  });
+
+  it("hides a custom type by itself, leaving the rest of `other` alone", () => {
+    const h = setup(
+      [{ id: "a.md" }, { id: "b.md" }, { id: "c.md" }],
+      [
+        makeNode({ id: "a", rawType: "实验记录", type: "other" as PageType }),
+        makeNode({ id: "b", rawType: "读书笔记", type: "other" as PageType }),
+        makeNode({ id: "c" }),
+      ],
+    );
+    h.hiddenTypes.push("实验记录");
+    h.enhancer.start();
+
+    expect(Object.keys(received(h).nodes)).toEqual(["b.md", "c.md"]);
   });
 
   it("leaves virtual and unknown nodes untouched", () => {
