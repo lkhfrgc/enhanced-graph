@@ -29,7 +29,7 @@ const FOCUS_INTERMEDIATE_CHOICES = [0, 1, 2, 3] as const;
 export type ColorTab = "type" | "community";
 
 /** The panel is two views: the insights it exists for, and the colours. */
-export type PanelTab = "insights" | "colors" | "filters";
+export type PanelTab = "insights" | "colors" | "filters" | "clustering";
 
 export interface OfficialPanelOptions {
   readonly graph: () => WikiGraph;
@@ -60,6 +60,8 @@ export interface OfficialPanelOptions {
   readonly onSetLineColor: (color: string | null) => void;
   /** Draws the filters body, which the standalone view renders with the same code. */
   readonly renderFilters: (el: HTMLElement) => void;
+  /** Draws the clustering body, again the standalone view's own component. */
+  readonly renderClustering: (el: HTMLElement) => void;
 }
 
 export class OfficialSidePanel {
@@ -235,6 +237,12 @@ export class OfficialSidePanel {
 
     if (this.tab === "colors") {
       this.renderColours(panel);
+      return;
+    }
+
+    if (this.tab === "clustering") {
+      const body = panel.createDiv({ cls: "enhanced-graph-official-filters" });
+      this.options.renderClustering(body);
       return;
     }
 

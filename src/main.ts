@@ -231,6 +231,16 @@ export default class EnhancedGraphPlugin extends Plugin implements PluginHost, S
         folder: this.settings.workingFolder,
         excluded: this.settings.excludeFolders,
       }),
+      getClustering: () => ({
+        weights: this.settings.weights,
+        resolution: this.settings.resolution,
+      }),
+      onApplyClustering: async (choice) => {
+        this.settings.weights = { ...choice.weights };
+        this.settings.resolution = choice.resolution;
+        await this.saveSettings();
+        this.requestGraphRebuild();
+      },
       // The one filter in the panel that changes which notes are READ rather than
       // which are drawn, so it rebuilds instead of repainting.
       onApplyWorkspace: async (folder, excluded) => {
@@ -462,6 +472,7 @@ export default class EnhancedGraphPlugin extends Plugin implements PluginHost, S
         vault: this.vaultAdapter,
         workingFolder: this.settings.workingFolder,
         excludeFolders: this.settings.excludeFolders,
+        resolution: this.settings.resolution,
         weights: this.settings.weights,
         // Re-using the previous community ids keeps cluster colours stable
         // across rebuilds instead of reshuffling them on every file save.

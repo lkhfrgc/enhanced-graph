@@ -61,6 +61,7 @@ const settings: EnhancedGraphSettings = {
   language: "zh" as const,
   weights: { ...DEFAULT_RELEVANCE_WEIGHTS },
   excludeFolders: [] as string[],
+  resolution: 1,
   workingFolder: "",
   hiddenTypes: [] as string[],
   hiddenCommunities: [] as number[],

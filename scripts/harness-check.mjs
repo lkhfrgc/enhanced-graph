@@ -1579,106 +1579,185 @@ async function main() {
     });
     await page.waitForTimeout(300);
 
-    // --- weights panel: quick access to the four coefficients ---------------
-    const weightsPanel = await page.evaluate(async () => {
+    // --- clustering panel: the coefficients and the resolution together ------
+    const clusteringPanel = await page.evaluate(async () => {
       const button = [...document.querySelectorAll(".enhanced-graph-toolbar .enhanced-graph-button")].find(
-        (candidate) => candidate.textContent?.includes("权重"),
+        (candidate) => candidate.textContent?.includes("聚类"),
       );
       button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       await new Promise((resolve) => setTimeout(resolve, 300));
       const panel = document.querySelector(".enhanced-graph-panel");
       const fields = [...panel.querySelectorAll(".enhanced-graph-stepper .enhanced-graph-number")];
+      const applyButton = [...panel.querySelectorAll("button")].find((el) =>
+        el.textContent?.includes("应用"),
+      );
       return {
         title: panel?.querySelector(".enhanced-graph-panel-header")?.textContent ?? "",
-        // The panel is steppers now: no sliders should be left.
+        // The panel is steppers: no sliders should be left.
         sliders: panel.querySelectorAll(".enhanced-graph-slider input[type=range]").length,
         numbers: fields.length,
         stepButtons: panel.querySelectorAll(".enhanced-graph-stepper-button").length,
         labels: [...panel.querySelectorAll(".enhanced-graph-slider-label")].map((el) => el.textContent),
         values: fields.map((field) => Number(field.value)),
-        hasReset: [...panel.querySelectorAll(".enhanced-graph-link")].some((el) =>
-          el.textContent?.includes("恢复默认权重"),
+        applyDisabled: applyButton?.disabled ?? null,
+        hasDefaults: [...panel.querySelectorAll(".enhanced-graph-link")].some((el) =>
+          el.textContent?.includes("恢复默认"),
         ),
         settings: { ...window.__HARNESS__.settings.weights },
+        resolution: window.__HARNESS__.settings.resolution,
       };
     });
     check(
-      "the weights panel exposes all four coefficients at their current values",
-      weightsPanel.title.includes("权重") &&
-        weightsPanel.sliders === 0 &&
-        weightsPanel.numbers === 4 &&
-        // Two step buttons per coefficient.
-        weightsPanel.stepButtons === 8 &&
-        weightsPanel.hasReset &&
-        JSON.stringify(weightsPanel.values) ===
+      "the clustering panel exposes the four coefficients and the resolution",
+      clusteringPanel.title.includes("聚类") &&
+        clusteringPanel.sliders === 0 &&
+        // Four coefficients plus the resolution.
+        clusteringPanel.numbers === 5 &&
+        // Two step buttons per row.
+        clusteringPanel.stepButtons === 10 &&
+        clusteringPanel.hasDefaults &&
+        clusteringPanel.applyDisabled === true &&
+        JSON.stringify(clusteringPanel.values) ===
           JSON.stringify([
-            weightsPanel.settings.directLink,
-            weightsPanel.settings.sourceOverlap,
-            weightsPanel.settings.commonNeighbor,
-            weightsPanel.settings.coCitation,
+            clusteringPanel.settings.directLink,
+            clusteringPanel.settings.sourceOverlap,
+            clusteringPanel.settings.commonNeighbor,
+            clusteringPanel.settings.coCitation,
+            clusteringPanel.resolution,
           ]),
-      `"${weightsPanel.title}": ${weightsPanel.numbers} number fields + ` +
-        `${weightsPanel.stepButtons} step buttons (${weightsPanel.labels.join(", ")}) ` +
-        `showing ${weightsPanel.values.join("/")}, matching settings; ` +
-        `${weightsPanel.sliders} sliders left`,
+      `"${clusteringPanel.title}": ${clusteringPanel.numbers} number fields + ` +
+        `${clusteringPanel.stepButtons} step buttons (${clusteringPanel.labels.join(", ")}) ` +
+        `showing ${clusteringPanel.values.join("/")}, matching settings; ` +
+        `${clusteringPanel.sliders} sliders left; apply disabled ${clusteringPanel.applyDisabled}`,
     );
 
-    // Editing a weight persists it. The rebuild it triggers needs the real
-    // vault (and is debounced), so only the persisted value is observable here.
-    const weightEdit = await page.evaluate(async () => {
-      const before = window.__HARNESS__.settings.weights.sourceOverlap;
+    // Editing stages only: nothing is written and no rebuild is asked for until the
+    // button is pressed — these coefficients re-score the whole vault.
+    const clusteringEdit = await page.evaluate(async () => {
+      const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       const panel = document.querySelector(".enhanced-graph-panel");
       const fields = [...panel.querySelectorAll(".enhanced-graph-stepper .enhanced-graph-number")];
+      const applyButton = () => [...panel.querySelectorAll("button")].find((el) => el.textContent?.includes("应用"));
+      const before = window.__HARNESS__.settings.weights.sourceOverlap;
+      const rebuildsBefore = window.__HARNESS__.rebuilds();
+
       // Second field is source overlap. Type an exact value and commit.
       fields[1].value = "1.5";
       fields[1].dispatchEvent(new Event("change", { bubbles: true }));
-      await new Promise((resolve) => setTimeout(resolve, 250));
-      const typed = window.__HARNESS__.settings.weights.sourceOverlap;
+      await sleep(250);
+      // What the field shows, not what the settings hold: nothing is written until
+      // the button is pressed.
+      const typed = Number(fields[1].value);
 
       // Then step it up twice with the ▲ button: 1.5 → 1.6 → 1.7.
       const row = fields[1].closest(".enhanced-graph-stepper");
       const up = row.querySelector(".enhanced-graph-stepper-button");
       up.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-      await new Promise((resolve) => setTimeout(resolve, 120));
+      await sleep(120);
       up.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-      await new Promise((resolve) => setTimeout(resolve, 250));
-      return {
-        before,
+      await sleep(250);
+
+      // And the resolution, which is the last field.
+      const resolutionField = fields[4];
+      const resolutionBefore = window.__HARNESS__.settings.resolution;
+      resolutionField.value = "1.6";
+      resolutionField.dispatchEvent(new Event("change", { bubbles: true }));
+      await sleep(250);
+
+      const staged = {
         typed,
-        stepped: window.__HARNESS__.settings.weights.sourceOverlap,
+        sourceOverlap: window.__HARNESS__.settings.weights.sourceOverlap,
+        resolution: window.__HARNESS__.settings.resolution,
+        resolutionBefore,
+        rebuilds: window.__HARNESS__.rebuilds() - rebuildsBefore,
         field: fields[1].value,
+        resolutionField: resolutionField.value,
+        enabled: applyButton()?.disabled === false,
       };
+
+      applyButton()?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await sleep(400);
+      const applied = {
+        sourceOverlap: window.__HARNESS__.settings.weights.sourceOverlap,
+        resolution: window.__HARNESS__.settings.resolution,
+        rebuilds: window.__HARNESS__.rebuilds() - rebuildsBefore,
+      };
+      return { before, staged, applied };
     });
     check(
-      "a weight can be typed exactly or stepped with the up button",
-      weightEdit.typed === 1.5 &&
-        weightEdit.before !== weightEdit.typed &&
-        // 1.5 + 0.1 + 0.1 — no floating-point drift in the stored value.
-        weightEdit.stepped === 1.7 &&
-        weightEdit.field === "1.7",
-      `sourceOverlap ${weightEdit.before} → typed ${weightEdit.typed} → two steps up ` +
-        `${weightEdit.stepped} (field shows ${weightEdit.field})`,
+      "a coefficient can be typed exactly or stepped, and stays staged",
+      clusteringEdit.staged.typed === 1.5 &&
+        clusteringEdit.before !== clusteringEdit.staged.typed &&
+        // 1.5 + 0.1 + 0.1 — no floating-point drift in the draft.
+        clusteringEdit.staged.field === "1.7" &&
+        // Staged means NOT written: the settings still hold the old value.
+        clusteringEdit.staged.sourceOverlap === clusteringEdit.before &&
+        clusteringEdit.staged.rebuilds === 0 &&
+        clusteringEdit.staged.enabled === true,
+      `sourceOverlap field ${clusteringEdit.before} → typed ${clusteringEdit.staged.typed} → ` +
+        `two steps up ${clusteringEdit.staged.field}; settings still ` +
+        `${clusteringEdit.staged.sourceOverlap}, ${clusteringEdit.staged.rebuilds} rebuilds asked for`,
+    );
+    check(
+      "应用 writes the staged coefficients and resolution, and asks for one rebuild",
+      clusteringEdit.applied.sourceOverlap === 1.7 &&
+        clusteringEdit.applied.resolution === 1.6 &&
+        clusteringEdit.staged.resolutionBefore !== 1.6 &&
+        clusteringEdit.applied.rebuilds === 1,
+      `sourceOverlap → ${clusteringEdit.applied.sourceOverlap}, resolution ` +
+        `${clusteringEdit.staged.resolutionBefore} → ${clusteringEdit.applied.resolution}, ` +
+        `${clusteringEdit.applied.rebuilds} rebuild(s)`,
     );
 
-    const weightReset = await page.evaluate(async () => {
+    const clusteringDefaults = await page.evaluate(async () => {
+      const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      // Re-open the panel first, the way the host re-renders it after an apply: the
+      // checks drive a panel the plugin would already have replaced by now.
+      const tab = [...document.querySelectorAll(".enhanced-graph-toolbar .enhanced-graph-button")].find(
+        (candidate) => candidate.textContent?.includes("聚类"),
+      );
+      tab?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await sleep(150);
+      tab?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await sleep(300);
       const panel = document.querySelector(".enhanced-graph-panel");
       const button = [...panel.querySelectorAll(".enhanced-graph-link")].find((el) =>
-        el.textContent?.includes("恢复默认权重"),
+        el.textContent?.includes("恢复默认"),
       );
       button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-      await new Promise((resolve) => setTimeout(resolve, 300));
-      return { ...window.__HARNESS__.settings.weights };
+      await sleep(300);
+      const fields = [...panel.querySelectorAll(".enhanced-graph-stepper .enhanced-graph-number")];
+      const staged = fields.map((field) => Number(field.value));
+      const apply = [...panel.querySelectorAll("button")].find((el) => el.textContent?.includes("应用"));
+      const beforeClick = {
+        found: Boolean(apply),
+        disabled: apply?.disabled ?? null,
+        label: apply?.textContent ?? null,
+        sourceOverlapSetting: window.__HARNESS__.settings.weights.sourceOverlap,
+        panels: document.querySelectorAll(".enhanced-graph-panel").length,
+        fieldCount: panel.querySelectorAll(".enhanced-graph-stepper .enhanced-graph-number").length,
+        buttons: [...panel.querySelectorAll("button")].map(
+          (el) => `${el.textContent}:${el.disabled ? "off" : "on"}`,
+        ),
+      };
+      apply?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await sleep(400);
+      return { staged, beforeClick, applied: { ...window.__HARNESS__.settings.weights } };
     });
     check(
-      "「恢复默认权重」 puts every coefficient back",
+      "「恢复默认」 stages the documented defaults, and 应用 lands them",
       // Matches DEFAULT_RELEVANCE_WEIGHTS: the ordering follows how strong the
-      // evidence is, not the values the unbounded design happened to use.
-      weightReset.directLink === 4 &&
-        weightReset.commonNeighbor === 2 &&
-        weightReset.sourceOverlap === 2 &&
-        weightReset.coCitation === 1,
-      `${weightReset.directLink}/${weightReset.sourceOverlap}/` +
-        `${weightReset.commonNeighbor}/${weightReset.coCitation}`,
+      // evidence is, not the values the unbounded design happened to use. The
+      // resolution goes back to Louvain's own 1.
+      JSON.stringify(clusteringDefaults.staged) === JSON.stringify([4, 2, 2, 1, 1]) &&
+        clusteringDefaults.applied.directLink === 4 &&
+        clusteringDefaults.applied.commonNeighbor === 2 &&
+        clusteringDefaults.applied.sourceOverlap === 2 &&
+        clusteringDefaults.applied.coCitation === 1,
+      `draft ${clusteringDefaults.staged.join("/")} → applied ` +
+        `${clusteringDefaults.applied.directLink}/${clusteringDefaults.applied.sourceOverlap}/` +
+        `${clusteringDefaults.applied.commonNeighbor}/${clusteringDefaults.applied.coCitation}; ` +
+        `apply ${JSON.stringify(clusteringDefaults.beforeClick)}`,
     );
 
     // Back to the filters panel for the tag checks below.

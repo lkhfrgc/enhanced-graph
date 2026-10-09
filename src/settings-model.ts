@@ -20,6 +20,15 @@ export interface EnhancedGraphSettings {
   /** Folder prefixes excluded from the graph. */
   excludeFolders: string[];
   /**
+   * Louvain resolution: higher yields more, smaller clusters.
+   *
+   * 1 is the algorithm's own default and was the only value this plugin could use
+   * until now. Modularity cannot reliably separate communities below
+   * `sqrt(2 * edges)` nodes, which is where this vault's clusters already sit, so
+   * the knob is exposed rather than hidden.
+   */
+  resolution: number;
+  /**
    * Only notes under this subfolder are read; empty means the whole vault.
    *
    * A single folder rather than a list, and an INCLUDE where `excludeFolders` is an
@@ -128,6 +137,7 @@ export const DEFAULT_SETTINGS: EnhancedGraphSettings = {
   language: "auto",
   weights: { ...DEFAULT_RELEVANCE_WEIGHTS },
   excludeFolders: [],
+  resolution: 1,
   workingFolder: "",
   hiddenTypes: [],
   hiddenCommunities: [],
@@ -175,6 +185,7 @@ export function mergeSettings(raw: unknown): EnhancedGraphSettings {
     positions: source.positions ?? {},
     dismissedInsights: source.dismissedInsights ?? [],
     excludeFolders: source.excludeFolders ?? [],
+    resolution: typeof source.resolution === "number" ? source.resolution : DEFAULT_SETTINGS.resolution,
     workingFolder: source.workingFolder ?? DEFAULT_SETTINGS.workingFolder,
     hiddenTypes: source.hiddenTypes ?? [],
     hiddenCommunities: source.hiddenCommunities ?? [],

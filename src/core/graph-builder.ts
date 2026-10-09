@@ -26,7 +26,7 @@ import type {
   RelevanceWeights,
   WikiGraph,
 } from "../types";
-import { deriveCommunities } from "./communities";
+import { clampResolution, deriveCommunities } from "./communities";
 import { folderKey, isInWorkspace, isUnder } from "./workspace";
 import { parseNote } from "./parse";
 import type { ParsedNote } from "./parse";
@@ -52,6 +52,11 @@ export interface BuildGraphOptions {
    * and the exclusion list then trims templates and archives out of it.
    */
   readonly workingFolder?: string;
+  /**
+   * Louvain resolution. Higher yields more, smaller clusters; clamped to a range
+   * where the algorithm is meaningful rather than merely accepted.
+   */
+  readonly resolution?: number;
   readonly weights?: RelevanceWeights;
   /** Parallel file reads. Default 16. */
   readonly concurrency?: number;
@@ -600,7 +605,10 @@ export async function buildWikiGraph(options: BuildGraphOptions): Promise<WikiGr
   const { assignments, communities } = deriveCommunities(
     preliminary.map((node) => ({ id: node.id, label: node.label, linkCount: node.linkCount })),
     edges.map((edge) => ({ source: edge.source, target: edge.target, weight: edge.weight })),
-    options.previousCommunities ? { previousCommunities: options.previousCommunities } : undefined,
+    {
+      resolution: clampResolution(options.resolution),
+      ...(options.previousCommunities ? { previousCommunities: options.previousCommunities } : {}),
+    },
   );
 
   const nodes: GraphNode[] = preliminary.map((node) =>

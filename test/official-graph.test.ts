@@ -29,6 +29,7 @@ import {
 import { createNodeResolver } from "../src/integrate/official-internals";
 import type { GraphInsights } from "../src/core/insights";
 import {
+  DEFAULT_RELEVANCE_WEIGHTS,
   EMPTY_GRAPH,
   type CommunityInfo,
   type FolderInfo,
@@ -203,6 +204,9 @@ interface Harness {
   workingFolder: string;
   excludeFolders: string[];
   appliedWorkspaces: Array<{ folder: string; excluded: string[] }>;
+  /** Louvain resolution, and the clustering applies the panel has asked for. */
+  resolution: number;
+  appliedClustering: Array<{ weights: typeof DEFAULT_RELEVANCE_WEIGHTS; resolution: number }>;
   /** Knowledge clusters the user has excluded, by id. */
   hiddenCommunities: number[];
   hideStructural: boolean;
@@ -262,6 +266,8 @@ function setup(
     workingFolder: workspace.workingFolder ?? "",
     excludeFolders: [...(workspace.excludeFolders ?? [])],
     appliedWorkspaces: [],
+    resolution: 1,
+    appliedClustering: [],
     hiddenCommunities: [],
     hideStructural: false,
     hideIsolated: false,
@@ -334,6 +340,10 @@ function setup(
     getWorkspace: () => ({ folder: state.workingFolder, excluded: state.excludeFolders }),
     onApplyWorkspace: (folder, excluded) => {
       state.appliedWorkspaces.push({ folder, excluded: [...excluded] });
+    },
+    getClustering: () => ({ weights: state.weights, resolution: state.resolution }),
+    onApplyClustering: (choice) => {
+      state.appliedClustering.push({ weights: { ...choice.weights }, resolution: choice.resolution });
     },
   });
   return state;
@@ -478,6 +488,8 @@ describe("OfficialGraphEnhancer colouring", () => {
       getTagFilterMode: () => "exclude" as const,
       getWorkspace: () => ({ folder: "", excluded: [] }),
       onApplyWorkspace: () => undefined,
+      getClustering: () => ({ weights: { ...DEFAULT_RELEVANCE_WEIGHTS }, resolution: 1 }),
+      onApplyClustering: () => undefined,
     });
     enhancer.start();
     expect(renderer.nodeLookup["a.md"].color?.rgb).toBe(hexToRgbInt(communityColor(1)));
@@ -556,6 +568,8 @@ describe("OfficialGraphEnhancer hover", () => {
       getTagFilterMode: () => "exclude" as const,
       getWorkspace: () => ({ folder: "", excluded: [] }),
       onApplyWorkspace: () => undefined,
+      getClustering: () => ({ weights: { ...DEFAULT_RELEVANCE_WEIGHTS }, resolution: 1 }),
+      onApplyClustering: () => undefined,
     });
     enhancer.start();
 
@@ -711,6 +725,8 @@ describe("OfficialGraphEnhancer panel and lifecycle", () => {
       getTagFilterMode: () => "exclude" as const,
       getWorkspace: () => ({ folder: "", excluded: [] }),
       onApplyWorkspace: () => undefined,
+      getClustering: () => ({ weights: { ...DEFAULT_RELEVANCE_WEIGHTS }, resolution: 1 }),
+      onApplyClustering: () => undefined,
     });
     enhancer.start();
     expect(renderer.containerEl.querySelectorAll(".enhanced-graph-official-panel")).toHaveLength(1);
@@ -798,6 +814,8 @@ describe("degradation", () => {
       getTagFilterMode: () => "exclude" as const,
       getWorkspace: () => ({ folder: "", excluded: [] }),
       onApplyWorkspace: () => undefined,
+      getClustering: () => ({ weights: { ...DEFAULT_RELEVANCE_WEIGHTS }, resolution: 1 }),
+      onApplyClustering: () => undefined,
     });
 
     expect(() => {
@@ -844,6 +862,8 @@ describe("degradation", () => {
       getTagFilterMode: () => "exclude" as const,
       getWorkspace: () => ({ folder: "", excluded: [] }),
       onApplyWorkspace: () => undefined,
+      getClustering: () => ({ weights: { ...DEFAULT_RELEVANCE_WEIGHTS }, resolution: 1 }),
+      onApplyClustering: () => undefined,
     });
 
     expect(() => enhancer.start()).not.toThrow();
@@ -1907,6 +1927,88 @@ describe("the built-in graph's toolbar", () => {
       .dispatchEvent(new MouseEvent("click", { bubbles: true }));
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(h.appliedWorkspaces).toEqual([{ folder: "notes", excluded: ["gone/"] }]);
+  });
+
+  it("stages the coefficients and the resolution, and applies them on the button", async () => {
+    const h = setup([{ id: "a.md" }, { id: "b.md" }], [makeNode({ id: "a" }), makeNode({ id: "b" })]);
+    h.enhancer.start();
+    buttonSaying(toolbarOf(h), t("toolbar.clustering"))?.dispatchEvent(
+      new MouseEvent("click", { bubbles: true }),
+    );
+    const panel = h.renderer.containerEl.querySelector<HTMLElement>(".enhanced-graph-official-panel")!;
+    const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
+    // Four coefficients and the resolution, all steppers, on the current values.
+    const fields = (): HTMLInputElement[] =>
+      Array.from(panel.querySelectorAll<HTMLInputElement>(".enhanced-graph-stepper .enhanced-graph-number"));
+    expect(fields().length).toBe(5);
+    expect(fields().map((field) => Number(field.value))).toEqual([
+      h.weights.directLink,
+      h.weights.sourceOverlap,
+      h.weights.commonNeighbor,
+      h.weights.coCitation,
+      h.resolution,
+    ]);
+
+    const applyButton = (): HTMLButtonElement =>
+      Array.from(panel.querySelectorAll<HTMLButtonElement>("button")).find(
+        (button) => button.textContent === t("clustering.apply"),
+      )!;
+    expect(applyButton().disabled).toBe(true);
+
+    // Typing stages: the host is told nothing until the button is pressed, because
+    // either change re-scores and re-partitions the whole vault.
+    const overlap = fields()[1];
+    overlap.value = "3.5";
+    overlap.dispatchEvent(new Event("change", { bubbles: true }));
+    const resolution = fields()[4];
+    resolution.value = "1.4";
+    resolution.dispatchEvent(new Event("change", { bubbles: true }));
+    await settle();
+    expect(h.appliedClustering).toEqual([]);
+    expect(applyButton().disabled).toBe(false);
+
+    applyButton().dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await settle();
+    // One write carrying both halves, in the shape the settings and the builder read.
+    expect(h.appliedClustering).toEqual([
+      {
+        weights: {
+          directLink: h.weights.directLink,
+          sourceOverlap: 3.5,
+          commonNeighbor: h.weights.commonNeighbor,
+          coCitation: h.weights.coCitation,
+        },
+        resolution: 1.4,
+      },
+    ]);
+  });
+
+  it("restores the documented defaults into the draft, without applying them", async () => {
+    const h = setup([{ id: "a.md" }], [makeNode({ id: "a" })]);
+    h.enhancer.start();
+    buttonSaying(toolbarOf(h), t("toolbar.clustering"))?.dispatchEvent(
+      new MouseEvent("click", { bubbles: true }),
+    );
+    const panel = h.renderer.containerEl.querySelector<HTMLElement>(".enhanced-graph-official-panel")!;
+
+    const fields = (): HTMLInputElement[] =>
+      Array.from(panel.querySelectorAll<HTMLInputElement>(".enhanced-graph-stepper .enhanced-graph-number"));
+    const first = fields()[0];
+    first.value = "7";
+    first.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(Number(fields()[0].value)).toBe(7);
+
+    // `h.weights` is the applied state, so restoring the defaults has to leave it
+    // alone: this panel writes only on Apply.
+    const appliedBefore = { ...h.weights };
+    Array.from(panel.querySelectorAll<HTMLButtonElement>("button"))
+      .find((button) => button.textContent === t("clustering.defaults"))!
+      .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fields().map((field) => Number(field.value))).toEqual([4, 2, 2, 1, 1]);
+    expect({ ...h.weights }).toEqual(appliedBefore);
+    expect(h.appliedClustering).toEqual([]);
   });
 
   it("hides a filtered type from the built-in graph itself", () => {

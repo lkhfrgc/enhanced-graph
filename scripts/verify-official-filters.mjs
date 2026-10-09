@@ -441,6 +441,95 @@ try {
   await selectTab("标签");
   await page.waitForTimeout(300);
 
+  // Clustering: the same two build inputs, in the built-in graph's own panel. A
+  // press on its toolbar toggle, then the panel's Apply.
+  await page.locator(".enhanced-graph-official-toolbar button", { hasText: "聚类" }).first().click({ delay: PRESS_MS });
+  await page.waitForSelector(".enhanced-graph-stepper .enhanced-graph-number", { timeout: 15_000 });
+  await page.waitForTimeout(300);
+
+  const clusteringFields = page.locator(".enhanced-graph-official-panel .enhanced-graph-stepper .enhanced-graph-number");
+  const clusteringApply = page
+    .locator(".enhanced-graph-official-panel .enhanced-graph-workspace-actions button", { hasText: "应用" })
+    .first();
+  const clusteringAtRest = await page.evaluate(() => ({
+    fields: [...document.querySelectorAll(".enhanced-graph-official-panel .enhanced-graph-stepper .enhanced-graph-number")].map(
+      (field) => Number(field.value),
+    ),
+    applied: window.__OFFICIAL_FILTERS__.appliedClustering.length,
+    settings: { ...window.__OFFICIAL_FILTERS__.settings },
+  }));
+  const clusteringApplyDisabled = await clusteringApply.isDisabled();
+
+  // Stage a coefficient and the resolution with real presses on the steppers.
+  await clusteringFields.nth(1).fill("3.5");
+  await clusteringFields.nth(1).press("Enter");
+  await page.waitForTimeout(200);
+  await clusteringFields.nth(4).fill("1.4");
+  await clusteringFields.nth(4).press("Enter");
+  await page.waitForTimeout(300);
+
+  const clusteringStaged = await page.evaluate(() => ({
+    fields: [...document.querySelectorAll(".enhanced-graph-official-panel .enhanced-graph-stepper .enhanced-graph-number")].map(
+      (field) => Number(field.value),
+    ),
+    applied: window.__OFFICIAL_FILTERS__.appliedClustering.length,
+    sourceOverlap: window.__OFFICIAL_FILTERS__.settings.weights.sourceOverlap,
+    resolution: window.__OFFICIAL_FILTERS__.settings.resolution,
+  }));
+  const clusteringEnabled = !(await clusteringApply.isDisabled());
+
+  await clusteringApply.click({ delay: PRESS_MS });
+  await page.waitForTimeout(400);
+  const clusteringApplied = await page.evaluate(() => ({
+    calls: window.__OFFICIAL_FILTERS__.appliedClustering.slice(),
+    sourceOverlap: window.__OFFICIAL_FILTERS__.settings.weights.sourceOverlap,
+    resolution: window.__OFFICIAL_FILTERS__.settings.resolution,
+  }));
+
+  console.log(
+    `\n  clustering panel: fields ${JSON.stringify(clusteringAtRest.fields)} at rest ` +
+      `(apply disabled ${clusteringApplyDisabled}); staged → fields ${JSON.stringify(clusteringStaged.fields)}, ` +
+      `${clusteringStaged.applied} applied, settings ${clusteringStaged.sourceOverlap}/${clusteringStaged.resolution}; ` +
+      `after 应用 → ${JSON.stringify(clusteringApplied.calls)}\n`,
+  );
+  check(
+    "the built-in graph's clustering panel shows the four coefficients and the resolution",
+    clusteringAtRest.fields.length === 5 &&
+      clusteringAtRest.fields[0] === clusteringAtRest.settings.weights.directLink &&
+      clusteringAtRest.fields[1] === clusteringAtRest.settings.weights.sourceOverlap &&
+      clusteringAtRest.fields[4] === clusteringAtRest.settings.resolution &&
+      clusteringApplyDisabled === true,
+    `${JSON.stringify(clusteringAtRest.fields)} (apply disabled ${clusteringApplyDisabled})`,
+  );
+  check(
+    "staging the clustering settings applies nothing",
+    clusteringStaged.applied === 0 &&
+      clusteringStaged.sourceOverlap === clusteringAtRest.settings.weights.sourceOverlap &&
+      clusteringStaged.resolution === clusteringAtRest.settings.resolution &&
+      clusteringStaged.fields[1] === 3.5 &&
+      clusteringStaged.fields[4] === 1.4 &&
+      clusteringEnabled === true,
+    `fields ${JSON.stringify(clusteringStaged.fields)}, ${clusteringStaged.applied} applied, ` +
+      `settings ${clusteringStaged.sourceOverlap}/${clusteringStaged.resolution}`,
+  );
+  check(
+    "应用 lands both the coefficient and the resolution in one call",
+    clusteringApplied.calls.length === 1 &&
+      clusteringApplied.calls[0].weights.sourceOverlap === 3.5 &&
+      clusteringApplied.calls[0].resolution === 1.4 &&
+      clusteringApplied.sourceOverlap === 3.5 &&
+      clusteringApplied.resolution === 1.4,
+    `${JSON.stringify(clusteringApplied.calls)}; settings ${clusteringApplied.sourceOverlap}/${clusteringApplied.resolution}`,
+  );
+
+  // Back to the defaults, so the state the other checks read is the documented one.
+  await page.locator(".enhanced-graph-official-panel button", { hasText: "恢复默认" }).first().click({ delay: PRESS_MS });
+  await page.waitForTimeout(250);
+  await page.locator(".enhanced-graph-official-panel .enhanced-graph-workspace-actions button", { hasText: "应用" }).first().click({ delay: PRESS_MS });
+  await page.waitForTimeout(350);
+  await openPanelTab("过滤器");
+  await page.waitForTimeout(300);
+
   // Clusters: the legend's cards are controls in the built-in graph too, and they
   // write the same shared setting as the filters panel. Driven with the real
   // pointer, because the panel defers its own redraw while one of its checkboxes

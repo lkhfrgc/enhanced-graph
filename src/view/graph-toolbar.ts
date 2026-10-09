@@ -15,7 +15,7 @@ import { t } from "../i18n";
 import type { ColorMode } from "../types";
 
 /** Which side panel is showing, if any. */
-export type PanelMode = "none" | "insights" | "filters" | "appearance" | "weights";
+export type PanelMode = "none" | "insights" | "filters" | "appearance" | "clustering";
 
 export interface ToolbarOptions {
   readonly colorMode: ColorMode;
@@ -102,9 +102,9 @@ export function renderToolbar(container: HTMLElement, options: ToolbarOptions): 
       options.onPanel("appearance"),
     );
   }
-  if (showPanel("weights")) {
-    makeToggle(right, t("toolbar.weights"), "scale", options.panelMode === "weights", () =>
-      options.onPanel("weights"),
+  if (showPanel("clustering")) {
+    makeToggle(right, t("toolbar.clustering"), "scale", options.panelMode === "clustering", () =>
+      options.onPanel("clustering"),
     );
   }
   if (options.onRebuild) {

@@ -27,6 +27,7 @@ import type { GraphInsights } from "../core/insights";
 import { edgeKey, edgeKeyEndpoints } from "../core/graph-keys";
 import { findConnectingPaths } from "../core/paths";
 import { type FilterSection, renderFilters } from "../view/graph-filters";
+import { renderClustering } from "../view/graph-clustering";
 import { collectTags, filterNodes, type TagFilterMode, type VisibilityFilters } from "../view/visibility";
 import { isInWorkspace } from "../core/workspace";
 import type { GraphNode, OfficialGraphMode, RelevanceWeights, WikiGraph } from "../types";
@@ -37,7 +38,7 @@ import { OfficialHoverTooltip, type HoverTooltipOptions } from "./official-hover
 import { OfficialLegend } from "./official-legend";
 import { OfficialMarkerLayer, type MarkerLine, type MarkerPoint } from "./official-markers";
 import { OfficialToolbar } from "./official-toolbar";
-import { OfficialSidePanel, type OfficialPanelOptions } from "./official-panel";
+import { OfficialSidePanel, type OfficialPanelOptions, type PanelTab } from "./official-panel";
 import {
   createNodeResolver,
   officialNodes,
@@ -186,6 +187,15 @@ export interface OfficialGraphDeps {
    */
   readonly getWorkspace: () => { readonly folder: string; readonly excluded: readonly string[] };
   readonly onApplyWorkspace: (folder: string, excluded: readonly string[]) => Promise<void> | void;
+  /**
+   * What the clustering is made of right now: the association coefficients and
+   * Louvain's resolution. Both are build inputs, shared with the standalone view.
+   */
+  readonly getClustering: () => { readonly weights: RelevanceWeights; readonly resolution: number };
+  readonly onApplyClustering: (choice: {
+    readonly weights: RelevanceWeights;
+    readonly resolution: number;
+  }) => Promise<void> | void;
 }
 
 interface Attachment {
@@ -266,7 +276,7 @@ export class OfficialGraphEnhancer {
    * Starts on the insights because that is what the panel shows before anything
    * is clicked: the toolbar has to agree with it, or its highlight lies.
    */
-  private panelMode: "none" | "insights" | "filters" | "appearance" | "weights" = "insights";
+  private panelMode: "none" | "insights" | "filters" | "appearance" | "clustering" = "insights";
 
   /**
    * Nodes the user asked to focus, per renderer.
@@ -711,11 +721,11 @@ export class OfficialGraphEnhancer {
         });
       },
       tagFilterMode: this.deps.getTagFilterMode(),
-      workspace: {
+      workspace: () => ({
         folder: this.deps.getWorkspace().folder,
         excluded: this.deps.getWorkspace().excluded,
         folders: graph.folders,
-      },
+      }),
       // Applying re-reads the vault, so the panel is redrawn once the rebuild has
       // been asked for rather than before it: the counts and the folder list in the
       // other groups all come from the graph.
@@ -838,16 +848,20 @@ export class OfficialGraphEnhancer {
         this.syncMarkerTicker();
       },
       onPanel: (mode) => {
-        if (mode !== "insights" && mode !== "filters" && mode !== "appearance") return;
+        if (mode !== "insights" && mode !== "filters" && mode !== "appearance" && mode !== "clustering") {
+          return;
+        }
         this.panelMode = this.panelMode === mode ? "none" : mode;
         for (const attachment of this.attachments.values()) {
           if (attachment.renderer !== renderer) continue;
-          const tab =
+          const tab: PanelTab =
             this.panelMode === "appearance"
               ? "colors"
               : this.panelMode === "filters"
                 ? "filters"
-                : "insights";
+                : this.panelMode === "clustering"
+                  ? "clustering"
+                  : "insights";
           attachment.panel.showTab(tab, this.panelMode !== "none");
           attachment.toolbar.render();
           return;
@@ -1824,7 +1838,27 @@ export class OfficialGraphEnhancer {
       },
       onDismiss: (key, nodeIds) => void this.deps.onDismiss(key, nodeIds),
       renderFilters: (el) => this.renderFiltersBody(el),
+      renderClustering: (el) => this.renderClusteringBody(el),
     };
+  }
+
+  /**
+   * The clustering body, the standalone view's own component.
+   *
+   * Redrawn once the host has written the settings: the coefficients and the
+   * resolution are both build inputs, so applying them means a rebuild, and the
+   * panel should show what is actually in force rather than the draft.
+   */
+  private renderClusteringBody(el: HTMLElement): void {
+    renderClustering(el, {
+      applied: () => this.deps.getClustering(),
+      onApply: (choice) => {
+        void Promise.resolve(this.deps.onApplyClustering(choice)).then(() => {
+          el.empty();
+          this.renderClusteringBody(el);
+        });
+      },
+    });
   }
 
   // -------------------------------------------------------------------------

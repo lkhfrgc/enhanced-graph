@@ -19,6 +19,7 @@ import "./dom-polyfill";
 import type { GraphInsights } from "../src/core/insights";
 import { OfficialGraphEnhancer } from "../src/integrate/official-graph";
 import type { FolderInfo, GraphNode, PageType, WikiGraph } from "../src/types";
+import { DEFAULT_RELEVANCE_WEIGHTS } from "../src/types";
 
 // Enough tags for the tag list to reach its own scroll cap, so the tags tab has
 // more content than the panel can ever show.
@@ -159,7 +160,14 @@ const settings = {
   hideStructural: false,
   workingFolder: "",
   excludeFolders: [] as string[],
+  resolution: 1,
+  // In `settings`, where `main.ts` keeps them: the checks read the applied state the
+  // same way they read every other setting.
+  weights: { ...DEFAULT_RELEVANCE_WEIGHTS },
 };
+
+/** What the clustering panel has asked to apply, in order. */
+const appliedClustering: Array<{ weights: typeof DEFAULT_RELEVANCE_WEIGHTS; resolution: number }> = [];
 
 /** What the panel has asked to apply, in order, for the checks to assert on. */
 const appliedWorkspaces: Array<{ folder: string; excluded: string[] }> = [];
@@ -202,6 +210,16 @@ enhancer = new OfficialGraphEnhancer({
     hideIsolated: settings.hideIsolated,
   }),
   getTagFilterMode: () => settings.tagFilterMode,
+  getClustering: () => ({ weights: settings.weights, resolution: settings.resolution }),
+  // Recorded and written, but nothing to rebuild here: the fixture hands the same
+  // graph back either way. The rebuild itself is measured on the real vault.
+  onApplyClustering: async (choice) => {
+    settings.weights = { ...choice.weights };
+    settings.resolution = choice.resolution;
+    appliedClustering.push({ weights: { ...choice.weights }, resolution: choice.resolution });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    enhancer?.refresh();
+  },
   getWorkspace: () => ({ folder: settings.workingFolder, excluded: settings.excludeFolders }),
   // Recorded rather than rebuilt: the fixture has no vault to re-read, so the check
   // asserts on what the panel asked for. The filtering itself is measured on the
@@ -247,6 +265,8 @@ interface OfficialFiltersApi {
   renderer: FakeOfficialRenderer;
   /** Workspaces the panel has applied, in order. */
   appliedWorkspaces: Array<{ folder: string; excluded: string[] }>;
+  /** Clustering settings the panel has applied, in order. */
+  appliedClustering: Array<{ weights: typeof DEFAULT_RELEVANCE_WEIGHTS; resolution: number }>;
   /** The folders the graph reports, so a check can compare them with the picker. */
   folders: readonly FolderInfo[];
 }
@@ -258,6 +278,7 @@ interface OfficialFiltersApi {
   nodeTags: Object.fromEntries(nodes.map((node) => [node.id, node.tags])),
   renderer,
   appliedWorkspaces,
+  appliedClustering,
   folders: graph.folders,
 };
 (window as unknown as { __OFFICIAL_FILTERS_READY__: boolean }).__OFFICIAL_FILTERS_READY__ = true;

@@ -21,7 +21,7 @@ The association score between any two notes is a weighted sum of four signals:
 
 **Every signal is normalised to 0–1 before weighting** (`saturate(x) = x/(1+x)`), so a weight is a statement of relative importance and the per-signal numbers in the tooltip can be compared with each other.
 
-- Weights are adjustable in the settings tab or from the view's own weights panel; changes rebuild the graph.
+- The coefficients and the clustering resolution live in the view's own **clustering panel** (the 聚类 / Clustering toggle on the toolbar, in the standalone view and in the built-in graph alike). Both are build inputs, so the panel stages the edits and applies them together on its button, which re-scores the vault and re-runs the clustering.
 - Hovering an edge shows the full breakdown.
 - The command **Copy relevance report** writes a note's top-10 related notes to the clipboard as a Markdown table.
 

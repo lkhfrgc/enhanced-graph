@@ -65,8 +65,11 @@ export interface FilterOptions {
    * Not a visibility switch like the others — it is the build's scope, so applying
    * it changes which notes exist rather than which are drawn, and it costs a
    * rebuild. That is why it has its own button instead of acting on click.
+   *
+   * A function, not a value: applying replaces the settings array, so a snapshot
+   * taken when the panel was built would keep testing against the old one.
    */
-  readonly workspace: WorkspaceChoice;
+  readonly workspace: () => WorkspaceChoice;
   /** Apply a workspace: the folder to read, and the folders to leave out of it. */
   readonly onApplyWorkspace: (folder: string, excluded: readonly string[]) => void;
   /**
@@ -155,7 +158,7 @@ export function renderFilters(container: HTMLElement, options: FilterOptions): v
       id: "workspace",
       // Counted in folders, not in nodes: this group is about which folders the
       // plugin reads, and the number answers "how much is there to choose from?".
-      label: `${t("filter.workspace")} (${options.workspace.folders.length})`,
+      label: `${t("filter.workspace")} (${options.workspace().folders.length})`,
       render: (section) => renderWorkspaceRows(section, options),
     },
     { id: "visibility", label: t("filter.visibility"), render: (section) => renderVisibilityRows(section, options) },
@@ -228,7 +231,7 @@ function folderKey(prefix: string): string {
  * rebuild takes.
  */
 function renderWorkspaceRows(section: HTMLElement, options: FilterOptions): void {
-  const applied: WorkspaceChoice = options.workspace;
+  const applied: WorkspaceChoice = options.workspace();
   const appliedExcluded = applied.excluded.map(folderKey);
   const appliedKey = `${applied.folder}\u0000${appliedExcluded.join("\u0000")}`;
   if (pendingWorkspace === null || pendingWorkspace.from !== appliedKey) {

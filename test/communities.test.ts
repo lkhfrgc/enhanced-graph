@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import type { CommunityInfo } from "../src/types";
 import {
+  MAX_RESOLUTION,
+  MIN_RESOLUTION,
   SPARSE_COHESION_THRESHOLD,
   SPARSE_MIN_MEMBERS,
+  clampResolution,
   computeCommunityConnectivity,
   deriveCommunities,
   isSparseCommunity,
@@ -173,6 +176,83 @@ describe("isSparseCommunity", () => {
 // ---------------------------------------------------------------------------
 // Two triangles joined by a single bridge edge
 // ---------------------------------------------------------------------------
+
+describe("deriveCommunities / core note", () => {
+  // `hub` has the most links, `anchor` carries the most association weight: one
+  // edge to `hub` and one edge of weight 9 to a leaf. Ranking members by raw link
+  // count names `hub`; ranking them the way the clustering was built names
+  // `anchor`.
+  const nodes = [
+    makeNode("hub", 3),
+    makeNode("anchor", 1),
+    makeNode("leaf", 1),
+    makeNode("other", 1),
+  ];
+  const edges = [
+    edge("hub", "anchor", 1),
+    edge("hub", "leaf", 1),
+    edge("anchor", "leaf", 9),
+    edge("other", "hub", 1),
+  ];
+
+  it("names the cluster after its weighted core, not its best-connected page", () => {
+    const result = deriveCommunities(nodes, edges, { resolution: 0.5 });
+    const community = result.communities.find((c) => c.nodeIds.includes("anchor"))!;
+
+    expect(community.nodeIds).toContain("hub");
+    expect(community.topNodes[0]).toBe("ANCHOR");
+    expect(community.topNodes).toContain("HUB");
+  });
+
+  it("breaks a weighted-degree tie by link count, then by id", () => {
+    // Two nodes with identical weighted degree (2 each). `b` has more links, so it
+    // must come first — and the order has to be fixed, so the name is stable.
+    const tied = deriveCommunities(
+      [makeNode("a", 1), makeNode("b", 2), makeNode("c", 5)],
+      [edge("a", "c", 2), edge("b", "c", 2)],
+      { resolution: 0.5 },
+    );
+    // Whatever the partition, `a` and `b` sit in one community here (c is the hub
+    // they both attach to); assert on that community's order alone.
+    const community = tied.communities.find(
+      (candidate) => candidate.nodeIds.includes("a") && candidate.nodeIds.includes("b"),
+    )!;
+    expect(community).toBeDefined();
+    const order = community.topNodes;
+    expect(order.indexOf("B")).toBeLessThan(order.indexOf("A"));
+  });
+});
+
+describe("deriveCommunities / resolution", () => {
+  const { nodes, edges } = ringOfCliques(2, 5);
+
+  it("is clamped to the range the panel offers", () => {
+    // Both ends of the range are accepted; anything outside is pulled back in
+    // rather than handed to the algorithm, where 0 would mean "one cluster".
+    for (const value of [MIN_RESOLUTION, 1, MAX_RESOLUTION]) {
+      expect(clampResolution(value)).toBe(value);
+    }
+    expect(clampResolution(0.1)).toBe(MIN_RESOLUTION);
+    expect(clampResolution(99)).toBe(MAX_RESOLUTION);
+    expect(clampResolution(Number.NaN)).toBe(1);
+    expect(clampResolution(undefined)).toBe(1);
+  });
+
+  it("splits the same graph into more communities as it rises", () => {
+    // Two 5-cliques joined by one edge: at resolution 0.5 they are one community,
+    // at 3 they are two. This is the knob doing what the sweep measured.
+    const coarse = deriveCommunities(nodes, edges, { resolution: MIN_RESOLUTION });
+    const fine = deriveCommunities(nodes, edges, { resolution: MAX_RESOLUTION });
+
+    expect(coarse.communities.length).toBeLessThan(fine.communities.length);
+    expect(fine.communities.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("keeps the assignments consistent with the reported communities", () => {
+    const result = deriveCommunities(nodes, edges, { resolution: 2 });
+    expectWellFormedPartition(result, nodes);
+  });
+});
 
 describe("deriveCommunities / two cliques", () => {
   const nodes = ["a", "b", "c", "d", "e", "f"].map((id) => makeNode(id, 1));

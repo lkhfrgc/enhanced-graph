@@ -35,7 +35,7 @@ export interface OfficialToolbarOptions {
  * settings tab and in the standalone view, and offering them here as well meant a
  * second copy of the same four numbers inside a graph they describe.
  */
-const AVAILABLE_PANELS: readonly PanelMode[] = ["insights", "filters", "appearance"];
+const AVAILABLE_PANELS: readonly PanelMode[] = ["insights", "filters", "appearance", "clustering"];
 
 export class OfficialToolbar {
   private readonly el: HTMLElement;

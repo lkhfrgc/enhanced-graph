@@ -26,11 +26,9 @@ import {
   type GraphNode,
   type PageType,
   type WikiGraph,
-  DEFAULT_RELEVANCE_WEIGHTS,
-  type RelevanceWeights,
 } from "../types";
 import { t } from "../i18n";
-import { renderWeights } from "./graph-weights";
+import { renderClustering, type ClusteringChoice } from "./graph-clustering";
 
 import { analyzeGraph, type GraphInsights } from "../core/insights";
 import { edgeKey } from "../core/graph-keys";
@@ -73,10 +71,6 @@ import { collectTags, filterEdges, filterNodes, type VisibilityFilters } from ".
  * the drag; the full relayout happens on release.
  */
 const GRAVITY_PREVIEW_ITERATIONS = 12;
-
-
-/** Coalesce rapid weight edits: each rebuild re-reads and re-scores the vault. */
-const WEIGHT_REBUILD_DEBOUNCE_MS = 700;
 
 export const VIEW_TYPE_ENHANCED_GRAPH = "enhanced-graph-view";
 
@@ -221,9 +215,6 @@ export class EnhancedGraphView extends ItemView {
   async setGraphFromPlugin(): Promise<void> {
     await this.reload(false);
   }
-
-  /** Weight edits re-score the whole vault, so they are coalesced. */
-  private weightTimer: number | null = null;
 
   /** Intermediate-node counts offered by the connection-range control. */
   private static readonly FOCUS_CHOICES = [0, 1, 2, 3] as const;
@@ -897,7 +888,7 @@ export class EnhancedGraphView extends ItemView {
       insights: t("insights.title"),
       filters: t("toolbar.filter"),
       appearance: t("toolbar.appearance"),
-      weights: t("toolbar.weights"),
+      clustering: t("toolbar.clustering"),
     };
     const header = el.createDiv({ cls: "enhanced-graph-panel-header" });
     header.createSpan({ text: titles[this.panelMode] });
@@ -913,55 +904,42 @@ export class EnhancedGraphView extends ItemView {
       this.renderAppearancePanel(el);
       return;
     }
-    if (this.panelMode === "weights") {
-      this.renderWeightsPanel(el);
+    if (this.panelMode === "clustering") {
+      this.renderClusteringPanel(el);
       return;
     }
     this.renderInsights(el);
   }
 
   /**
-   * Quick access to the four relevance coefficients.
+   * Quick access to the two decisions the graph is made of: the four relevance
+   * coefficients and Louvain's resolution.
    *
-   * Unlike appearance, these cannot be applied by repainting: every pair score
-   * depends on them, so the graph has to be rebuilt. The rebuild is debounced so
-   * dragging a slider re-scores once at the end rather than on every step.
+   * Neither can be applied by repainting — every pair score, and then the whole
+   * partition, depends on them, so the graph has to be rebuilt. The panel stages the
+   * edits and applies them together on its button, which is also what makes the
+   * rebuild land on the values the user settled on rather than on every step.
    */
-  private renderWeightsPanel(el: HTMLElement): void {
-    renderWeights(el, {
-      weights: this.plugin.settings.weights,
-      onChange: (key, value) => void this.setWeight(key, value),
-      onReset: () => void this.resetWeights(),
+  private renderClusteringPanel(el: HTMLElement): void {
+    renderClustering(el, {
+      // Read fresh on every render: applying replaces the settings objects.
+      applied: () => ({
+        weights: this.plugin.settings.weights,
+        resolution: this.plugin.settings.resolution,
+      }),
+      onApply: (choice) => void this.applyClustering(choice),
     });
   }
 
-  private async setWeight(key: keyof RelevanceWeights, value: number): Promise<void> {
-    this.plugin.settings.weights[key] = value;
+  private async applyClustering(choice: ClusteringChoice): Promise<void> {
+    this.plugin.settings.weights = { ...choice.weights };
+    this.plugin.settings.resolution = choice.resolution;
     await this.plugin.saveSettings();
-    this.requestWeightRebuild();
+    // Straight to a rebuild, with no debounce: the panel has an explicit Apply, so
+    // there is nothing to coalesce — and a delay here is exactly the "I pressed it
+    // and nothing happened" wait the workspace button already taught us to avoid.
+    this.plugin.requestGraphRebuild(true);
     this.renderStatus();
-  }
-
-  private async resetWeights(): Promise<void> {
-    this.plugin.settings.weights = { ...DEFAULT_RELEVANCE_WEIGHTS };
-    await this.plugin.saveSettings();
-    this.requestWeightRebuild();
-    this.renderPanel();
-  }
-
-  /**
-   * Coalesce rapid weight edits into one rebuild.
-   *
-   * A rebuild re-reads the vault and re-scores every pair, which is far too
-   * expensive to run per slider step; the panel's number box and the debounce
-   * together make it land on the value the user actually stopped at.
-   */
-  private requestWeightRebuild(): void {
-    if (this.weightTimer !== null) window.clearTimeout(this.weightTimer);
-    this.weightTimer = window.setTimeout(() => {
-      this.weightTimer = null;
-      this.plugin.requestGraphRebuild(true);
-    }, WEIGHT_REBUILD_DEBOUNCE_MS);
   }
 
   /**
@@ -999,11 +977,11 @@ export class EnhancedGraphView extends ItemView {
         this.renderLegend();
       },
       tagFilterMode: this.plugin.settings.tagFilterMode,
-      workspace: {
+      workspace: () => ({
         folder: this.plugin.settings.workingFolder,
         excluded: this.plugin.settings.excludeFolders,
         folders: this.graph.folders,
-      },
+      }),
       // Applying changes which notes exist, so it is a settings write plus a
       // rebuild — the same pair the settings tab used to do for these two keys.
       onApplyWorkspace: (folder, excluded) => {

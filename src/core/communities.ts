@@ -16,6 +16,21 @@ export const SPARSE_COHESION_THRESHOLD = 0.15;
 export const SPARSE_MIN_MEMBERS = 3;
 
 /**
+ * Bounds for the exposed resolution.
+ *
+ * Below 0.5 the whole vault collapses into a few blobs, and above 3 the clusters
+ * break into pairs — both measured on a 79-note vault. The bounds are where the
+ * knob stops being useful, not where the algorithm stops working.
+ */
+export const MIN_RESOLUTION = 0.5;
+export const MAX_RESOLUTION = 3;
+
+export function clampResolution(value: number | undefined): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 1;
+  return Math.min(MAX_RESOLUTION, Math.max(MIN_RESOLUTION, value));
+}
+
+/**
  * Louvain's random walk uses `Math.random` by default, which reshuffles
  * community ids on every rebuild of an unchanged vault — and because the node
  * colour palette is indexed by community id, that would repaint the whole
@@ -155,13 +170,30 @@ function summarise(
     intraEdgesByCommunity.set(sourceCommunity, (intraEdgesByCommunity.get(sourceCommunity) ?? 0) + 1);
   }
 
+  // The core note is the one the cluster is named after, so it has to be measured
+  // the way the cluster was BUILT: Louvain partitions a graph weighted by the
+  // association score, and ranking members by raw link count instead can name a
+  // page the clustering itself barely used. Ties fall back to link count and then
+  // to id, so the name is stable across rebuilds.
+  const weightedDegree = new Map<string, number>();
+  for (const edge of edges) {
+    const weight = Number.isFinite(edge.weight) && edge.weight > 0 ? edge.weight : 1;
+    weightedDegree.set(edge.source, (weightedDegree.get(edge.source) ?? 0) + weight);
+    weightedDegree.set(edge.target, (weightedDegree.get(edge.target) ?? 0) + weight);
+  }
+
   const communities: CommunityInfo[] = [];
   for (const [communityId, memberIds] of groups) {
     const nodeCount = memberIds.length;
     const intraEdges = intraEdgesByCommunity.get(communityId) ?? 0;
     const { cohesion, meanIntraDegree } = computeCommunityConnectivity(nodeCount, intraEdges);
     const topNodes = [...memberIds]
-      .sort((a, b) => (nodeInfo.get(b)?.linkCount ?? 0) - (nodeInfo.get(a)?.linkCount ?? 0))
+      .sort(
+        (a, b) =>
+          (weightedDegree.get(b) ?? 0) - (weightedDegree.get(a) ?? 0) ||
+          (nodeInfo.get(b)?.linkCount ?? 0) - (nodeInfo.get(a)?.linkCount ?? 0) ||
+          (a < b ? -1 : a > b ? 1 : 0),
+      )
       .slice(0, 5)
       .map((id) => nodeInfo.get(id)?.label ?? id);
     communities.push({
