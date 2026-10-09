@@ -413,6 +413,9 @@ export class EnhancedGraphView extends ItemView {
       edges: this.visibleEdges(nodes),
       communities: this.graph.communities,
       nodeIndex: new Map(nodes.map((node) => [node.id, node])),
+      // Carried through unchanged: the workspace picker offers the vault's folders,
+      // which do not depend on which nodes are currently visible.
+      folders: this.graph.folders,
       builtAt: this.graph.builtAt,
     };
   }
@@ -996,6 +999,18 @@ export class EnhancedGraphView extends ItemView {
         this.renderLegend();
       },
       tagFilterMode: this.plugin.settings.tagFilterMode,
+      workspace: {
+        folder: this.plugin.settings.workingFolder,
+        excluded: this.plugin.settings.excludeFolders,
+        folders: this.graph.folders,
+      },
+      // Applying changes which notes exist, so it is a settings write plus a
+      // rebuild — the same pair the settings tab used to do for these two keys.
+      onApplyWorkspace: (folder, excluded) => {
+        this.plugin.settings.workingFolder = folder;
+        this.plugin.settings.excludeFolders = [...excluded];
+        void this.plugin.saveSettings().then(() => this.plugin.requestGraphRebuild());
+      },
       onSelectAllTags: (tags) => {
         const next = new Set(this.activeTagSelection());
         for (const tag of tags) if (tag.length > 0) next.add(tag);

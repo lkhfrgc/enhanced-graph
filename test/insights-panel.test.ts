@@ -285,7 +285,14 @@ function makeGap(overrides: GapOverrides = {}): CoverageGap {
 function makeGraph(nodes: readonly GraphNode[]): WikiGraph {
   const edges: readonly GraphEdge[] = [];
   const communities: readonly CommunityInfo[] = [];
-  return { nodes, edges, communities, nodeIndex: new Map(nodes.map((node) => [node.id, node])), builtAt: 1 };
+  return {
+    nodes,
+    edges,
+    communities,
+    nodeIndex: new Map(nodes.map((node) => [node.id, node])),
+    folders: [],
+    builtAt: 1,
+  };
 }
 
 const ALPHA = makeNode({ id: "alpha", label: "Alpha", type: "source", linkCount: 3 });

@@ -100,7 +100,11 @@ Verified against real Obsidian **1.9.10** and **1.14.4**. `minAppVersion` is 1.9
 
 ## Settings
 
-The settings tab holds: interface language, association weights, built-in graph enhancement, reuse of the built-in graph's layout, a working folder, and excluded folders — plus two buttons that clear dismissed insights and the layout cache. The working folder narrows the plugin to one subfolder of the vault (empty means all of it); excluded folders are then trimmed out of that.
+The settings tab holds: interface language, association weights, built-in graph enhancement, and reuse of the built-in graph's layout — plus two buttons that clear dismissed insights and the layout cache.
+
+The **workspace** — which part of the vault the plugin reads at all — is chosen in the filters panel of either view, in its own 工作区 / Workspace group: a folder to read (empty means the whole vault) and folders to leave out of it, applied together with the group's **Apply** button. It changes which notes are read, not merely which are drawn, so it re-reads the vault when applied; the folder list is the vault's own, collected before the scope narrowed it, so the scope can always be widened again.
+
+Every filter group switches like a tab: page types, knowledge clusters, tags, the workspace, and the two visibility switches.
 
 Everything else (colours, filters, appearance — and, in the standalone view, the weights) is edited inside the graph itself, where the effect is visible while you change it.
 

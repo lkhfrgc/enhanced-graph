@@ -120,6 +120,14 @@ export interface WikiGraph {
   readonly edges: readonly GraphEdge[];
   readonly communities: readonly CommunityInfo[];
   readonly nodeIndex: ReadonlyMap<string, GraphNode>;
+  /**
+   * Every folder in the vault that holds a note, and its ancestors, sorted.
+   *
+   * Collected BEFORE the working folder narrows the build, so the scope can always
+   * be widened again from the panel: a list built from the scoped notes would only
+   * ever offer the folders already inside it, and there would be no way back up.
+   */
+  readonly folders: readonly string[];
   readonly builtAt: number;
 }
 
@@ -128,6 +136,7 @@ export const EMPTY_GRAPH: WikiGraph = Object.freeze({
   edges: [],
   communities: [],
   nodeIndex: new Map(),
+  folders: [],
   builtAt: 0,
 });
 

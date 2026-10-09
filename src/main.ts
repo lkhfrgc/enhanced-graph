@@ -227,6 +227,18 @@ export default class EnhancedGraphPlugin extends Plugin implements PluginHost, S
         hideIsolated: this.settings.hideIsolated,
       }),
       getTagFilterMode: () => this.settings.tagFilterMode,
+      getWorkspace: () => ({
+        folder: this.settings.workingFolder,
+        excluded: this.settings.excludeFolders,
+      }),
+      // The one filter in the panel that changes which notes are READ rather than
+      // which are drawn, so it rebuilds instead of repainting.
+      onApplyWorkspace: async (folder, excluded) => {
+        this.settings.workingFolder = folder;
+        this.settings.excludeFolders = [...excluded];
+        await this.saveSettings();
+        this.requestGraphRebuild();
+      },
       onSetVisibility: async (patch) => {
         Object.assign(this.settings, patch);
         await this.saveSettings();

@@ -42,6 +42,10 @@ const snapshot: Snapshot = {
   graph: {
     ...raw.graph,
     nodeIndex: new Map(Object.entries(raw.graph.nodeIndex ?? {})),
+    // A snapshot written before the folder list existed has no `folders`, and the
+    // workspace picker iterates it. `verify:vault` regenerates the file, so this
+    // only covers a harness run against a stale one.
+    folders: raw.graph.folders ?? [],
   } as WikiGraph,
 };
 
@@ -90,6 +94,9 @@ const settings: EnhancedGraphSettings = {
   positions: {} as Record<string, { x: number; y: number }>,
   dismissedInsights: [] as string[],
 };
+
+/** Rebuilds the fake plugin was asked for; the workspace check reads it. */
+let rebuilds = 0;
 
 /**
  * A markdown file for the stubbed vault.
@@ -140,7 +147,10 @@ const plugin = {
   async copyRelevanceReport() {
     NOTICES.push("copied");
   },
-  requestGraphRebuild() {},
+  /** Counted so a check can tell an applied workspace from a staged one. */
+  requestGraphRebuild() {
+    rebuilds += 1;
+  },
   refreshViews() {},
   /**
    * Mirrors what the plugin injects: the real provider reads Obsidian's
@@ -218,6 +228,8 @@ interface HarnessApi {
   focusNode(nodeId: string): void;
   /** Sigma's own hit test at a container-relative point; see the implementation. */
   hitTest(x: number, y: number): string | null;
+  /** How many times the view has asked for a rebuild. */
+  rebuilds(): number;
 }
 
 const api: HarnessApi = {
@@ -225,6 +237,7 @@ const api: HarnessApi = {
   settings,
   snapshot,
   notices: NOTICES,
+  rebuilds: () => rebuilds,
   nodePosition(nodeId: string) {
     const renderer = (view as unknown as {
       renderer: { nodeViewportPosition(id: string): { x: number; y: number } | null } | null;

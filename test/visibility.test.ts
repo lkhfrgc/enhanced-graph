@@ -259,6 +259,7 @@ describe("the view's filter set", () => {
       edges: [],
       communities: [],
       nodeIndex: new Map(),
+      folders: [],
       builtAt: 1,
     };
     expect(collectTags(graph.nodes)).toHaveLength(1);

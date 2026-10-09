@@ -176,6 +176,15 @@ export interface OfficialGraphDeps {
   readonly onToggleType: (pageType: string) => Promise<void> | void;
   /** Whether the ticked tags are hidden or kept; shared with the standalone view. */
   readonly getTagFilterMode: () => TagFilterMode;
+  /**
+   * The workspace: the folder being read and the folders left out of it.
+   *
+   * Shared with the standalone view and the settings, and unlike the visibility
+   * filters it changes which notes are read at all — so it is applied by
+   * {@link onApplyWorkspace}, which writes the settings and rebuilds.
+   */
+  readonly getWorkspace: () => { readonly folder: string; readonly excluded: readonly string[] };
+  readonly onApplyWorkspace: (folder: string, excluded: readonly string[]) => Promise<void> | void;
 }
 
 interface Attachment {
@@ -701,6 +710,20 @@ export class OfficialGraphEnhancer {
         });
       },
       tagFilterMode: this.deps.getTagFilterMode(),
+      workspace: {
+        folder: this.deps.getWorkspace().folder,
+        excluded: this.deps.getWorkspace().excluded,
+        folders: graph.folders,
+      },
+      // Applying re-reads the vault, so the panel is redrawn once the rebuild has
+      // been asked for rather than before it: the counts and the folder list in the
+      // other groups all come from the graph.
+      onApplyWorkspace: (folder, excluded) => {
+        void Promise.resolve(this.deps.onApplyWorkspace(folder, excluded)).then(() => {
+          el.empty();
+          this.renderFiltersBody(el);
+        });
+      },
       // Each mode keeps its own selection, so switching back and forth never
       // rewrites the other one. Include mode opens fully ticked the first time it is
       // entered — everything kept — because a fresh include list is `null`, and an

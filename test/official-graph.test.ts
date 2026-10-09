@@ -157,12 +157,14 @@ function makeGraph(
   nodes: GraphNode[],
   communities: CommunityInfo[] = [],
   edges: Array<WikiGraph["edges"][number]> = [],
+  folders: readonly string[] = [],
 ): WikiGraph {
   return {
     nodes,
     edges,
     communities,
     nodeIndex: new Map(nodes.map((node) => [node.id, node])),
+    folders,
     builtAt: 1,
   };
 }
@@ -196,6 +198,10 @@ interface Harness {
   hiddenTags: string[];
   includedTags: string[] | null;
   tagFilterMode: "exclude" | "include";
+  /** The applied workspace, and what the panel has asked to apply. */
+  workingFolder: string;
+  excludeFolders: string[];
+  appliedWorkspaces: Array<{ folder: string; excluded: string[] }>;
   /** Knowledge clusters the user has excluded, by id. */
   hiddenCommunities: number[];
   hideStructural: boolean;
@@ -215,9 +221,16 @@ function setup(
   ids: Array<{ id: string; type?: string; color?: { a: number; rgb: number } | null }>,
   graphNodes: GraphNode[],
   mode: "off" | "community" | "type" = "community",
+  /** Graph metadata the workspace group reads: the vault's folders, and what is applied. */
+  workspace: { folders?: readonly string[]; workingFolder?: string; excludeFolders?: readonly string[] } = {},
 ): Harness {
   const renderer = new FakeOfficialRenderer(ids);
-  const graph = makeGraph(graphNodes, [makeCommunity(0), makeCommunity(1)]);
+  const graph = makeGraph(
+    graphNodes,
+    [makeCommunity(0), makeCommunity(1)],
+    [],
+    workspace.folders ?? [],
+  );
   // Stands in for Obsidian's data engine: `render()` recomputes and hands the
   // renderer a fresh payload, which is how a late-attaching filter gets applied.
   const leaf = makeLeaf(renderer, {
@@ -241,6 +254,9 @@ function setup(
     hiddenTags: [],
     includedTags: null,
     tagFilterMode: "exclude",
+    workingFolder: workspace.workingFolder ?? "",
+    excludeFolders: [...(workspace.excludeFolders ?? [])],
+    appliedWorkspaces: [],
     hiddenCommunities: [],
     hideStructural: false,
     hideIsolated: false,
@@ -310,6 +326,10 @@ function setup(
       state.opened.push(nodeId);
     },
     getTagFilterMode: () => state.tagFilterMode,
+    getWorkspace: () => ({ folder: state.workingFolder, excluded: state.excludeFolders }),
+    onApplyWorkspace: (folder, excluded) => {
+      state.appliedWorkspaces.push({ folder, excluded: [...excluded] });
+    },
   });
   return state;
 }
@@ -451,6 +471,8 @@ describe("OfficialGraphEnhancer colouring", () => {
       onDismiss: () => {},
       onOpenNode: () => {},
       getTagFilterMode: () => "exclude" as const,
+      getWorkspace: () => ({ folder: "", excluded: [] }),
+      onApplyWorkspace: () => undefined,
     });
     enhancer.start();
     expect(renderer.nodeLookup["a.md"].color?.rgb).toBe(hexToRgbInt(communityColor(1)));
@@ -527,6 +549,8 @@ describe("OfficialGraphEnhancer hover", () => {
       onDismiss: () => {},
       onOpenNode: () => {},
       getTagFilterMode: () => "exclude" as const,
+      getWorkspace: () => ({ folder: "", excluded: [] }),
+      onApplyWorkspace: () => undefined,
     });
     enhancer.start();
 
@@ -680,6 +704,8 @@ describe("OfficialGraphEnhancer panel and lifecycle", () => {
       onDismiss: () => {},
       onOpenNode: () => {},
       getTagFilterMode: () => "exclude" as const,
+      getWorkspace: () => ({ folder: "", excluded: [] }),
+      onApplyWorkspace: () => undefined,
     });
     enhancer.start();
     expect(renderer.containerEl.querySelectorAll(".enhanced-graph-official-panel")).toHaveLength(1);
@@ -765,6 +791,8 @@ describe("degradation", () => {
       onDismiss: () => {},
       onOpenNode: () => {},
       getTagFilterMode: () => "exclude" as const,
+      getWorkspace: () => ({ folder: "", excluded: [] }),
+      onApplyWorkspace: () => undefined,
     });
 
     expect(() => {
@@ -809,6 +837,8 @@ describe("degradation", () => {
       onDismiss: () => {},
       onOpenNode: () => {},
       getTagFilterMode: () => "exclude" as const,
+      getWorkspace: () => ({ folder: "", excluded: [] }),
+      onApplyWorkspace: () => undefined,
     });
 
     expect(() => enhancer.start()).not.toThrow();
@@ -1694,6 +1724,95 @@ describe("the built-in graph's toolbar", () => {
     await settle();
     expect(h.tagFilterMode).toBe("exclude");
     expect([...h.hiddenTags].sort()).toEqual(["alpha", "beta", "gamma"]);
+  });
+
+  it("stages a workspace and applies it only on the button", async () => {
+    const h = setup(
+      [{ id: "a.md" }, { id: "b.md" }, { id: "c.md" }],
+      [makeNode({ id: "a" }), makeNode({ id: "b" }), makeNode({ id: "c" })],
+      "community",
+      // The folder list the builder reports: every folder holding a note, plus its
+      // ancestors — collected before the scope narrowed anything.
+      { folders: ["notes", "notes/deep", "archive"] },
+    );
+    h.enhancer.start();
+    buttonSaying(toolbarOf(h), t("toolbar.filter"))?.dispatchEvent(
+      new MouseEvent("click", { bubbles: true }),
+    );
+    const panel = h.renderer.containerEl.querySelector<HTMLElement>(".enhanced-graph-official-panel")!;
+    selectTab(panel, t("filter.workspace"));
+    const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
+    const picker = (): HTMLSelectElement =>
+      panel.querySelector<HTMLSelectElement>(".enhanced-graph-folder-select")!;
+    const excludedRows = (): HTMLLabelElement[] =>
+      Array.from(panel.querySelectorAll<HTMLLabelElement>(".enhanced-graph-workspace-excluded label"));
+    const applyButton = (): HTMLButtonElement =>
+      Array.from(panel.querySelectorAll<HTMLButtonElement>("button")).find(
+        (button) => button.textContent === t("filter.workspaceApply"),
+      )!;
+
+    // Every folder is offered, with the whole vault first, and nothing is staged
+    // yet — so Apply has nothing to do.
+    expect(Array.from(picker().options).map((option) => option.value)).toEqual([
+      "",
+      "notes",
+      "notes/deep",
+      "archive",
+    ]);
+    expect(picker().value).toBe("");
+    expect(excludedRows().map((row) => row.textContent)).toEqual(["notes/", "notes/deep/", "archive/"]);
+    expect(applyButton().disabled).toBe(true);
+
+    // Choosing and ticking only stages: the host is told nothing, and the graph is
+    // asked for no rebuild, until the button is pressed.
+    picker().value = "notes";
+    picker().dispatchEvent(new Event("change", { bubbles: true }));
+    const deepRow = excludedRows().find((row) => row.textContent === "notes/deep/")!;
+    const deepBox = deepRow.querySelector<HTMLInputElement>("input")!;
+    deepBox.checked = true;
+    deepBox.dispatchEvent(new Event("change", { bubbles: true }));
+    await settle();
+    expect(h.appliedWorkspaces).toEqual([]);
+    expect(applyButton().disabled).toBe(false);
+
+    applyButton().dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await settle();
+    // One write, carrying both halves: the folder to read and the folders to leave
+    // out of it. Excluded prefixes are written in the form the builder reads.
+    expect(h.appliedWorkspaces).toEqual([{ folder: "notes", excluded: ["notes/deep/"] }]);
+  });
+
+  it("keeps an excluded prefix that is not a folder in the vault", async () => {
+    // A prefix can be hand-written into a settings file, or name a folder that has
+    // since gone. Applying must not silently drop it.
+    const h = setup([{ id: "a.md" }], [makeNode({ id: "a" })], "community", {
+      folders: ["notes"],
+      excludeFolders: ["gone/"],
+    });
+    h.enhancer.start();
+    buttonSaying(toolbarOf(h), t("toolbar.filter"))?.dispatchEvent(
+      new MouseEvent("click", { bubbles: true }),
+    );
+    const panel = h.renderer.containerEl.querySelector<HTMLElement>(".enhanced-graph-official-panel")!;
+    selectTab(panel, t("filter.workspace"));
+
+    const rows = Array.from(
+      panel.querySelectorAll<HTMLLabelElement>(".enhanced-graph-workspace-excluded label"),
+    );
+    expect(rows.map((row) => row.textContent)).toEqual(["notes/", "gone/"]);
+    expect(rows[1].querySelector<HTMLInputElement>("input")!.checked).toBe(true);
+
+    // Staging something else and applying keeps it.
+    const picker = panel.querySelector<HTMLSelectElement>(".enhanced-graph-folder-select")!;
+    picker.value = "notes";
+    picker.dispatchEvent(new Event("change", { bubbles: true }));
+    const apply = Array.from(panel.querySelectorAll<HTMLButtonElement>("button")).find(
+      (button) => button.textContent === t("filter.workspaceApply"),
+    )!;
+    apply.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(h.appliedWorkspaces).toEqual([{ folder: "notes", excluded: ["gone/"] }]);
   });
 
   it("hides a filtered type from the built-in graph itself", () => {

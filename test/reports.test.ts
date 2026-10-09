@@ -48,6 +48,7 @@ function makeGraph(nodes: GraphNode[], edges: GraphEdge[] = []): WikiGraph {
     edges,
     communities: [],
     nodeIndex: new Map(nodes.map((node) => [node.id, node])),
+    folders: [],
     builtAt: 1,
   };
 }

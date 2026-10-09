@@ -79,35 +79,10 @@ export class EnhancedGraphSettingTab extends PluginSettingTab {
       layoutSetting.setDesc(`${t("settings.reuseOfficialLayoutDesc")}\n${t("settings.reuseOfficialLayoutUnavailable")}`);
     }
 
-    new Setting(containerEl)
-      .setName(t("settings.workingFolder"))
-      .setDesc(t("settings.workingFolderDesc"))
-      .addText((text) =>
-        text
-          .setPlaceholder(t("settings.workingFolderPlaceholder"))
-          .setValue(this.plugin.settings.workingFolder)
-          .onChange(async (value) => {
-            this.plugin.settings.workingFolder = value.trim();
-            await this.plugin.saveSettings();
-            this.plugin.requestGraphRebuild();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName(t("settings.excludeFolders"))
-      .setDesc(t("settings.excludeFoldersDesc"))
-      .addTextArea((text) =>
-        text
-          .setValue(this.plugin.settings.excludeFolders.join("\n"))
-          .onChange(async (value) => {
-            this.plugin.settings.excludeFolders = value
-              .split("\n")
-              .map((line) => line.trim())
-              .filter(Boolean);
-            await this.plugin.saveSettings();
-            this.plugin.requestGraphRebuild();
-          }),
-      );
+    // The working folder and the excluded folders are chosen in the filters panel
+    // of either view, next to the graph they narrow and with the folder list to
+    // choose from. Kept here they would be a second, competing home for the same
+    // two keys — and a text box cannot offer the folders that exist.
   }
 
   // -------------------------------------------------------------------------

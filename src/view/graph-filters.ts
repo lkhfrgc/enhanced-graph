@@ -60,6 +60,16 @@ export interface FilterOptions {
   readonly onToggleIsolated: (value: boolean) => void;
   readonly onToggleStructural: (value: boolean) => void;
   /**
+   * The workspace: which part of the vault the plugin reads at all.
+   *
+   * Not a visibility switch like the others — it is the build's scope, so applying
+   * it changes which notes exist rather than which are drawn, and it costs a
+   * rebuild. That is why it has its own button instead of acting on click.
+   */
+  readonly workspace: WorkspaceChoice;
+  /** Apply a workspace: the folder to read, and the folders to leave out of it. */
+  readonly onApplyWorkspace: (folder: string, excluded: readonly string[]) => void;
+  /**
    * Which filter group is on screen, and how to switch.
    *
    * Held by the caller rather than here: this function runs on every repaint, so
@@ -74,7 +84,21 @@ export interface FilterOptions {
 }
 
 /** The filter groups, one of which is on screen at a time. */
-export type FilterSection = "types" | "clusters" | "tags" | "visibility";
+export type FilterSection = "types" | "clusters" | "tags" | "workspace" | "visibility";
+
+/**
+ * A workspace selection: what is applied, and what can be chosen.
+ *
+ * `folders` is the vault's own folder list (`WikiGraph.folders`), collected before
+ * the scope narrowed it, so a folder the scope currently hides is still offered.
+ */
+export interface WorkspaceChoice {
+  /** The applied working folder; empty means the whole vault. */
+  readonly folder: string;
+  /** The applied excluded folder prefixes. */
+  readonly excluded: readonly string[];
+  readonly folders: readonly string[];
+}
 
 /** One group's rows, and how the panel should label its tab. */
 interface FilterGroup {
@@ -127,6 +151,13 @@ export function renderFilters(container: HTMLElement, options: FilterOptions): v
       label: `${t("filter.tags")} (${tags.length})`,
       render: (section) => renderTagRows(section, options, tags),
     },
+    {
+      id: "workspace",
+      // Counted in folders, not in nodes: this group is about which folders the
+      // plugin reads, and the number answers "how much is there to choose from?".
+      label: `${t("filter.workspace")} (${options.workspace.folders.length})`,
+      render: (section) => renderWorkspaceRows(section, options),
+    },
     { id: "visibility", label: t("filter.visibility"), render: (section) => renderVisibilityRows(section, options) },
   ];
 
@@ -159,6 +190,130 @@ export function renderFilters(container: HTMLElement, options: FilterOptions): v
 function renderVisibilityRows(section: HTMLElement, options: FilterOptions): void {
   checkboxRow(section, t("filter.hideIsolated"), options.hideIsolated, options.onToggleIsolated);
   checkboxRow(section, t("filter.hideStructural"), options.hideStructural, options.onToggleStructural);
+}
+
+/**
+ * The workspace group's pending state, or `null` while the panel follows what is
+ * applied.
+ *
+ * Module-level for the same reason the tag search box is: the panel is re-rendered
+ * from scratch whenever anything else repaints it, and a half-made choice must not
+ * be silently thrown away by an unrelated redraw. `from` is the applied selection
+ * the staged one was derived from: both views share this module, so the workspace
+ * can be applied from the other one, and a staged choice that no longer starts from
+ * what is applied has to be dropped rather than shadow it.
+ */
+let pendingWorkspace: { folder: string; excluded: Set<string>; from: string } | null = null;
+
+/** `archive/old/` and `/archive/old` are the same folder to a reader. */
+function folderKey(prefix: string): string {
+  return prefix.replace(/^\/+|\/+$/g, "");
+}
+
+/**
+ * Workspace rows: which folder to read, which to leave out, and Apply.
+ *
+ * Applying costs a rebuild — the notes are re-read, not merely re-drawn — so the
+ * choices are staged and take effect together on the button. Everything else in
+ * this panel is a draw-time switch that can afford to act on click; this one
+ * cannot, and pressing it by accident would empty the graph for as long as a
+ * rebuild takes.
+ */
+function renderWorkspaceRows(section: HTMLElement, options: FilterOptions): void {
+  const applied: WorkspaceChoice = options.workspace;
+  const appliedExcluded = applied.excluded.map(folderKey);
+  const appliedKey = `${applied.folder}\u0000${appliedExcluded.join("\u0000")}`;
+  if (pendingWorkspace === null || pendingWorkspace.from !== appliedKey) {
+    pendingWorkspace = { folder: applied.folder, excluded: new Set(appliedExcluded), from: appliedKey };
+  }
+  const pending = pendingWorkspace;
+
+  section.createDiv({ cls: "enhanced-graph-hint", text: t("filter.workspaceHint") });
+
+  // --- the folder to read -------------------------------------------------
+  const picker = section.createDiv({ cls: "enhanced-graph-workspace-row" });
+  picker.createSpan({ cls: "enhanced-graph-workspace-label", text: t("filter.workspaceFolder") });
+  const select = picker.createEl("select", { cls: "enhanced-graph-folder-select dropdown" });
+  select.createEl("option", { text: t("filter.workspaceWholeVault"), value: "" });
+  for (const folder of applied.folders) {
+    // Indented by depth, so a nested list reads as a tree inside a flat select.
+    const depth = folder.split("/").length - 1;
+    select.createEl("option", { text: `${"\u00a0\u00a0".repeat(depth)}${folder}/`, value: folder });
+  }
+  // A folder that is applied but not in the vault's list — mistyped, or deleted
+  // since — is still listed, so the select cannot quietly show "whole vault" while
+  // the graph is in fact scoped to something.
+  if (pending.folder !== "" && !applied.folders.includes(pending.folder)) {
+    select.createEl("option", { text: pending.folder, value: pending.folder });
+  }
+  select.value = pending.folder;
+  select.addEventListener("change", () => {
+    pending.folder = select.value;
+    syncApply();
+  });
+
+  // --- the folders to leave out -------------------------------------------
+  const excludedBox = section.createDiv({ cls: "enhanced-graph-workspace-excluded" });
+  excludedBox.createSpan({ cls: "enhanced-graph-workspace-label", text: t("filter.workspaceExcluded") });
+  // Prefixes that are not among the vault's folders — hand-written into an older
+  // settings file, say — stay in the list, so applying cannot drop them unseen.
+  const unknown = appliedExcluded.filter((key) => key !== "" && !applied.folders.includes(key));
+  const rows = [...applied.folders, ...unknown];
+  if (rows.length === 0) {
+    excludedBox.createDiv({ cls: "enhanced-graph-tag-empty", text: t("filter.workspaceNoFolders") });
+  }
+  for (const folder of rows) {
+    const row = excludedBox.createEl("label", { cls: "enhanced-graph-checkbox" });
+    const input = row.createEl("input", { type: "checkbox" });
+    input.checked = pending.excluded.has(folder);
+    input.addEventListener("change", () => {
+      if (input.checked) pending.excluded.add(folder);
+      else pending.excluded.delete(folder);
+      syncApply();
+    });
+    row.createSpan({ text: `${folder}/` });
+  }
+
+  // --- apply ---------------------------------------------------------------
+  const actions = section.createDiv({ cls: "enhanced-graph-workspace-actions" });
+  const apply = actions.createEl("button", { cls: "enhanced-graph-button", text: t("filter.workspaceApply") });
+  const reset = actions.createEl("button", { cls: "enhanced-graph-link", text: t("filter.workspaceReset") });
+
+  /** True while the staged choice would change what is applied. */
+  const isDirty = (): boolean =>
+    pending.folder !== applied.folder ||
+    pending.excluded.size !== appliedExcluded.length ||
+    [...pending.excluded].some((folder) => !appliedExcluded.includes(folder));
+
+  function syncApply(): void {
+    apply.disabled = !isDirty();
+    reset.classList.toggle("is-hidden", !isDirty());
+  }
+
+  apply.addEventListener("click", () => {
+    if (!isDirty()) return;
+    const { folder } = pending;
+    // Written as prefixes, the form the builder and older settings files use.
+    const excluded = [...pending.excluded]
+      .filter((name) => name !== "")
+      .sort()
+      .map((name) => `${name}/`);
+    // The panel goes back to following what is applied: the host writes these and
+    // rebuilds, and the rebuild's own repaint lands on the applied values.
+    pendingWorkspace = null;
+    options.onApplyWorkspace(folder, excluded);
+  });
+
+  reset.addEventListener("click", () => {
+    pendingWorkspace = null;
+    // Redrawn in place: the staged ticks have to go back to the applied ones, and
+    // only a fresh render puts them there. Reusing the element keeps the section's
+    // `data-section`, which the switcher and the checks read.
+    section.empty();
+    renderWorkspaceRows(section, options);
+  });
+
+  syncApply();
 }
 
 /**

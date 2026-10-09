@@ -81,38 +81,15 @@ function settingNamed(container: HTMLElement, name: string): HTMLElement | undef
 }
 
 describe("EnhancedGraphSettingTab", () => {
-  it("parses the exclude-folder box into a trimmed, non-empty list", async () => {
-    const h = makeHost();
-    const tab = render(h.host);
+  it("leaves the workspace to the filters panel", () => {
+    const { host } = makeHost();
+    const tab = render(host);
 
-    const box = settingNamed(tab.containerEl, "排除的文件夹")?.querySelector("textarea");
-    expect(box).toBeTruthy();
-    box!.value = "templates/\n\n  archive/old  \n";
-    box!.dispatchEvent(new Event("input", { bubbles: true }));
-    await Promise.resolve();
-
-    // Blank lines and surrounding spaces are the user's, not the setting's.
-    expect(h.settings.excludeFolders).toEqual(["templates/", "archive/old"]);
-    // Folder changes alter which nodes exist, so a rebuild is required.
-    expect(h.rebuilds).toBeGreaterThan(0);
-  });
-
-  it("stores the working folder trimmed, and rebuilds for it", async () => {
-    const h = makeHost();
-    const tab = render(h.host);
-
-    const box = settingNamed(tab.containerEl, "工作文件夹")?.querySelector<HTMLInputElement>(
-      "input[type=text]",
-    );
-    expect(box).toBeTruthy();
-    box!.value = "  notes/  ";
-    box!.dispatchEvent(new Event("input", { bubbles: true }));
-    await Promise.resolve();
-
-    // Trailing spaces in a folder name would silently match nothing.
-    expect(h.settings.workingFolder).toBe("notes/");
-    // Which nodes exist changes, so a rebuild is required.
-    expect(h.rebuilds).toBeGreaterThan(0);
+    // Both keys are chosen in the panel now, against the vault's own folder list.
+    // A second home in the settings tab would compete with it — and a free-text box
+    // cannot offer the folders that actually exist.
+    expect(settingNamed(tab.containerEl, "工作文件夹")).toBeUndefined();
+    expect(settingNamed(tab.containerEl, "排除的文件夹")).toBeUndefined();
   });
 
   it("offers the language choices and shows the stored one", () => {

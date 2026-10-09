@@ -97,7 +97,7 @@ function makeGraph(
 ): WikiGraph {
   const nodeIndex = new Map(nodes.map((node) => [node.id, node]));
   for (const [key, node] of extraIndexKeys) nodeIndex.set(key, node);
-  return { nodes, edges, communities, nodeIndex, builtAt: 1 };
+  return { nodes, edges, communities, nodeIndex, folders: [], builtAt: 1 };
 }
 
 function keysOf(connections: readonly { readonly key: string }[]): string[] {

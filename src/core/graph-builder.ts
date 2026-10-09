@@ -432,9 +432,54 @@ function countCommonNeighbors(a: string, b: string, ctx: RelevanceContext): numb
 // Build
 // ---------------------------------------------------------------------------
 
+/**
+ * Every folder in the vault that holds a note, plus its ancestors, sorted.
+ *
+ * Deliberately independent of the working folder: this is the list the workspace
+ * picker offers, and a list narrowed by the current scope could only ever offer
+ * folders already inside it — no way back up. The user's own `excludeFolders` are
+ * ignored here too, so an excluded folder stays selectable and can be un-excluded.
+ */
+export async function listVaultFolders(vault: VaultAdapter): Promise<string[]> {
+  let listed: readonly string[];
+  try {
+    listed = await vault.listMarkdownFiles();
+  } catch {
+    return [];
+  }
+
+  const configDir = vault.configDir();
+  const folders = new Set<string>();
+  for (const raw of listed) {
+    const path = normalizeVaultPath(raw);
+    if (!/\.md$/i.test(path)) continue;
+    if (isExcludedPath(path, [], configDir)) continue;
+    const parts = path.split("/");
+    parts.pop();
+    // Every ancestor, not just the immediate parent: `a/b/c.md` makes `a` and
+    // `a/b` selectable, so a deeply nested vault can still be scoped to a top
+    // folder.
+    for (let depth = 1; depth <= parts.length; depth += 1) {
+      folders.add(parts.slice(0, depth).join("/"));
+    }
+  }
+  return [...folders].sort(compareStrings);
+}
+
 export async function buildWikiGraph(options: BuildGraphOptions): Promise<WikiGraph> {
-  const notes = await loadNotes(options.vault, options);
-  if (notes.length === 0) return EMPTY_GRAPH;
+  // Collected before the working folder is applied, so the scope can be widened
+  // again from the panel afterwards.
+  const [notes, folders] = await Promise.all([
+    loadNotes(options.vault, options),
+    listVaultFolders(options.vault),
+  ]);
+  // An empty scope is not the same as an empty vault: the folders are kept so the
+  // picker still offers a way out of a folder that turned out to hold nothing.
+  if (notes.length === 0) {
+    return folders.length === 0
+      ? EMPTY_GRAPH
+      : Object.freeze({ ...EMPTY_GRAPH, folders: Object.freeze(folders) });
+  }
 
   const index = buildLinkIndex(notes);
 
@@ -560,6 +605,7 @@ export async function buildWikiGraph(options: BuildGraphOptions): Promise<WikiGr
     edges: Object.freeze(sortedEdges),
     communities: Object.freeze(communities),
     nodeIndex,
+    folders: Object.freeze(folders),
     builtAt: Date.now(),
   });
 }

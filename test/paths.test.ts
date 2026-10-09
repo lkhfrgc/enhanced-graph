@@ -60,6 +60,7 @@ function graphOf(specs: string[], extraNodes: string[] = []): WikiGraph {
     edges,
     communities: [],
     nodeIndex: new Map(nodes.map((item) => [item.id, item])),
+    folders: [],
     builtAt: 1,
   };
 }

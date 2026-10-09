@@ -1883,6 +1883,111 @@ async function main() {
       `rows restored ${tagRestore.restored}/${tagRestore.before}; nodes ${tagFilter.before} → ${tagFilter.after} → ${tagRestore.nodesAfterClear}; tag boxes left ticked ${tagRestore.tickedTagRows}`,
     );
 
+    // --- 11a-2. the workspace group, in the standalone view ----------------
+    // The same panel module serves both views, and the built-in graph's copy is
+    // driven in `verify-official-filters.mjs`. What is measured here is the
+    // standalone view's own half: that its panel offers the folders, that the
+    // choice is staged until 应用, and that applying writes the settings and asks
+    // the plugin to rebuild — against a fake plugin that counts the requests.
+    const workspace = await page.evaluate(async () => {
+      const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const tab = [...document.querySelectorAll(".enhanced-graph-panel-tabs button")].find((el) =>
+        el.textContent?.startsWith("工作区"),
+      );
+      tab?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await sleep(450);
+
+      const picker = document.querySelector(".enhanced-graph-folder-select");
+      const options = picker ? [...picker.options].map((option) => option.value) : [];
+      const rows = [...document.querySelectorAll(".enhanced-graph-workspace-excluded label")];
+      const applyButton = [...document.querySelectorAll(".enhanced-graph-workspace-actions button")].find(
+        (el) => el.textContent?.includes("应用"),
+      );
+      const disabledAtRest = applyButton?.disabled ?? null;
+      const rebuildsBefore = window.__HARNESS__.rebuilds();
+      const settingsBefore = {
+        folder: window.__HARNESS__.settings.workingFolder,
+        excluded: [...window.__HARNESS__.settings.excludeFolders],
+      };
+
+      // Stage: pick a folder and tick one exclusion.
+      picker.value = options[1] ?? "";
+      picker.dispatchEvent(new Event("change", { bubbles: true }));
+      const tickBox = rows[1]?.querySelector("input");
+      if (tickBox) {
+        tickBox.checked = true;
+        tickBox.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      await sleep(300);
+      const staged = {
+        rebuilds: window.__HARNESS__.rebuilds() - rebuildsBefore,
+        folder: window.__HARNESS__.settings.workingFolder,
+        excluded: [...window.__HARNESS__.settings.excludeFolders],
+        enabled: applyButton?.disabled === false,
+      };
+
+      applyButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await sleep(500);
+      const applied = {
+        rebuilds: window.__HARNESS__.rebuilds() - rebuildsBefore,
+        folder: window.__HARNESS__.settings.workingFolder,
+        excluded: [...window.__HARNESS__.settings.excludeFolders],
+      };
+
+      // Put the workspace back so the checks that follow see the whole vault.
+      const restore = document.querySelector(".enhanced-graph-folder-select");
+      if (restore) {
+        restore.value = "";
+        restore.dispatchEvent(new Event("change", { bubbles: true }));
+        const box = document.querySelector(
+          ".enhanced-graph-workspace-excluded label:nth-child(2) input",
+        );
+        if (box?.checked) {
+          box.checked = false;
+          box.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+        const apply = [...document.querySelectorAll(".enhanced-graph-workspace-actions button")].find((el) =>
+          el.textContent?.includes("应用"),
+        );
+        apply?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        await sleep(500);
+      }
+
+      return { options, rows: rows.length, disabledAtRest, settingsBefore, staged, applied };
+    });
+
+    console.log(
+      `\n  workspace (standalone): folders ${JSON.stringify(workspace.options)}; ` +
+        `${workspace.rows} exclusion rows; disabled at rest ${workspace.disabledAtRest}; ` +
+        `staged → ${workspace.staged.rebuilds} rebuild(s), ${JSON.stringify(workspace.staged.folder)}/` +
+        `${JSON.stringify(workspace.staged.excluded)}; applied → ${workspace.applied.rebuilds} rebuild(s), ` +
+        `${JSON.stringify(workspace.applied.folder)}/${JSON.stringify(workspace.applied.excluded)}\n`,
+    );
+    check(
+      "工作区 in the standalone view offers the vault's folders, whole vault first",
+      workspace.options.length > 1 && workspace.options[0] === "" && workspace.rows === workspace.options.length - 1,
+      `${JSON.stringify(workspace.options)} with ${workspace.rows} exclusion rows`,
+    );
+    check(
+      "staging a workspace in the standalone view changes nothing yet",
+      workspace.disabledAtRest === true &&
+        workspace.staged.rebuilds === 0 &&
+        workspace.staged.folder === workspace.settingsBefore.folder &&
+        JSON.stringify(workspace.staged.excluded) === JSON.stringify(workspace.settingsBefore.excluded) &&
+        workspace.staged.enabled === true,
+      `disabled at rest ${workspace.disabledAtRest}; staged ${workspace.staged.rebuilds} rebuilds, ` +
+        `${JSON.stringify(workspace.staged.folder)}/${JSON.stringify(workspace.staged.excluded)} ` +
+        `(was ${JSON.stringify(workspace.settingsBefore.folder)}/${JSON.stringify(workspace.settingsBefore.excluded)})`,
+    );
+    check(
+      "应用 in the standalone view writes both settings and asks for one rebuild",
+      workspace.applied.rebuilds === 1 &&
+        workspace.applied.folder === workspace.options[1] &&
+        workspace.applied.excluded.length === 1,
+      `${workspace.applied.rebuilds} rebuild(s), ${JSON.stringify(workspace.applied.folder)}/` +
+        `${JSON.stringify(workspace.applied.excluded)}`,
+    );
+
     // --- 11b. the "no matching nodes" message ------------------------------
     // It used to be a Notice fired from applySearch, which runs on every
     // keystroke — so a non-matching query stacked a column of toasts down the

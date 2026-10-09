@@ -307,6 +307,101 @@ try {
       `(want 1 and ${carriers})`,
   );
 
+  // The workspace group: staged choices, applied on the button. On the real vault
+  // this is what narrows the build; the fixture has no vault to re-read, so what is
+  // measured here is exactly the part the panel owns — the folder list it offers,
+  // that nothing is applied until the button is pressed, and the pair it then asks
+  // for. The narrowing itself is measured on the real vault in `verify:vault`.
+  await selectTab("工作区");
+  await page.waitForSelector(".enhanced-graph-folder-select", { timeout: 15_000 });
+  await page.waitForTimeout(300);
+
+  const workspaceFolders = await page.evaluate(() => window.__OFFICIAL_FILTERS__.folders.slice());
+  const pickerOptions = await page.evaluate(() => {
+    const select = document.querySelector(".enhanced-graph-folder-select");
+    return select ? Array.from(select.options).map((option) => option.value) : [];
+  });
+  const excludedRows = await page.evaluate(() =>
+    Array.from(document.querySelectorAll(".enhanced-graph-workspace-excluded label")).map(
+      (row) => row.textContent,
+    ),
+  );
+  const applyButton = page.locator(".enhanced-graph-workspace-actions button", { hasText: "应用" }).first();
+  const applyDisabledFirst = await applyButton.isDisabled();
+
+  // Stage a folder and an exclusion, with real presses, and check that nothing has
+  // been applied yet: a rebuild that has not been asked for must not happen.
+  await page.locator(".enhanced-graph-folder-select").selectOption("notes", { force: true });
+  await page.waitForTimeout(200);
+  const deepRow = page.locator(".enhanced-graph-workspace-excluded label", { hasText: "notes/deep/" }).first();
+  await deepRow.locator("input[type=checkbox]").click({ delay: PRESS_MS });
+  await page.waitForTimeout(300);
+
+  const staged = await page.evaluate(() => ({
+    applied: window.__OFFICIAL_FILTERS__.appliedWorkspaces.length,
+    folder: window.__OFFICIAL_FILTERS__.settings.workingFolder,
+    excluded: window.__OFFICIAL_FILTERS__.settings.excludeFolders.slice(),
+  }));
+  const applyEnabledAfterStaging = !(await applyButton.isDisabled());
+
+  await applyButton.click({ delay: PRESS_MS });
+  await page.waitForTimeout(400);
+  const applied = await page.evaluate(() => ({
+    calls: window.__OFFICIAL_FILTERS__.appliedWorkspaces.slice(),
+    folder: window.__OFFICIAL_FILTERS__.settings.workingFolder,
+    excluded: window.__OFFICIAL_FILTERS__.settings.excludeFolders.slice(),
+  }));
+
+  console.log(
+    `\n  workspace: folders ${JSON.stringify(workspaceFolders)} offered as ${JSON.stringify(pickerOptions)}; ` +
+      `exclusion rows ${JSON.stringify(excludedRows)}; ` +
+      `staged → ${staged.applied} applied, settings ${JSON.stringify(staged.folder)}/${JSON.stringify(staged.excluded)}; ` +
+      `after 应用 → ${JSON.stringify(applied.calls)}\n`,
+  );
+  check(
+    "工作区 offers the vault's folders, with the whole vault first",
+    pickerOptions.length === workspaceFolders.length + 1 &&
+      pickerOptions[0] === "" &&
+      workspaceFolders.every((folder) => pickerOptions.includes(folder)),
+    `${JSON.stringify(pickerOptions)} for folders ${JSON.stringify(workspaceFolders)}`,
+  );
+  check(
+    "工作区 lists every folder as an exclusion row",
+    excludedRows.length === workspaceFolders.length &&
+      workspaceFolders.every((folder) => excludedRows.includes(`${folder}/`)),
+    `${JSON.stringify(excludedRows)}`,
+  );
+  check(
+    "应用 is disabled until something is staged",
+    applyDisabledFirst === true && applyEnabledAfterStaging === true,
+    `disabled at rest: ${applyDisabledFirst}, enabled after staging: ${applyEnabledAfterStaging}`,
+  );
+  check(
+    "staging a workspace applies nothing",
+    staged.applied === 0 && staged.folder === "" && staged.excluded.length === 0,
+    `${staged.applied} calls, settings ${JSON.stringify(staged.folder)}/${JSON.stringify(staged.excluded)} (want none)`,
+  );
+  check(
+    "应用 hands over the folder to read and the folder to leave out, in one call",
+    applied.calls.length === 1 &&
+      applied.calls[0].folder === "notes" &&
+      JSON.stringify(applied.calls[0].excluded) === JSON.stringify(["notes/deep/"]) &&
+      applied.folder === "notes" &&
+      JSON.stringify(applied.excluded) === JSON.stringify(["notes/deep/"]),
+    `${JSON.stringify(applied.calls)}; settings ${JSON.stringify(applied.folder)}/${JSON.stringify(applied.excluded)}`,
+  );
+
+  // Back to the tag group for the checks that follow, and to a clean workspace.
+  await selectTab("工作区");
+  await page.locator(".enhanced-graph-folder-select").selectOption("", { force: true });
+  await page.waitForTimeout(200);
+  await deepRow.locator("input[type=checkbox]").click({ delay: PRESS_MS });
+  await page.waitForTimeout(200);
+  await page.locator(".enhanced-graph-workspace-actions button", { hasText: "应用" }).first().click({ delay: PRESS_MS });
+  await page.waitForTimeout(400);
+  await selectTab("标签");
+  await page.waitForTimeout(300);
+
   // Clusters: the legend's cards are controls in the built-in graph too, and they
   // write the same shared setting as the filters panel. Driven with the real
   // pointer, because the panel defers its own redraw while one of its checkboxes

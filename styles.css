@@ -582,6 +582,42 @@
   padding: 3px 6px;
 }
 
+/* The workspace group: a folder to read, folders to leave out, and the button that
+   makes both take effect. The rows are labelled rather than self-explanatory — one
+   select and a list of checkboxes look alike otherwise. */
+.enhanced-graph-workspace-row,
+.enhanced-graph-workspace-excluded {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.enhanced-graph-workspace-label {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+/* Wide enough for a nested path, and it shrinks rather than pushing the panel. */
+.enhanced-graph-folder-select {
+  width: 100%;
+  min-width: 0;
+}
+
+.enhanced-graph-workspace-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+/* The checkboxes themselves scroll with the panel, like every other list here. */
+.enhanced-graph-workspace-excluded .enhanced-graph-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 /* The search box and its restore button on one line: the button undoes what the
    search and the checkboxes below it did, so it sits with them. */
 .enhanced-graph-tag-search-row {

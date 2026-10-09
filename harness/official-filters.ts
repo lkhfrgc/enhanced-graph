@@ -25,12 +25,17 @@ import type { GraphNode, PageType, WikiGraph } from "../src/types";
 const TAGS = Array.from({ length: 30 }, (_, index) => `tag-${String(index + 1).padStart(2, "0")}`);
 
 function makeNode(id: string, tags: string[], community: number): GraphNode {
+  // Every third note lives in `notes/`, and one in `notes/deep/`, so the workspace
+  // picker has real folders to offer and a scope to narrow to. Ids, labels, types
+  // and tags are untouched: the other checks key off those, not off paths.
+  const index = Number(id.slice(-2));
+  const path = index % 3 === 0 ? `notes/deep/${id}.md` : index % 2 === 0 ? `notes/${id}.md` : `${id}.md`;
   return {
     id,
     label: id,
     type: "concept" as PageType,
     rawType: "concept",
-    path: `${id}.md`,
+    path,
     linkCount: 3,
     inLinks: 2,
     outLinks: 1,
@@ -62,6 +67,10 @@ const graph: WikiGraph = {
     };
   }),
   nodeIndex: new Map(nodes.map((node) => [node.id, node])),
+  // What `listVaultFolders` would report for the paths above, plus a folder no note
+  // lives in — the picker offers folders, not just the ones with notes in the
+  // current scope.
+  folders: ["notes", "notes/deep"],
   builtAt: 1,
 };
 const insights: GraphInsights = {
@@ -145,7 +154,12 @@ const settings = {
   hiddenCommunities: [] as number[],
   hideIsolated: false,
   hideStructural: false,
+  workingFolder: "",
+  excludeFolders: [] as string[],
 };
+
+/** What the panel has asked to apply, in order, for the checks to assert on. */
+const appliedWorkspaces: Array<{ folder: string; excluded: string[] }> = [];
 
 const renderer = new FakeOfficialRenderer(nodes.map((node) => `${node.id}.md`));
 document.body.appendChild(renderer.containerEl);
@@ -182,6 +196,17 @@ enhancer = new OfficialGraphEnhancer({
     hideIsolated: settings.hideIsolated,
   }),
   getTagFilterMode: () => settings.tagFilterMode,
+  getWorkspace: () => ({ folder: settings.workingFolder, excluded: settings.excludeFolders }),
+  // Recorded rather than rebuilt: the fixture has no vault to re-read, so the check
+  // asserts on what the panel asked for. The filtering itself is measured on the
+  // real vault in `verify:vault` and in `graph-builder.test.ts`.
+  onApplyWorkspace: async (folder, excluded) => {
+    settings.workingFolder = folder;
+    settings.excludeFolders = [...excluded];
+    appliedWorkspaces.push({ folder, excluded: [...excluded] });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    enhancer?.refresh();
+  },
   onSetVisibility: async (patch) => {
     Object.assign(settings, patch);
     // `main.ts` awaits the settings write and only then re-renders the views. The
@@ -214,6 +239,10 @@ interface OfficialFiltersApi {
   nodeTags: Record<string, readonly string[]>;
   /** The stand-in renderer, so a check can move its camera. */
   renderer: FakeOfficialRenderer;
+  /** Workspaces the panel has applied, in order. */
+  appliedWorkspaces: Array<{ folder: string; excluded: string[] }>;
+  /** The folders the graph reports, so a check can compare them with the picker. */
+  folders: readonly string[];
 }
 
 (window as unknown as { __OFFICIAL_FILTERS__: OfficialFiltersApi }).__OFFICIAL_FILTERS__ = {
@@ -222,5 +251,7 @@ interface OfficialFiltersApi {
   tagCount: TAGS.length,
   nodeTags: Object.fromEntries(nodes.map((node) => [node.id, node.tags])),
   renderer,
+  appliedWorkspaces,
+  folders: graph.folders,
 };
 (window as unknown as { __OFFICIAL_FILTERS_READY__: boolean }).__OFFICIAL_FILTERS_READY__ = true;
