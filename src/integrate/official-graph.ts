@@ -408,30 +408,38 @@ export class OfficialGraphEnhancer {
       // recoloured but the active toggle stayed on the old mode.
       attachment.toolbar.render();
       attachment.legend.render();
-      // Filters are applied inside the `setData` wrapper, so changing one does
-      // nothing until the data goes through again: the engine has no idea our
-      // settings moved and would only refresh when the vault does.
-      if (typeof attachment.engine?.render === "function") {
-        // Ask the engine for a fresh payload. Re-applying the one we captured only
-        // works if we ever captured one, and we attach AFTER the graph has already
-        // rendered — so `lastData` is null until the vault next changes, and the
-        // filters silently did nothing until then.
-        try {
-          attachment.engine.render();
-        } catch (error) {
-          console.error("[enhanced-graph] asking the built-in graph to re-render failed:", error);
-        }
-      } else if (attachment.lastData != null && typeof renderer.setData === "function") {
-        try {
-          renderer.setData(attachment.lastData);
-        } catch (error) {
-          console.error("[enhanced-graph] re-applying the built-in graph data failed:", error);
-        }
-      }
+      this.requestEngineRender(attachment);
       // Colours live on `node.color`, which the render loop reads per frame — so
       // writing them changes nothing until something asks for a frame. Without
       // this the new colours only appeared once an unrelated click woke the loop.
       renderer.changed?.();
+    }
+  }
+
+  /**
+   * Ask the engine for a fresh payload, so the filter runs on what is on screen.
+   *
+   * Filters are applied inside the `setData` wrapper, so they only ever see the NEXT
+   * payload. We attach AFTER the graph has already rendered — `lastData` is null until
+   * the vault next changes — so without asking, every filter is invisible until an
+   * unrelated repaint, including the two that are ON by default: 隐藏索引/概览/日志
+   * showed the structural pages, and 隐藏孤立节点 hid nothing, until something moved.
+   */
+  private requestEngineRender(attachment: Attachment): void {
+    if (typeof attachment.engine?.render === "function") {
+      try {
+        attachment.engine.render();
+      } catch (error) {
+        console.error("[enhanced-graph] asking the built-in graph to re-render failed:", error);
+      }
+      return;
+    }
+    if (attachment.lastData != null && typeof attachment.renderer.setData === "function") {
+      try {
+        attachment.renderer.setData(attachment.lastData);
+      } catch (error) {
+        console.error("[enhanced-graph] re-applying the built-in graph data failed:", error);
+      }
     }
   }
 
@@ -518,6 +526,10 @@ export class OfficialGraphEnhancer {
       this.wrapHover(attachment);
       this.applyColors(attachment);
       attachment.panel.render();
+      // The graph rendered before we attached, so nothing we filter is on screen yet:
+      // ask the engine for a payload now, or the default switches look broken until
+      // the vault next changes.
+      this.requestEngineRender(attachment);
       return attachment;
     } catch (error) {
       console.error("[enhanced-graph] could not attach to the built-in graph view:", error);

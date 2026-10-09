@@ -1772,6 +1772,9 @@ describe("the built-in graph's toolbar", () => {
       { folders },
     );
     h.enhancer.start();
+    // Attaching asks the engine for a payload, and the wrapper re-renders the panel a
+    // tick later. Wait for that, the way a person's next click would.
+    await new Promise((resolve) => setTimeout(resolve, 0));
     buttonSaying(toolbarOf(h), t("toolbar.filter"))?.dispatchEvent(
       new MouseEvent("click", { bubbles: true }),
     );
@@ -1840,21 +1843,27 @@ describe("the built-in graph's toolbar", () => {
     const panel = h.renderer.containerEl.querySelector<HTMLElement>(".enhanced-graph-official-panel")!;
     selectTab(panel, t("filter.workspace"));
 
-    const folderInput = panel.querySelector<HTMLInputElement>(".enhanced-graph-folder-input")!;
-    folderInput.value = "notez";
-    folderInput.dispatchEvent(new Event("input", { bubbles: true }));
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    // Re-queried on every use, not captured: the panel can re-render (attaching asks
+    // the engine for a payload, and the wrapper repaints a tick later), and both a
+    // detached input and a detached status keep whatever they last showed.
+    const folderInput = (): HTMLInputElement =>
+      panel.querySelector<HTMLInputElement>(".enhanced-graph-folder-input")!;
+    const status = (): Element => panel.querySelector(".enhanced-graph-workspace-status")!;
+    const typed = async (value: string): Promise<void> => {
+      folderInput().value = value;
+      folderInput().dispatchEvent(new Event("input", { bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    };
 
-    const status = panel.querySelector(".enhanced-graph-workspace-status")!;
-    expect(status.textContent).toBe(t("filter.workspaceNoMatch"));
-    expect(status.classList.contains("is-warning")).toBe(true);
+    await typed("notez");
+    expect(status().textContent).toBe(t("filter.workspaceNoMatch"));
+    expect(status().classList.contains("is-warning")).toBe(true);
 
     // A path that only leads somewhere is still useful — the builder matches by
     // prefix — and says how much is under it.
-    folderInput.value = "notes";
-    folderInput.dispatchEvent(new Event("input", { bubbles: true }));
-    expect(status.classList.contains("is-warning")).toBe(false);
-    expect(status.textContent).toBe(t("filter.workspaceMatched", { count: "1" }));
+    await typed("notes");
+    expect(status().classList.contains("is-warning")).toBe(false);
+    expect(status().textContent).toBe(t("filter.workspaceMatched", { count: "1" }));
   });
 
   it("takes out-of-workspace notes off the built-in graph, by path", () => {
@@ -2119,6 +2128,29 @@ describe("the built-in graph's toolbar", () => {
     expect(h.hideStructural).toBe(true);
   });
 
+  it("applies the default switches on the first render, not on the next repaint", async () => {
+    // 隐藏索引/概览/日志 is ON by default, and the built-in graph has already rendered
+    // by the time we attach — our filter only ever sees the NEXT payload. Reported as
+    // "the switch is on but the structural pages are still there", and it was: nothing
+    // asked the engine for a payload, so every filter was invisible until the vault
+    // changed. The standalone view never had this problem; it filters its own data.
+    const h = setup(
+      [{ id: "note.md" }, { id: "overview.md" }],
+      [
+        makeNode({ id: "note" }),
+        makeNode({ id: "overview", isStructural: true }),
+      ],
+    );
+    h.hideStructural = true;
+    h.enhancer.start();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // The engine was asked for a payload, so there is something to judge...
+    expect(h.renderer.lastData).not.toBeNull();
+    // ...and the structural page is not in it.
+    expect(Object.keys(received(h).nodes)).toEqual(["note.md"]);
+  });
+
   it("hides a filtered type from the built-in graph itself", () => {
     const h = setup(
       [{ id: "a.md" }, { id: "b.md" }],
@@ -2137,14 +2169,17 @@ describe("the built-in graph's toolbar", () => {
       [makeNode({ id: "a", type: "concept" }), makeNode({ id: "b", type: "entity" })],
     );
     h.enhancer.start();
-    // Nothing has gone through our wrapper yet, so there is no captured payload to
-    // re-apply — the situation a freshly attached graph is always in. The filters
-    // used to do nothing at all until the vault next changed.
-    expect(h.renderer.lastData).toBeFalsy();
+    // Attaching asks the engine for a payload straight away, so a filter that is on
+    // is in force from the first frame. Before that, `lastData` stayed null until the
+    // vault next changed and every switch looked dead — 隐藏索引/概览/日志 included,
+    // which is on by default.
+    expect(h.renderer.lastData).not.toBeNull();
+    // Nothing is filtered yet: no switch is on in this fixture.
+    expect(Object.keys(received(h).nodes)).toEqual(["a.md", "b.md"]);
 
     h.hiddenTypes.push("concept");
     h.enhancer.refresh();
-    // The engine was asked for a fresh payload, which our wrapper then filtered.
+    // Refreshing asks again, and the wrapper filters what comes back.
     expect(Object.keys(received(h).nodes)).toEqual(["b.md"]);
   });
   it("applies a filter change without waiting for the engine to update", () => {

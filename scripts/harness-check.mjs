@@ -2096,6 +2096,91 @@ async function main() {
         `${JSON.stringify(workspace.excludedFolder)}/)`,
     );
 
+    // --- 11a-3. the structural switch, on by default -----------------------
+    // Reported: 隐藏索引/概览/日志 is on from the start, yet the vault's structural
+    // pages are still drawn. Whatever the cause, this measures the pair that has to
+    // agree — the checkbox the panel shows, and what is actually on the canvas.
+    const structural = await page.evaluate(async () => {
+      const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const tab = [...document.querySelectorAll(".enhanced-graph-panel-tabs button")].find((el) =>
+        el.textContent?.startsWith("隐藏"),
+      );
+      tab?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await sleep(400);
+
+      const rowFor = (label) =>
+        [...document.querySelectorAll(".enhanced-graph-panel .enhanced-graph-checkbox")].find((row) =>
+          row.textContent?.includes(label),
+        );
+      const box = () => rowFor("索引")?.querySelector("input[type=checkbox]") ?? null;
+      const structuralIds = window.__HARNESS__.snapshot.graph.nodes
+        .filter((node) => node.isStructural)
+        .map((node) => node.id);
+      const visibleStructural = () => {
+        const visible = new Set(window.__HARNESS__.visibleNodeIds());
+        return structuralIds.filter((id) => visible.has(id));
+      };
+
+      const atStart = {
+        setting: window.__HARNESS__.settings.hideStructural,
+        ticked: box()?.checked ?? null,
+        drawn: visibleStructural(),
+        total: structuralIds.length,
+      };
+
+      // Off: they have to come back.
+      const off = box();
+      if (off) {
+        off.checked = false;
+        off.dispatchEvent(new Event("change", { bubbles: true }));
+        await sleep(450);
+      }
+      const afterOff = {
+        setting: window.__HARNESS__.settings.hideStructural,
+        drawn: visibleStructural(),
+      };
+
+      // On again: gone again.
+      const on = box();
+      if (on) {
+        on.checked = true;
+        on.dispatchEvent(new Event("change", { bubbles: true }));
+        await sleep(450);
+      }
+      const afterOn = {
+        setting: window.__HARNESS__.settings.hideStructural,
+        drawn: visibleStructural(),
+      };
+
+      return { atStart, afterOff, afterOn };
+    });
+
+    console.log(
+      `\n  structural switch: setting ${structural.atStart.setting}, checkbox ticked ` +
+        `${structural.atStart.ticked}; drawn ${structural.atStart.drawn.length}/${structural.atStart.total} ` +
+        `(${JSON.stringify(structural.atStart.drawn)})` +
+        `; off → ${structural.afterOff.drawn.length} drawn; on → ${structural.afterOn.drawn.length} drawn\n`,
+    );
+    check(
+      "隐藏索引/概览/日志 is on by default and the structural pages are not drawn",
+      structural.atStart.setting === true &&
+        structural.atStart.ticked === true &&
+        structural.atStart.total > 0 &&
+        structural.atStart.drawn.length === 0,
+      `setting ${structural.atStart.setting}, ticked ${structural.atStart.ticked}, ` +
+        `${structural.atStart.drawn.length} of ${structural.atStart.total} structural pages drawn ` +
+        `(${JSON.stringify(structural.atStart.drawn)})`,
+    );
+    check(
+      "switching it off brings them back, and switching it on hides them again",
+      structural.afterOff.setting === false &&
+        structural.afterOff.drawn.length === structural.atStart.total &&
+        structural.afterOn.setting === true &&
+        structural.afterOn.drawn.length === 0,
+      `off → ${structural.afterOff.drawn.length}/${structural.atStart.total} drawn; ` +
+        `on → ${structural.afterOn.drawn.length} drawn`,
+    );
+
     // --- 11b. the "no matching nodes" message ------------------------------
     // It used to be a Notice fired from applySearch, which runs on every
     // keystroke — so a non-matching query stacked a column of toasts down the
