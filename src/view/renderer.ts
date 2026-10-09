@@ -25,6 +25,7 @@ import {
   nodeSize,
   themePalette,
   typeColor,
+  MARKER_DOT_RADIUS_PX,
   DEFAULT_EDGE_WIDTHS,
   type EdgeStyle,
   type GraphThemePalette,
@@ -147,9 +148,24 @@ export interface HighlightState {
    * every neighbour, but only the clicked nodes are "the thing I picked".
    */
   anchors: ReadonlySet<string>;
+  /**
+   * Nodes marked with a dot at their centre — a whole type or cluster the user
+   * right-clicked in the legend.
+   *
+   * Separate from {@link anchors} because it is a different statement: anchors ring the
+   * one or two nodes the user picked, while a group mark says "every one of these",
+   * which can be thirty nodes. A ring each would be noise; a dot at the centre does not
+   * have to match the node's drawn radius, and reads as a mark rather than a highlight.
+   */
+  dots: ReadonlySet<string>;
 }
 
-const EMPTY_HIGHLIGHT: HighlightState = { nodes: new Set(), edges: new Set(), anchors: new Set() };
+const EMPTY_HIGHLIGHT: HighlightState = {
+  nodes: new Set(),
+  edges: new Set(),
+  anchors: new Set(),
+  dots: new Set(),
+};
 
 /** The concrete graphology/sigma generic instantiation used across the plugin. */
 export type EnhancedSigmaGraph = Graph<GraphNodeAttributes, GraphEdgeAttributes, Attributes>;
@@ -334,6 +350,18 @@ export class GraphRenderer {
   }
 
   /**
+   * Replace the group marks, leaving the emphasis alone.
+   *
+   * A separate setter rather than a field on {@link setHighlight} because the two are
+   * set at different times by different gestures: a legend right-click marks a group
+   * while a focus or an insight card owns the emphasis, and neither should have to know
+   * the other's current value to avoid wiping it.
+   */
+  setDots(dots: ReadonlySet<string>): void {
+    this.setHighlight({ ...this.highlight, dots });
+  }
+
+  /**
    * Ring the nodes the user explicitly picked.
    *
    * Drawn on our own 2D layer rather than through sigma: sigma's `highlighted`
@@ -383,7 +411,8 @@ export class GraphRenderer {
     context.clearRect(0, 0, width, height);
 
     const anchors = this.highlight.anchors;
-    if (anchors.size === 0) return;
+    const dots = this.highlight.dots;
+    if (anchors.size === 0 && dots.size === 0) return;
 
     // Use the same projection sigma uses to draw the hover pill
     // (`framedGraphToViewport` + `scaleSize`). Deriving the radius by projecting
@@ -416,6 +445,33 @@ export class GraphRenderer {
       context.lineWidth = 2.5;
       context.strokeStyle = this.palette.markerRing;
       context.stroke();
+    }
+
+    // Group marks: a dot at the centre of every node of the marked type or cluster.
+    //
+    // Two discs, like the ring above and like the built-in graph's marker layer: the
+    // dark one separates the dot from whatever colour the node underneath happens to
+    // be, the bright one carries the mark. Drawn after the rings so a node that is both
+    // anchored and marked keeps its dot visible.
+    if (dots.size > 0) {
+      const markRadius = MARKER_DOT_RADIUS_PX;
+      for (const nodeId of dots) {
+        const data = sigma.getNodeDisplayData(nodeId);
+        if (!data || data.visibility === "hidden" || data.x === undefined || data.y === undefined) continue;
+        const centre =
+          projection.framedGraphToViewport?.({ x: data.x, y: data.y }) ??
+          sigma.graphToViewport({ x: data.x, y: data.y });
+
+        context.beginPath();
+        context.arc(centre.x, centre.y, markRadius, 0, Math.PI * 2);
+        context.fillStyle = this.palette.markerRingHalo;
+        context.fill();
+
+        context.beginPath();
+        context.arc(centre.x, centre.y, Math.max(1, markRadius - 2), 0, Math.PI * 2);
+        context.fillStyle = this.palette.markerRing;
+        context.fill();
+      }
     }
   }
 

@@ -2348,6 +2348,87 @@ async function main() {
         `(${emptyRows.expectedEmpty.join(", ")}); labels ${JSON.stringify(emptyRows.rows.map((r) => r.label))}`,
     );
 
+    // --- 11a-6. right-click marks a group ----------------------------------
+    // The left-click toggle must keep working, and the right-click must dot every node
+    // of that type without filtering anything.
+    const markCheck = await page.evaluate(async () => {
+      const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const visibleBefore = window.__HARNESS__.visibleNodeIds().length;
+      const rowFor = (text) =>
+        [...document.querySelectorAll(".enhanced-graph-legend-row")].find((row) =>
+          row.querySelector(".enhanced-graph-legend-label")?.textContent?.includes(text),
+        );
+      const keyOf = (node) => ((node.rawType ?? "").trim().toLowerCase() || node.type);
+      const expected = window.__HARNESS__.snapshot.graph.nodes.filter(
+        (node) => keyOf(node) === "concept",
+      ).length;
+
+      const row = rowFor("概念");
+      const paintedPixels = () => {
+        const canvas = document.querySelector("canvas.enhanced-graph-marker-layer");
+        const context = canvas?.getContext("2d");
+        if (!canvas || !context) return -1;
+        const data = context.getImageData(0, 0, canvas.width, canvas.height).data;
+        let painted = 0;
+        for (let i = 3; i < data.length; i += 4) if (data[i] > 0) painted += 1;
+        return painted;
+      };
+      const paintedBefore = paintedPixels();
+      row?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+      await sleep(400);
+      const marked = window.__HARNESS__.markedNodeIds().slice().sort();
+      const sameRow = rowFor("概念");
+      const state = {
+        marked: marked.length,
+        expected,
+        // Marking is not filtering: the same pages are still drawn.
+        visibleAfter: window.__HARNESS__.visibleNodeIds().length,
+        visibleBefore,
+        markedRow: sameRow?.classList.contains("is-marked") ?? false,
+        // The dots are painted on the overlay canvas, so the mark can be checked as ink
+        // rather than as state: pixels before, and many more after.
+        paintedBefore,
+        paintedAfter: paintedPixels(),
+      };
+
+      // Off again with the same gesture.
+      sameRow?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+      await sleep(400);
+      return {
+        ...state,
+        cleared: window.__HARNESS__.markedNodeIds().length,
+        paintedAfterClear: paintedPixels(),
+        stillMarkedRow:
+          rowFor("概念")?.classList.contains("is-marked") ?? false,
+      };
+    });
+
+    console.log(
+      `\n  group mark: right-click 概念 → ${markCheck.marked} nodes dotted ` +
+        `(expected ${markCheck.expected}); drawn ${markCheck.visibleBefore} → ${markCheck.visibleAfter}; ` +
+        `row marked ${markCheck.markedRow}; ink ${markCheck.paintedBefore} → ${markCheck.paintedAfter} → ` +
+        `${markCheck.paintedAfterClear} px; second right-click → ${markCheck.cleared} dotted\n`,
+    );
+    check(
+      "right-clicking a legend row dots every node of that type, without filtering",
+      markCheck.marked === markCheck.expected &&
+        markCheck.expected > 0 &&
+        markCheck.visibleAfter === markCheck.visibleBefore &&
+        markCheck.markedRow &&
+        markCheck.cleared === 0 &&
+        !markCheck.stillMarkedRow,
+      `${markCheck.marked}/${markCheck.expected} dotted, drawn ${markCheck.visibleBefore} → ` +
+        `${markCheck.visibleAfter}, row marked ${markCheck.markedRow} → cleared ${markCheck.cleared}`,
+    );
+    check(
+      "the dots are actually painted, and go away again",
+      markCheck.paintedBefore === 0 &&
+        markCheck.paintedAfter > 100 &&
+        markCheck.paintedAfterClear === 0,
+      `overlay canvas ink: ${markCheck.paintedBefore} px before, ${markCheck.paintedAfter} px while marked, ` +
+        `${markCheck.paintedAfterClear} px after clearing`,
+    );
+
     // --- 11b. the "no matching nodes" message ------------------------------
     // It used to be a Notice fired from applySearch, which runs on every
     // keystroke — so a non-matching query stacked a column of toasts down the

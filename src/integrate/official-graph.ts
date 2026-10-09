@@ -279,6 +279,14 @@ export class OfficialGraphEnhancer {
   /** Toolbar state: the search box and which panel is open. */
   private searchQuery = "";
   /**
+   * The type or cluster the user right-clicked in the legend, and the nodes it dots.
+   *
+   * Held here rather than per attachment so the mark survives the graph view being
+   * closed and reopened, the way the panel mode does.
+   */
+  private markedGroup: { kind: "type" | "community"; key: string } | null = null;
+  private markedNodes: ReadonlySet<string> = new Set();
+  /**
    * Which panel the toolbar has open.
    *
    * Starts on the insights because that is what the panel shows before anything
@@ -847,6 +855,25 @@ export class OfficialGraphEnhancer {
         void this.deps.onSetVisibility({ hiddenTypes: [...next] });
       },
       onShowAllTypes: () => void this.deps.onSetVisibility({ hiddenTypes: [] }),
+      // Right-click: dot every page of that type on the graph. Not a filter — nothing is
+      // hidden and nothing is rebuilt — and it toggles, so the same gesture clears it.
+      onMarkType: (type) => {
+        const ids = [...this.visibleNodeIds()]
+          .map((id) => graph.nodes.find((node) => node.id === id))
+          .filter((node): node is GraphNode => node !== undefined)
+          .filter((node) => nodeTypeKey(node) === type)
+          .map((node) => node.id);
+        this.setMarkedGroup({ kind: "type", key: type }, ids);
+      },
+      onMarkCommunity: (id) => {
+        const members = graph.communities.find((community) => community.id === id);
+        const visible = this.visibleNodeIds();
+        this.setMarkedGroup(
+          { kind: "community", key: String(id) },
+          (members?.nodeIds ?? []).filter((nodeId) => visible.has(nodeId)),
+        );
+      },
+      marked: this.markedGroup,
       onToggleCommunity: (id) => {
         const next = new Set(this.deps.getVisibility().hiddenCommunities);
         if (next.has(id)) next.delete(id);
@@ -1541,7 +1568,10 @@ export class OfficialGraphEnhancer {
    * the graph moved under them.
    */
   private marksAreDrawn(): boolean {
-    return this.attachments.size > 0 && (this.hasFocus() || this.searchQuery !== "");
+    return (
+      this.attachments.size > 0 &&
+      (this.hasFocus() || this.searchQuery !== "" || this.markedNodes.size > 0)
+    );
   }
 
   /** Keep the marker ticker running exactly while there is something to keep in step. */
@@ -1605,7 +1635,7 @@ export class OfficialGraphEnhancer {
     if (!attachment) return;
     const query = this.searchQuery;
     const hasFocus = Boolean(focused && focused.size > 0);
-    if (!hasFocus && query === "") {
+    if (!hasFocus && query === "" && this.markedNodes.size === 0) {
       attachment.markers.draw([], [], this.markerPalette());
       return;
     }
@@ -1673,6 +1703,15 @@ export class OfficialGraphEnhancer {
         if (!position) continue;
         points.push({ x: position.x, y: position.y, radius: MARKER_RADIUS_PX });
       }
+    }
+
+    // And the group the user right-clicked in the legend: every page of that type or
+    // cluster, dotted where it is. Same mark, same reason — it points at a set instead
+    // of hiding everything else, so the group can be seen in its surroundings.
+    for (const id of this.markedNodes) {
+      const position = screenOf(id);
+      if (!position) continue;
+      points.push({ x: position.x, y: position.y, radius: MARKER_RADIUS_PX });
     }
 
     attachment.markers.draw(points, lines, this.markerPalette());
@@ -1827,6 +1866,31 @@ export class OfficialGraphEnhancer {
       console.error("[enhanced-graph] filtering the built-in graph failed:", error);
       return payload;
     }
+  }
+
+  /**
+   * Toggle the group mark: the same row again clears it, a different row replaces it.
+   *
+   * Redrawing goes through the marker ticker, so the dots keep following pan and zoom
+   * exactly as the focus marks do.
+   */
+  private setMarkedGroup(
+    group: { kind: "type" | "community"; key: string },
+    ids: readonly string[],
+  ): void {
+    const same = this.markedGroup?.kind === group.kind && this.markedGroup.key === group.key;
+    this.markedGroup = same ? null : group;
+    this.markedNodes = same ? new Set() : new Set(ids);
+    this.syncMarkerTicker();
+    for (const attachment of this.attachments.values()) {
+      this.drawMarkers(attachment.renderer);
+      attachment.legend.render();
+    }
+  }
+
+  /** The dotted nodes, for hosts that report what is marked. */
+  markedNodeIds(): readonly string[] {
+    return [...this.markedNodes];
   }
 
   /**

@@ -74,6 +74,17 @@ export function communityColor(community: number): string {
   return COMMUNITY_COLORS[community % COMMUNITY_COLORS.length];
 }
 
+/**
+ * Radius of a mark dot, in CSS pixels.
+ *
+ * A dot pinned at a node's centre does not have to match the node: the position is
+ * known and the size is ours to choose. Deriving it from the drawn radius was tried
+ * and dropped — the renderer does not expose that radius, so every formula was
+ * guesswork against what was on screen. Shared so the standalone view and the
+ * built-in graph mark a group the same way.
+ */
+export const MARKER_DOT_RADIUS_PX = 6;
+
 export function typeColor(type: string): string {
   if (Object.prototype.hasOwnProperty.call(NODE_TYPE_COLORS, type)) {
     return NODE_TYPE_COLORS[type as PageType];

@@ -216,6 +216,8 @@ interface HarnessApi {
   clickStage(): void;
   /** Node ids the view currently draws (after type/tag/structural filters). */
   visibleNodeIds(): string[];
+  /** Node ids the legend's right-click dotted on the graph. */
+  markedNodeIds(): string[];
   /** The node sigma's hit test currently reports under the pointer. */
   hoveredNode(): string | null;
   /**
@@ -339,6 +341,10 @@ const api: HarnessApi = {
   visibleNodeIds() {
     const nodes = (view as unknown as { visibleNodes(): Array<{ id: string }> }).visibleNodes();
     return nodes.map((node) => node.id);
+  },
+  markedNodeIds() {
+    const marked = (view as unknown as { markedNodeIds?: () => string[] }).markedNodeIds;
+    return marked ? marked.call(view) : [];
   },
   hoveredNode() {
     const renderer = (view as unknown as { renderer?: { hoveredNode?: string | null } }).renderer;

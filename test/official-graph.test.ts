@@ -238,7 +238,13 @@ function setup(
   const renderer = new FakeOfficialRenderer(ids);
   const graph = makeGraph(
     graphNodes,
-    [makeCommunity(0), makeCommunity(1)],
+    // Membership derived from the nodes, as a real build's is: a cluster row's
+    // right-click marks its members, so an empty `nodeIds` would make that path
+    // untestable and, worse, would look like it worked.
+    [0, 1].map((id) => {
+      const members = graphNodes.filter((node) => node.community === id);
+      return { ...makeCommunity(id, members.length), nodeIds: members.map((node) => node.id) };
+    }),
     [],
     workspace.folders ?? [],
   );
@@ -463,6 +469,129 @@ describe("OfficialGraphEnhancer colouring", () => {
     h.enhancer.start();
 
     expect(Object.keys(received(h).nodes)).toEqual(["b.md", "c.md"]);
+  });
+
+  it("dots every page of a type on right-click, and clears on the second one", async () => {
+    // The request: left-click keeps excluding the type, right-click marks where its
+    // pages are — a dot at the centre of each, on the graph.
+    const draw = vi.spyOn(OfficialMarkerLayer.prototype, "draw").mockImplementation(() => {});
+    try {
+      const h = setup(
+        [{ id: "a.md" }, { id: "b.md" }, { id: "c.md" }],
+        [
+          makeNode({ id: "a", type: "concept" }),
+          makeNode({ id: "b", type: "concept" }),
+          makeNode({ id: "c", type: "entity" }),
+        ],
+        "type",
+      );
+      h.enhancer.start();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      const legendEl = h.renderer.containerEl.querySelector<HTMLElement>(".enhanced-graph-official-legend")!;
+      const rowFor = (label: string): HTMLElement =>
+        Array.from(legendEl.querySelectorAll<HTMLElement>(".enhanced-graph-legend-row")).find(
+          (row) => row.textContent?.includes(label),
+        )!;
+      const dots = (): Array<{ x: number; y: number; radius: number }> => {
+        const calls = draw.mock.calls;
+        return (calls[calls.length - 1]?.[0] ?? []) as Array<{ x: number; y: number; radius: number }>;
+      };
+
+      const concept = rowFor(t("type.concept"));
+      concept.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+      // Exactly the two concept pages, each with a finite screen position and the
+      // shared dot radius — the pages of the other type are not marked.
+      expect([...h.enhancer.markedNodeIds()].sort()).toEqual(["a", "b"]);
+      expect(dots()).toHaveLength(2);
+      for (const dot of dots()) {
+        expect(Number.isFinite(dot.x) && Number.isFinite(dot.y)).toBe(true);
+        expect(dot.radius).toBe(MARKER_RADIUS_PX);
+      }
+      // The row says it is the one being pointed at, and nothing was filtered: this is
+      // not the left-click gesture. Re-queried, because marking re-renders the legend
+      // and the element captured before the click is detached.
+      expect(rowFor(t("type.concept")).classList.contains("is-marked")).toBe(true);
+      expect(h.hiddenTypes).toEqual([]);
+
+      // Right-clicking the same row takes the dots away again.
+      rowFor(t("type.concept")).dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
+      );
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      expect(h.enhancer.markedNodeIds()).toEqual([]);
+      expect(dots()).toHaveLength(0);
+      // A mark keeps the marker ticker running; stop it so nothing outlives the test.
+      h.enhancer.stop();
+    } finally {
+      draw.mockRestore();
+    }
+  });
+
+  it("keeps the left-click toggle working alongside the right-click mark", async () => {
+    const h = setup(
+      [{ id: "a.md" }, { id: "b.md" }],
+      [makeNode({ id: "a", type: "concept" }), makeNode({ id: "b", type: "entity" })],
+      "type",
+    );
+    h.enhancer.start();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const legendEl = h.renderer.containerEl.querySelector<HTMLElement>(".enhanced-graph-official-legend")!;
+    const rowFor = (label: string): HTMLElement =>
+      Array.from(legendEl.querySelectorAll<HTMLElement>(".enhanced-graph-legend-row")).find(
+        (row) => row.textContent?.includes(label),
+      )!;
+
+    rowFor(t("type.concept")).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    rowFor(t("type.concept")).dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // Both gestures did their own thing: the type is excluded AND was marked.
+    expect(h.hiddenTypes).toEqual(["concept"]);
+    expect(h.enhancer.markedNodeIds()).toEqual(["a"]);
+    h.enhancer.stop();
+  });
+
+  it("dots a cluster's members on right-click too", async () => {
+    // The request names clusters as well as types. Membership lives on the graph's
+    // community list rather than on the nodes, so this is a different lookup — and the
+    // legend switches to cluster rows only in community colour mode.
+    const draw = vi.spyOn(OfficialMarkerLayer.prototype, "draw").mockImplementation(() => {});
+    try {
+      const h = setup(
+        [{ id: "a.md" }, { id: "b.md" }, { id: "c.md" }],
+        [
+          makeNode({ id: "a", community: 0 }),
+          makeNode({ id: "b", community: 0 }),
+          makeNode({ id: "c", community: 1 }),
+        ],
+        "community",
+      );
+      h.enhancer.start();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      const legend = h.renderer.containerEl.querySelector<HTMLElement>(
+        ".enhanced-graph-official-legend",
+      )!;
+      const row = Array.from(
+        legend.querySelectorAll<HTMLElement>(".enhanced-graph-legend-row"),
+      )[0];
+      row.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect([...h.enhancer.markedNodeIds()].sort()).toEqual(["a", "b"]);
+      const calls = draw.mock.calls;
+      const points = calls[calls.length - 1]?.[0] ?? [];
+      expect(points).toHaveLength(2);
+      expect(points.every((point) => point.radius === MARKER_RADIUS_PX)).toBe(true);
+      // Still a mark, not a filter: the cluster is not hidden.
+      expect(h.hiddenCommunities).toEqual([]);
+      h.enhancer.stop();
+    } finally {
+      draw.mockRestore();
+    }
   });
 
   it("leaves virtual and unknown nodes untouched", () => {

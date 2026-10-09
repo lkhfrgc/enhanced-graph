@@ -114,6 +114,14 @@ export class EnhancedGraphView extends ItemView {
   private insightSection: InsightSection = "connections";
   /** Filter group the user is looking at, in this view's filters tab. */
   private filterSection: FilterSection = "types";
+  /**
+   * The type or cluster the user right-clicked in the legend, and the nodes it dots.
+   *
+   * Separate from the highlight: clicking an insight card or focusing a node changes what
+   * is emphasised, and neither should silently drop a mark the user placed.
+   */
+  private markedGroup: { kind: "type" | "community"; key: string } | null = null;
+  private markedNodes: ReadonlySet<string> = new Set();
 
   private highlightNodes: ReadonlySet<string> = new Set<string>();
   private highlightEdges: ReadonlySet<string> = new Set<string>();
@@ -732,7 +740,10 @@ export class EnhancedGraphView extends ItemView {
   ): void {
     this.highlightNodes = nodes;
     this.highlightEdges = edges;
-    this.renderer?.setHighlight({ nodes, edges, anchors });
+    // The group mark is carried through every emphasis change: it is a separate
+    // statement ("this is where those pages are"), and an insight card or a focus
+    // would otherwise silently wipe it — see `setDots`.
+    this.renderer?.setHighlight({ nodes, edges, anchors, dots: this.markedNodes });
   }
 
   private clearHighlight(): void {
@@ -834,6 +845,9 @@ export class EnhancedGraphView extends ItemView {
       // other rule (the workspace, 隐藏索引/概览/日志, a tag, a cluster) reads as empty
       // instead of showing a colour and a count it does not have on screen.
       visibleTypes: new Set(this.visibleGraph().nodes.map((node) => nodeTypeKey(node))),
+      onMarkType: (type) => void this.markType(type),
+      onMarkCommunity: (id) => void this.markCommunity(id),
+      marked: this.markedGroup,
       onToggleType: (type) => {
         if (this.hiddenTypes.has(type)) this.hiddenTypes.delete(type);
         else this.hiddenTypes.add(type);
@@ -849,6 +863,46 @@ export class EnhancedGraphView extends ItemView {
       onToggleCommunity: (id) => void this.toggleCommunity(id),
       onShowAllCommunities: () => void this.showAllCommunities(),
     });
+  }
+
+  /**
+   * Right-click on a legend row: dot every node of that type or cluster.
+   *
+   * Not a filter — nothing is hidden, nothing is rebuilt. It answers "where are they?"
+   * for a group the user can name but not point at, and it toggles, so the same gesture
+   * takes the dots away again. Only the nodes currently drawn are marked: pointing at
+   * pages that are not on screen says nothing.
+   */
+  private markType(type: string): void {
+    const ids = this.visibleGraph()
+      .nodes.filter((node) => nodeTypeKey(node) === type)
+      .map((node) => node.id);
+    this.setMarkedGroup({ kind: "type", key: type }, ids);
+  }
+
+  private markCommunity(id: number): void {
+    const members = this.graph.communities.find((community) => community.id === id);
+    const visible = this.visibleGraph().nodeIndex;
+    const ids = (members?.nodeIds ?? []).filter((nodeId) => visible.has(nodeId));
+    this.setMarkedGroup({ kind: "community", key: String(id) }, ids);
+  }
+
+  /** Toggle the mark: the same row again clears it, a different row replaces it. */
+  private setMarkedGroup(
+    group: { kind: "type" | "community"; key: string },
+    ids: readonly string[],
+  ): void {
+    const same = this.markedGroup?.kind === group.kind && this.markedGroup.key === group.key;
+    this.markedGroup = same ? null : group;
+    this.markedNodes = same ? new Set() : new Set(ids);
+    this.renderer?.setDots(this.markedNodes);
+    this.renderLegend();
+    this.renderStatus();
+  }
+
+  /** The dotted nodes, for hosts that report what is marked. */
+  markedNodeIds(): readonly string[] {
+    return [...this.markedNodes];
   }
 
   /**

@@ -39,6 +39,17 @@ export interface LegendGestures {
   readonly onShowAllTypes?: () => void;
   readonly onToggleCommunity?: (id: number) => void;
   readonly onShowAllCommunities?: () => void;
+  /**
+   * Right-click: mark every node of this type or cluster with a dot on the graph.
+   *
+   * A separate gesture from the left-click toggle, and a separate statement: the toggle
+   * takes the group off the graph, the mark points at where it is. Marking is not a
+   * filter — it changes nothing about what is drawn, only what is pointed at.
+   */
+  readonly onMarkType?: (type: string) => void;
+  readonly onMarkCommunity?: (id: number) => void;
+  /** The group currently marked, so its row can show that it is the one being pointed at. */
+  readonly marked?: { readonly kind: "type" | "community"; readonly key: string } | null;
 }
 
 export interface LegendOptions extends LegendGestures {
@@ -66,6 +77,7 @@ export interface LegendOptions extends LegendGestures {
 
 export function renderLegend(container: HTMLElement, options: LegendOptions): void {
   const { graph, colorMode, hiddenTypes, hiddenCommunities } = options;
+  const marked = options.marked ?? null;
   // The body is the box that scrolls, and it is rebuilt on every render: clicking
   // a row re-renders so the row can come back shaded. Emptying the container takes
   // the body — and its scroll position — with it, which scrolled the list back to
@@ -142,12 +154,24 @@ function renderTypeRows(body: HTMLElement, options: LegendOptions): void {
     row.createSpan({ cls: "enhanced-graph-legend-count", text: String(count) });
     if (!drawn) row.title = t("legend.typeEmpty", { count: String(count) });
     const toggle = options.onToggleType;
-    if (toggle) {
+    const mark = options.onMarkType;
+    if (toggle || mark) {
       row.addClass("is-interactive");
-      if (drawn) row.title = t("legend.hint");
+      if (drawn) row.title = mark ? t("legend.hintMark") : t("legend.hint");
+      if (options.marked?.kind === "type" && options.marked.key === key) {
+        row.addClass("is-marked");
+        row.title = t("legend.hintUnmark");
+      }
       // A click, like the cluster rows: one gesture for both groups, and the
       // hidden row stays in place (shaded) so it can be clicked straight back.
-      row.addEventListener("click", () => toggle(key));
+      if (toggle) row.addEventListener("click", () => toggle(key));
+      if (mark) {
+        // Right-click points at the group instead: the row is the only place that
+        // knows what a group *is*, so this is where "show me where they are" belongs.
+        row.addEventListener("contextmenu", (event) => {
+          event.preventDefault();
+          mark(key);
+        });      }
     }
   }
 }
@@ -186,12 +210,22 @@ function renderCommunityRows(body: HTMLElement, options: LegendOptions): void {
     if (community.isSparse) setIcon(cohesion.createSpan({ cls: "enhanced-graph-legend-warn" }), "alert-triangle");
 
     const toggle = options.onToggleCommunity;
-    if (toggle) {
+    const mark = options.onMarkCommunity;
+    if (toggle || mark) {
       row.addClass("is-interactive");
-      row.title = t("legend.hintCluster");
-      row.addEventListener("click", () => toggle(community.id));
+      row.title = mark ? t("legend.hintMarkCluster") : t("legend.hintCluster");
+      if (options.marked?.kind === "community" && options.marked.key === String(community.id)) {
+        row.addClass("is-marked");
+        row.title = t("legend.hintUnmark");
+      }
+      if (toggle) row.addEventListener("click", () => toggle(community.id));
+      if (mark) {
+        row.addEventListener("contextmenu", (event) => {
+          event.preventDefault();
+          mark(community.id);
+        });
+      }
     }
   }
 }
 
-/** Nodes per page type, over the whole graph (not the filtered view). */
