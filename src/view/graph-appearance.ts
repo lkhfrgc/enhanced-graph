@@ -56,6 +56,8 @@ export interface AppearanceOptions {
   readonly colorMode: ColorMode;
   readonly customNodeColor: string;
   readonly typeColorOverrides: Readonly<Record<string, string>>;
+  /** The vault's type-to-colour assignment, so a custom type's row matches the canvas. */
+  readonly typeColors?: ReadonlyMap<string, string>;
   readonly communityColorOverrides: Readonly<Record<string, string>>;
   readonly nodeScale: number;
   readonly gravity: number;
@@ -204,7 +206,7 @@ function renderTypeColors(section: HTMLElement, options: AppearanceOptions): voi
 
   for (const { key, label } of types) {
     const override = options.typeColorOverrides[key];
-    const effective = override || typeColor(key);
+    const effective = override || options.typeColors?.get(key) || typeColor(key);
     colourRow(
       section,
       typeLabel(key, label),

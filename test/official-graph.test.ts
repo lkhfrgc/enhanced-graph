@@ -20,7 +20,7 @@ import "../harness/dom-polyfill";
 import { MARKER_RADIUS_PX, FOCUS_EDGE_DRAWN, GRAPH_MENU_SOURCE, SAFETY_NET_MS } from "../src/integrate/official-graph";
 import { OfficialMarkerLayer } from "../src/integrate/official-markers";
 import { t } from "../src/i18n";
-import { typeColor } from "../src/view/palette";
+import { assignTypeColors, typeColor } from "../src/view/palette";
 import {
   OfficialGraphEnhancer,
   OFFICIAL_GRAPH_VIEW_TYPES,
@@ -48,6 +48,29 @@ vi.mock("obsidian", () => ({
     el.setAttribute("data-icon", icon);
   },
 }));
+
+/**
+ * Stop every enhancer a test started.
+ *
+ * `start()` arms a safety-net interval, and only `stop()` clears it. A test that leaves
+ * one running keeps it firing after jsdom has been torn down, where `tick()` reaches for
+ * `document` and throws: measured, that surfaced as 4 uncaught `document is not defined`
+ * errors in roughly one full run in four, which failed `npm run verify` at random.
+ *
+ * Recorded by wrapping `start` rather than by asking each test to remember, because the
+ * ones that build their own enhancer are exactly the ones that forget.
+ */
+const startedEnhancers = new Set<OfficialGraphEnhancer>();
+const originalStart = OfficialGraphEnhancer.prototype.start;
+OfficialGraphEnhancer.prototype.start = function start(this: OfficialGraphEnhancer): void {
+  startedEnhancers.add(this);
+  originalStart.call(this);
+};
+
+afterEach(() => {
+  for (const enhancer of startedEnhancers) enhancer.stop();
+  startedEnhancers.clear();
+});
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -435,7 +458,10 @@ describe("OfficialGraphEnhancer colouring", () => {
 
   it("gives a custom type its own colour instead of the one for `other`", () => {
     // A custom type normalises to `other`; before, every custom type in the vault
-    // shared that colour, so the built-in graph could not tell them apart either.
+    // shared that colour, so the built-in graph could not tell them apart either. The
+    // colour comes from the vault's assignment rather than a hash of the name: a hash
+    // cannot know what else is present, and two custom types collided about as often as
+    // not — measured on a real vault, 13 declared types produced 12 colours.
     const h = setup(
       [{ id: "a.md" }, { id: "b.md" }],
       [
@@ -446,10 +472,11 @@ describe("OfficialGraphEnhancer colouring", () => {
     );
     h.enhancer.start();
 
+    const assignment = assignTypeColors(["实验记录", "读书笔记"]);
     const experiment = h.renderer.nodeLookup["a.md"].color?.rgb;
     const reading = h.renderer.nodeLookup["b.md"].color?.rgb;
-    expect(experiment).toBe(hexToRgbInt(typeColor("实验记录")));
-    expect(reading).toBe(hexToRgbInt(typeColor("读书笔记")));
+    expect(experiment).toBe(hexToRgbInt(assignment.get("实验记录")!));
+    expect(reading).toBe(hexToRgbInt(assignment.get("读书笔记")!));
     // The point: neither is painted as plain `other`, and they differ from each other.
     expect(experiment).not.toBe(hexToRgbInt(NODE_TYPE_COLORS.other));
     expect(reading).not.toBe(hexToRgbInt(NODE_TYPE_COLORS.other));

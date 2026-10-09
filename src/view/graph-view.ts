@@ -64,11 +64,13 @@ import {
 } from "./layout";
 import {
   collectTags,
+  collectTypes,
   filterEdges,
   filterNodes,
   nodeTypeKey,
   type VisibilityFilters,
 } from "./visibility";
+import { assignTypeColors, nodeColorForMode } from "./palette";
 
 /**
  * ForceAtlas2 steps taken per gravity-drag event.
@@ -122,6 +124,13 @@ export class EnhancedGraphView extends ItemView {
    */
   private markedGroup: { kind: "type" | "community"; key: string } | null = null;
   private markedNodes: ReadonlySet<string> = new Set();
+  /**
+   * One colour per declared type in the current graph, from `assignTypeColors`.
+   *
+   * Per graph rather than per key: two custom types hashing to the same ramp entry was
+   * the normal case, and no per-key function can know what else is on screen.
+   */
+  private typeColors: ReadonlyMap<string, string> = new Map();
 
   private highlightNodes: ReadonlySet<string> = new Set<string>();
   private highlightEdges: ReadonlySet<string> = new Set<string>();
@@ -195,6 +204,9 @@ export class EnhancedGraphView extends ItemView {
     this.graph = graph;
     this.insights = insights;
     this.building = false;
+    // One colour per declared type, all different — recomputed with the graph, because
+    // which types share the ramp depends on which types are present.
+    this.typeColors = assignTypeColors(collectTypes(graph.nodes).map((type) => type.key));
     if (this.positionCache) {
       this.positionCache.prune(new Set(graph.nodes.map((node) => node.id)));
     }
@@ -446,6 +458,7 @@ export class EnhancedGraphView extends ItemView {
       labelOpacity: this.plugin.settings.labelOpacity,
       customNodeColor: this.plugin.settings.customNodeColor,
       typeColorOverrides: this.plugin.settings.typeColorOverrides,
+      typeColors: this.typeColors,
       communityColorOverrides: this.plugin.settings.communityColorOverrides,
     };
 
@@ -582,6 +595,7 @@ export class EnhancedGraphView extends ItemView {
           community: node.community,
           colorMode: this.colorMode,
           label: node.label,
+          typeColors: this.typeColors,
         }),
       );
     }
@@ -840,6 +854,7 @@ export class EnhancedGraphView extends ItemView {
       colorMode: this.colorMode,
       customNodeColor: this.plugin.settings.customNodeColor,
       typeColorOverrides: this.plugin.settings.typeColorOverrides,
+      typeColors: this.typeColors,
       hiddenTypes: this.hiddenTypes,
       // What is actually on the canvas, so a type whose pages are all excluded by some
       // other rule (the workspace, 隐藏索引/概览/日志, a tag, a cluster) reads as empty
@@ -1125,6 +1140,7 @@ export class EnhancedGraphView extends ItemView {
       colorMode: this.colorMode,
       customNodeColor: this.plugin.settings.customNodeColor,
       typeColorOverrides: this.plugin.settings.typeColorOverrides,
+      typeColors: this.typeColors,
       communityColorOverrides: this.plugin.settings.communityColorOverrides,
       nodeScale: this.plugin.settings.nodeScale,
       gravity: this.plugin.settings.gravity,

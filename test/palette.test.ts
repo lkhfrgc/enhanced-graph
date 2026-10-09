@@ -15,9 +15,11 @@ import { describe, expect, it } from "vitest";
 import {
   NODE_TYPE_COLORS,
   COMMUNITY_COLORS,
+  CUSTOM_TYPE_COLORS,
   DEFAULT_EDGE_WIDTHS,
   EDGE_STRONG_PRESETS,
   EDGE_WIDTH_SCALE_RANGE,
+  assignTypeColors,
   edgeAlphaForWeight,
   edgeColorForWeight,
   edgeWidthForWeight,
@@ -341,6 +343,105 @@ describe("nodeColorForMode with per-type and per-community overrides", () => {
 
   it("treats an empty override string as no override", () => {
     expect(nodeColorForMode({ ...base, typeOverrides: { entity: "" } })).toBe(NODE_TYPE_COLORS.entity);
+  });
+});
+
+describe("assignTypeColors", () => {
+  it("gives every declared type its own colour, custom ones included", () => {
+    // The measured bug this replaces: a hash per key cannot know what else is on screen,
+    // so on a real vault 13 declared types produced 12 colours — 实体 and 资料 identical.
+    const keys = [
+      "concept",
+      "entity",
+      "source",
+      "methodology",
+      "synthesis",
+      "comparison",
+      "finding",
+      "thesis",
+      "other",
+      "overview",
+      "实体",
+      "概念",
+      "资料",
+    ];
+    const assignment = assignTypeColors(keys);
+    const colours = keys.map((key) => assignment.get(key));
+    expect(colours.every((colour) => typeof colour === "string")).toBe(true);
+    expect(new Set(colours).size).toBe(keys.length);
+  });
+
+  it("keeps the semantic colour for a canonical type", () => {
+    const assignment = assignTypeColors(["concept", "实验记录"]);
+    expect(assignment.get("concept")).toBe(NODE_TYPE_COLORS.concept);
+  });
+
+  it("does not hand a custom type a colour a canonical type already owns", () => {
+    const assignment = assignTypeColors(["concept", "实验记录", "读书笔记"]);
+    const canonical = new Set(Object.values(NODE_TYPE_COLORS));
+    expect(canonical.has(assignment.get("实验记录")!)).toBe(false);
+    expect(canonical.has(assignment.get("读书笔记")!)).toBe(false);
+  });
+
+  it("is deterministic: the same vault gets the same colours in any order", () => {
+    const keys = ["实验记录", "读书笔记", "concept", "随笔"];
+    const forwards = assignTypeColors(keys);
+    const backwards = assignTypeColors([...keys].reverse());
+    for (const key of keys) expect(backwards.get(key)).toBe(forwards.get(key));
+  });
+
+  it("assigns the ramp in a fixed order, so a colour means one type", () => {
+    const assignment = assignTypeColors(["实验记录", "读书笔记"]);
+    // Keys are sorted by code unit (实 U+5B9E, 读 U+8BFB), and each takes the next free
+    // ramp entry rather than a hash slot — so the assignment is reproducible, not lucky.
+    expect(assignment.get("实验记录")).toBe(CUSTOM_TYPE_COLORS[0]);
+    expect(assignment.get("读书笔记")).toBe(CUSTOM_TYPE_COLORS[1]);
+  });
+
+  it("keeps ten custom types apart, where a name hash managed five", () => {
+    // Names of the kind a vault invents. Measured: hashing each name gave 5 distinct
+    // colours for these ten (5 collisions), the assignment gives 10.
+    const keys = [
+      "实验记录", "读书笔记", "随笔", "会议纪要", "灵感",
+      "待办", "项目", "周报", "论文笔记", "课程",
+    ];
+    const assignment = assignTypeColors(keys);
+    const colours = keys.map((key) => assignment.get(key));
+    expect(new Set(colours).size).toBe(keys.length);
+  });
+
+  it("wraps when a vault declares more custom types than the ramp has", () => {
+    const keys = Array.from({ length: CUSTOM_TYPE_COLORS.length + 2 }, (_, i) => `type-${i}`);
+    const assignment = assignTypeColors(keys);
+    const colours = keys.map((key) => assignment.get(key));
+    // Everything is coloured; the ramp is exhausted, so the last two repeat. Documented
+    // rather than hidden: there is no answer that is both distinct and this long.
+    expect(colours.every((colour) => typeof colour === "string")).toBe(true);
+    expect(new Set(colours).size).toBe(CUSTOM_TYPE_COLORS.length);
+  });
+
+  it("gives a custom type its assigned colour through nodeColorForMode", () => {
+    const assignment = assignTypeColors(["实验记录"]);
+    expect(
+      nodeColorForMode({
+        colorMode: "type",
+        pageType: "实验记录",
+        community: 0,
+        customColor: "#ff8800",
+        typeColors: assignment,
+      }),
+    ).toBe(assignment.get("实验记录"));
+    // An override still wins over the assignment.
+    expect(
+      nodeColorForMode({
+        colorMode: "type",
+        pageType: "实验记录",
+        community: 0,
+        customColor: "#ff8800",
+        typeColors: assignment,
+        typeOverrides: { 实验记录: "#123456" },
+      }),
+    ).toBe("#123456");
   });
 });
 

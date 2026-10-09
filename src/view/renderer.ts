@@ -120,6 +120,13 @@ export interface RendererOptions {
   customNodeColor: string;
   /** Per-page-type colour overrides, keyed by page type. */
   typeColorOverrides: Readonly<Record<string, string>>;
+  /**
+   * The colours assigned to this graph's declared types, from `assignTypeColors`.
+   *
+   * Needed here rather than computed per node: the assignment depends on which types are
+   * present, so it is a property of the graph, not of a key.
+   */
+  typeColors: ReadonlyMap<string, string>;
   /** Per-community colour overrides, keyed by community id. */
   communityColorOverrides: Readonly<Record<number, string>>;
 }
@@ -195,6 +202,7 @@ export class GraphRenderer {
     labelOpacity: 1,
     customNodeColor: "#60a5fa",
     typeColorOverrides: {},
+    typeColors: new Map(),
     communityColorOverrides: {},
   };
   private tooltip: HTMLElement | null = null;
@@ -489,6 +497,7 @@ export class GraphRenderer {
       colorModeChanged ||
       next.customNodeColor !== this.options.customNodeColor ||
       next.typeColorOverrides !== this.options.typeColorOverrides ||
+      next.typeColors !== this.options.typeColors ||
       next.communityColorOverrides !== this.options.communityColorOverrides;
     const labelsChanged = next.showLabels !== this.options.showLabels;
     const sizeChanged = next.nodeCount !== this.options.nodeCount;
@@ -566,6 +575,7 @@ export class GraphRenderer {
       community: attributes.community,
       customColor: this.options.customNodeColor,
       typeOverrides: this.options.typeColorOverrides,
+      typeColors: this.options.typeColors,
       communityOverrides: this.options.communityColorOverrides,
     });
   }
@@ -1033,12 +1043,17 @@ export function toNodeAttributes(input: {
   community: number;
   colorMode: ColorMode;
   label: string;
+  /** The vault's type→colour assignment, so custom types get their own colour. */
+  typeColors?: ReadonlyMap<string, string>;
 }): GraphNodeAttributes {
   return {
     x: input.x,
     y: input.y,
     size: nodeSize(input.linkCount, input.maxLinkCount, input.nodeCount, input.nodeScale),
-    color: input.colorMode === "community" ? communityColor(input.community) : typeColor(input.pageType),
+    color:
+      input.colorMode === "community"
+        ? communityColor(input.community)
+        : input.typeColors?.get(input.pageType) ?? typeColor(input.pageType),
     label: input.label,
     pageType: input.pageType,
     pageTitle: input.pageTitle,

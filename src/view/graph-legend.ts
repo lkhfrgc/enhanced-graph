@@ -59,6 +59,8 @@ export interface LegendOptions extends LegendGestures {
   readonly customNodeColor: string;
   /** Per-type colour overrides, so the swatches match the canvas. */
   readonly typeColorOverrides: Readonly<Record<string, string>>;
+  /** The vault's type-to-colour assignment, so a custom type's swatch matches. */
+  readonly typeColors?: ReadonlyMap<string, string>;
   /** Hidden types, keyed by what the user declared (a canonical id also matches). */
   readonly hiddenTypes: ReadonlySet<string>;
   /**
@@ -146,6 +148,7 @@ function renderTypeRows(body: HTMLElement, options: LegendOptions): void {
           community: 0,
           customColor: options.customNodeColor,
           typeOverrides: options.typeColorOverrides,
+          typeColors: options.typeColors,
         });
     row.createSpan({
       cls: "enhanced-graph-legend-label",

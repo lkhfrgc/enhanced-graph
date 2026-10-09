@@ -63,15 +63,75 @@ export const COMMUNITY_COLORS: readonly string[] = [
   "#bd6aa4",
 ];
 
-/** Used when a page type is not in the canonical set. */
-const FALLBACK_TYPE_COLORS = [
-  "#cb6569", "#bd8147", "#7e8a3a", "#3d9f6e",
-  "#00979f", "#009ad4", "#757eca", "#c573ad",
+/**
+ * Colours for page types the plugin does not know — the ones a vault invents.
+ *
+ * Searched rather than hand-spread (`npm run palette` prints the numbers). The eight
+ * colours this replaces were fine among themselves — worst pair ΔE 29.5 — and bad next
+ * to the semantic palette: one sat ΔE 4.4 from `query`, so a custom type and a known one
+ * were painted the same colour. A rigid ramp cannot know what it will sit beside, so the
+ * generator sweeps hue, lightness and chroma and keeps only what clears ΔE 19 of the
+ * other entries AND ΔE 15 of all eleven semantic colours, on both canvases.
+ *
+ * Ten entries: enough for the custom types a vault realistically declares. Past that the
+ * assignment wraps, and two custom types share a colour — reported rather than hidden,
+ * because there is no eight-colour answer that is also distinct.
+ */
+export const CUSTOM_TYPE_COLORS: readonly string[] = [
+  "#b2657d",
+  "#d1656c",
+  "#af6a56",
+  "#9b7544",
+  "#a4903c",
+  "#778145",
+  "#0088c5",
+  "#7e8eca",
+  "#896ebc",
+  "#b180b4",
 ];
 
 export function communityColor(community: number): string {
   if (!Number.isFinite(community) || community < 0) return NODE_TYPE_COLORS.other;
   return COMMUNITY_COLORS[community % COMMUNITY_COLORS.length];
+}
+
+/**
+ * One colour per declared page type, all different.
+ *
+ * Assigning per vault rather than per key is the whole point: a hash cannot know which
+ * other types are present, so two custom types collided about as often as not — on a real
+ * vault, 13 declared types produced 12 colours, with `实体` and `资料` identical. Here the
+ * keys are sorted (so the same vault always gets the same colours, across views and across
+ * sessions) and each takes the next ramp entry nobody else has.
+ *
+ * Canonical types keep their semantic colour; the ramp is searched to stay clear of those,
+ * and an entry a canonical type already owns is skipped.
+ */
+export function assignTypeColors(keys: readonly string[]): ReadonlyMap<string, string> {
+  const assigned = new Map<string, string>();
+  const taken = new Set<string>();
+  const custom: string[] = [];
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(NODE_TYPE_COLORS, key)) {
+      const colour = NODE_TYPE_COLORS[key as PageType];
+      if (!assigned.has(key)) {
+        assigned.set(key, colour);
+        taken.add(colour);
+      }
+      continue;
+    }
+    if (!assigned.has(key)) custom.push(key);
+  }
+  custom.sort();
+  let cursor = 0;
+  for (const key of custom) {
+    while (cursor < CUSTOM_TYPE_COLORS.length && taken.has(CUSTOM_TYPE_COLORS[cursor])) cursor += 1;
+    const colour = CUSTOM_TYPE_COLORS[cursor % CUSTOM_TYPE_COLORS.length];
+    cursor += 1;
+    assigned.set(key, colour);
+    taken.add(colour);
+  }
+  return assigned;
 }
 
 /**
@@ -91,7 +151,7 @@ export function typeColor(type: string): string {
   }
   let hash = 0;
   for (const char of type) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
-  return FALLBACK_TYPE_COLORS[hash % FALLBACK_TYPE_COLORS.length];
+  return CUSTOM_TYPE_COLORS[hash % CUSTOM_TYPE_COLORS.length];
 }
 
 /**
@@ -110,6 +170,12 @@ export function nodeColorForMode(input: {
   readonly customColor: string;
   readonly typeOverrides?: Readonly<Record<string, string>>;
   readonly communityOverrides?: Readonly<Record<number, string>>;
+  /**
+   * Colours assigned per vault by {@link assignTypeColors}, when the caller has the
+   * graph to hand. Without it a custom type falls back to a hash of its name, which
+   * cannot know what else is on screen and therefore collides.
+   */
+  readonly typeColors?: ReadonlyMap<string, string>;
 }): string {
   if (input.colorMode === "custom") return input.customColor;
 
@@ -119,7 +185,7 @@ export function nodeColorForMode(input: {
   }
 
   const override = input.typeOverrides?.[input.pageType];
-  return override || typeColor(input.pageType);
+  return override || input.typeColors?.get(input.pageType) || typeColor(input.pageType);
 }
 
 // ---------------------------------------------------------------------------

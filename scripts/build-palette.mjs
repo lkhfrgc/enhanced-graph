@@ -206,6 +206,69 @@ function report(label, colours, oldColours) {
 const types = build(TYPES);
 const communities = build(COMMUNITIES);
 
+/** The eight hand-spread fallbacks this ramp replaces, for the comparison below. */
+const FALLBACK_HEXES = Array.from({ length: 8 }, (_, index) =>
+  toHex(lchToRgb(55 + (index % 2) * 4, 44, (index * 360) / 8 + 22)),
+);
+
+/**
+ * A ramp for page types the plugin does not know — the ones a vault invents.
+ *
+ * The eight hand-spread fallbacks were fine among themselves (worst pair ΔE 29.5) and
+ * bad next to the semantic palette: hue 202 sat ΔE 4.4 from `query` (205), so a custom
+ * type and a known one were painted the same colour. Rigid ramps cannot know what they
+ * will sit beside, so this one is searched instead: sweep hue and lightness, keep what
+ * clears a distance from the eleven semantic colours AND from the colours already kept,
+ * and stop when the wheel runs out.
+ *
+ * The distances are the point of the exercise, so they are printed rather than assumed.
+ */
+const CUSTOM_MIN_INTERNAL = 19;
+const CUSTOM_MIN_AGAINST_TYPES = 15;
+
+const customRamp = (() => {
+  const kept = [];
+  const hexes = types.map((type) => type.hex);
+  // Sweep hue first, then the lightness/chroma bands, so the first entries are spread
+  // around the wheel rather than clustered in whichever band came first. Two chroma
+  // levels as well as two lightnesses: a custom type does not have to be as saturated as
+  // a semantic one, and the extra room is what lets the ramp cover a vault that invents
+  // a dozen types.
+  const candidates = [];
+  for (let hueStep = 0; hueStep < 360; hueStep += 3) {
+    for (const L of [52, 56, 60]) {
+      for (const chroma of [46, 34]) {
+        candidates.push({ hue: hueStep, chroma, L });
+      }
+    }
+  }
+  for (const candidate of build(candidates)) {
+    const contrastOk =
+      contrast(candidate.hex, DARK_CANVAS) >= 3 && contrast(candidate.hex, LIGHT_CANVAS) >= 3;
+    if (!contrastOk) continue;
+    if (hexes.some((hex) => deltaE(candidate.hex, hex) < CUSTOM_MIN_AGAINST_TYPES)) continue;
+    if (kept.some((entry) => deltaE(candidate.hex, entry.hex) < CUSTOM_MIN_INTERNAL)) continue;
+    kept.push(candidate);
+  }
+  return kept;
+})();
+
+report("custom type ramp (searched)", customRamp, FALLBACK_HEXES);
+const customWorstAgainstTypes = (() => {
+  let worst = { d: Infinity, pair: null };
+  for (const custom of customRamp) {
+    for (const type of types) {
+      const d = deltaE(custom.hex, type.hex);
+      if (d < worst.d) worst = { d, pair: [custom.hex, type.hex] };
+    }
+  }
+  return worst;
+})();
+console.log(
+  `\n  closest custom-vs-semantic pair: ΔE ${customWorstAgainstTypes.d.toFixed(1)} ` +
+    `(${customWorstAgainstTypes.pair.join(" vs ")}) — required ≥ ${CUSTOM_MIN_AGAINST_TYPES}`,
+);
+
 report("page types (11)", types, Object.values(OLD.types));
 report("community colours (12)", communities, OLD.communities);
 
@@ -236,6 +299,10 @@ console.log("");
 console.log("const FALLBACK_TYPE_COLORS = [");
 console.log("  " + fallbacks.map((h) => `"${h}"`).join(", "));
 console.log("];\n");
+console.log("// Searched ramp for page types the plugin does not know; see `palette.ts`.");
+console.log("export const CUSTOM_TYPE_COLORS: readonly string[] = [");
+for (const colour of customRamp) console.log(`  "${colour.hex}",`);
+console.log("];");
 console.log("export const EDGE_STRONG_PRESETS = [");
 for (const edge of edges) console.log(`  { id: "${edge.id}", color: "${edge.hex}" },`);
 console.log("];");

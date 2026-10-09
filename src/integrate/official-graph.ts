@@ -40,7 +40,13 @@ import { isInWorkspace } from "../core/workspace";
 import type { GraphNode, OfficialGraphMode, RelevanceWeights, WikiGraph } from "../types";
 import { t } from "../i18n";
 import { countUndismissed } from "../view/insights-panel";
-import { communityColor, hexToRgbInt, themePalette, typeColor } from "../view/palette";
+import {
+  assignTypeColors,
+  communityColor,
+  hexToRgbInt,
+  themePalette,
+  typeColor,
+} from "../view/palette";
 import { typeLabel } from "../view/labels";
 import { OfficialHoverTooltip, type HoverTooltipOptions } from "./official-hover";
 import { OfficialLegend } from "./official-legend";
@@ -286,6 +292,9 @@ export class OfficialGraphEnhancer {
    */
   private markedGroup: { kind: "type" | "community"; key: string } | null = null;
   private markedNodes: ReadonlySet<string> = new Set();
+  /** The graph the cached type-to-colour assignment was computed for. */
+  private typeColorsFor: WikiGraph | null = null;
+  private typeColorsCache: ReadonlyMap<string, string> = new Map();
   /**
    * Which panel the toolbar has open.
    *
@@ -668,7 +677,7 @@ export class OfficialGraphEnhancer {
     return collectTypes(graph.nodes).map(({ key, label }) => ({
       key,
       label: typeLabel(key, label),
-      color: overrides[key] ?? typeColor(key),
+      color: overrides[key] ?? this.typeColorAssignment().get(key) ?? typeColor(key),
       isOverride: overrides[key] !== undefined,
     }));
   }
@@ -968,7 +977,24 @@ export class OfficialGraphEnhancer {
       return override ?? communityColor(community);
     }
     const override = this.deps.getTypeColors()[type];
-    return override ?? typeColor(type as Parameters<typeof typeColor>[0]);
+    // The vault's own assignment, so a custom type is the same colour here as in the
+    // standalone view — both derive it from the same graph.
+    return override ?? this.typeColorAssignment().get(type) ?? typeColor(type);
+  }
+
+  /**
+   * One colour per declared type in the current graph.
+   *
+   * Cached against the graph object because `applyColors` runs per node and per frame
+   * tick: recomputing the assignment for every node would be O(nodes × types).
+   */
+  private typeColorAssignment(): ReadonlyMap<string, string> {
+    const { graph } = this.deps.getData();
+    if (this.typeColorsFor !== graph) {
+      this.typeColorsFor = graph;
+      this.typeColorsCache = assignTypeColors(collectTypes(graph.nodes).map((type) => type.key));
+    }
+    return this.typeColorsCache;
   }
   // -------------------------------------------------------------------------
   // Hover wiring
