@@ -27,6 +27,7 @@ import type {
   WikiGraph,
 } from "../types";
 import { deriveCommunities } from "./communities";
+import { folderKey, isInWorkspace, isUnder } from "./workspace";
 import { parseNote } from "./parse";
 import type { ParsedNote } from "./parse";
 import { computeRelevance, createRelevanceContext } from "./relevance";
@@ -178,13 +179,11 @@ function isExcludedPath(
 /**
  * Whether a note is inside the working folder. Empty means the whole vault.
  *
- * Matched on the folder BOUNDARY: `notes` covers `notes/a.md` and not
- * `notes-archive/a.md`, which a plain prefix test would have swept in.
+ * Kept as a named export because the built-in graph's filter asks the same
+ * question; the answer itself lives in `core/workspace` so there is only one.
  */
 export function isInWorkingFolder(path: string, workingFolder: string): boolean {
-  const folder = workingFolder.replace(/^\/+|\/+$/g, "");
-  if (folder === "") return true;
-  return path.startsWith(`${folder}/`);
+  return isUnder(path, folderKey(workingFolder));
 }
 
 async function discoverMarkdownFiles(
@@ -205,11 +204,12 @@ async function discoverMarkdownFiles(
   for (const raw of listed) {
     const path = normalizeVaultPath(raw);
     if (!/\.md$/i.test(path)) continue;
-    // The working folder first: it is the cheaper test and the narrower question
-    // ("is this ours at all?"), so a vault-wide listing is cut down before the
-    // per-file exclusion list is consulted.
-    if (!isInWorkingFolder(path, workingFolder)) continue;
-    if (isExcludedPath(path, excludeFolders, configDir)) continue;
+    // The workspace first: it is the cheaper test and the narrower question ("is
+    // this ours at all?"), so a vault-wide listing is cut down before the per-file
+    // exclusion list is consulted. Both halves come from one rule, shared with the
+    // built-in graph's filter.
+    if (!isInWorkspace(path, workingFolder, excludeFolders)) continue;
+    if (isExcludedPath(path, [], configDir)) continue;
     unique.add(path);
   }
   // Sorted, so link-index collisions ("first writer wins") and the resulting

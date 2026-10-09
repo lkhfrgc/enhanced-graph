@@ -28,6 +28,7 @@ import { edgeKey, edgeKeyEndpoints } from "../core/graph-keys";
 import { findConnectingPaths } from "../core/paths";
 import { type FilterSection, renderFilters } from "../view/graph-filters";
 import { collectTags, filterNodes, type TagFilterMode, type VisibilityFilters } from "../view/visibility";
+import { isInWorkspace } from "../core/workspace";
 import type { GraphNode, OfficialGraphMode, RelevanceWeights, WikiGraph } from "../types";
 import { t } from "../i18n";
 import { countUndismissed } from "../view/insights-panel";
@@ -1721,7 +1722,10 @@ export class OfficialGraphEnhancer {
     if (!nodes) return payload;
 
     const filters = this.deps.getVisibility();
+    const workspace = this.deps.getWorkspace();
+    const scoped = workspace.folder !== "" || workspace.excluded.length > 0;
     const anyHidden =
+      scoped ||
       filters.hiddenTypes.size > 0 ||
       filters.hiddenCommunities.size > 0 ||
       filters.hiddenTags.size > 0 ||
@@ -1745,6 +1749,13 @@ export class OfficialGraphEnhancer {
       const visible = new Set(filterNodes(graph.nodes, filters).map((node) => node.id));
       const kept: Record<string, unknown> = {};
       for (const officialId of Object.keys(nodes)) {
+        // The workspace first, and by PATH: this payload is Obsidian's own node set,
+        // which the plugin's build never touched — a node outside the workspace is
+        // simply absent from our graph, and dropping "what we do not know" would be
+        // wrong for every other reason a node can be unknown (attachments, notes the
+        // analysis skipped). Judging it by its path keeps those, and still takes the
+        // out-of-workspace ones off the screen.
+        if (scoped && !isInWorkspace(officialId, workspace.folder, workspace.excluded)) continue;
         const ours = resolve(officialId);
         if (ours && !visible.has(ours.id)) continue;
         kept[officialId] = nodes[officialId];

@@ -358,6 +358,9 @@ try {
   }));
   const applyEnabledAfterStaging = !(await applyButton.isDisabled());
 
+  const payloadPaths = () =>
+    page.evaluate(() => Object.keys(window.__OFFICIAL_FILTERS__.renderer.lastData?.nodes ?? {}).sort());
+
   await applyButton.click({ delay: PRESS_MS });
   await page.waitForTimeout(400);
   const applied = await page.evaluate(() => ({
@@ -365,13 +368,16 @@ try {
     folder: window.__OFFICIAL_FILTERS__.settings.workingFolder,
     excluded: window.__OFFICIAL_FILTERS__.settings.excludeFolders.slice(),
   }));
+  const afterApplyPayload = await payloadPaths();
+  const afterApplyDrawn = afterApplyPayload.length;
 
   console.log(
     `\n  workspace fields: suggestions ${JSON.stringify(suggestions)} for folders ${JSON.stringify(graphFolders)}; ` +
       `unknown path → ${JSON.stringify(unknownPath)}; known path → ${JSON.stringify(knownPath)}; ` +
       `staged → chips ${JSON.stringify(staged.chips)}, ${staged.applied} applied, ` +
       `settings ${JSON.stringify(staged.folder)}/${JSON.stringify(staged.excluded)}; ` +
-      `after 应用 → ${JSON.stringify(applied.calls)}\n`,
+      `after 应用 → ${JSON.stringify(applied.calls)}, ${afterApplyDrawn} nodes left: ` +
+      `${JSON.stringify(afterApplyPayload)}\n`,
   );
   check(
     "工作区 suggests the vault's folders, at every depth",
@@ -411,6 +417,18 @@ try {
       applied.folder === "notes" &&
       JSON.stringify(applied.excluded) === JSON.stringify(["notes/deep/"]),
     `${JSON.stringify(applied.calls)}; settings ${JSON.stringify(applied.folder)}/${JSON.stringify(applied.excluded)}`,
+  );
+  check(
+    "applying a workspace takes the other notes off the built-in graph at once",
+    // The fixture's nodes carry real paths — some under `notes/`, some not — so this
+    // measures the built-in graph's own filter: reading the path, not the plugin's
+    // already-scoped graph. The panel asks for exactly one refresh, and the payload
+    // that comes back holds only what the workspace kept.
+    afterApplyDrawn > 0 &&
+      afterApplyDrawn < total &&
+      afterApplyPayload.every((path) => path.startsWith("notes/")) &&
+      afterApplyPayload.every((path) => !path.startsWith("notes/deep/")),
+    `${afterApplyDrawn} of ${total} nodes kept: ${JSON.stringify(afterApplyPayload)}`,
   );
 
   // Back to the whole vault, so the checks that follow see every node: clear the

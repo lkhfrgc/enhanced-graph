@@ -164,7 +164,10 @@ const settings = {
 /** What the panel has asked to apply, in order, for the checks to assert on. */
 const appliedWorkspaces: Array<{ folder: string; excluded: string[] }> = [];
 
-const renderer = new FakeOfficialRenderer(nodes.map((node) => `${node.id}.md`));
+// Keyed by the node's vault path, as Obsidian's own graph payload is: the built-in
+// graph's filter judges a payload node by its path when a workspace is in force, so
+// a fixture keyed by anything else could not exercise that at all.
+const renderer = new FakeOfficialRenderer(nodes.map((node) => node.path));
 document.body.appendChild(renderer.containerEl);
 
 const leaf = {
@@ -173,7 +176,7 @@ const leaf = {
     engine: {
       render: () =>
         renderer.setData({
-          nodes: Object.fromEntries(nodes.map((node) => [`${node.id}.md`, { type: "concept" }])),
+          nodes: Object.fromEntries(nodes.map((node) => [node.path, { type: "concept" }])),
         }),
     },
   },

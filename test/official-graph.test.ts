@@ -1830,6 +1830,50 @@ describe("the built-in graph's toolbar", () => {
     expect(status.textContent).toBe(t("filter.workspaceMatched", { count: "1" }));
   });
 
+  it("takes out-of-workspace notes off the built-in graph, by path", () => {
+    // The built-in graph draws Obsidian's own node set — its payload is keyed by
+    // vault path — so a note outside the workspace is simply absent from OUR graph.
+    // Judging the payload by path is what lets the workspace reach the built-in
+    // graph at all: without it, applying one changed the settings and nothing on
+    // screen.
+    const ids = [{ id: "notes/a.md" }, { id: "notes/deep/b.md" }, { id: "elsewhere/c.md" }];
+    const h = setup(ids, [makeNode({ id: "notes/a" }), makeNode({ id: "elsewhere/c" })], "community", {
+      folders: [
+        { path: "", count: 3 },
+        { path: "notes", count: 2 },
+        { path: "notes/deep", count: 1 },
+      ],
+      workingFolder: "notes",
+    });
+    h.enhancer.start();
+    const payload = {
+      nodes: {
+        "notes/a.md": { type: "concept" },
+        "notes/deep/b.md": { type: "concept" },
+        "elsewhere/c.md": { type: "concept" },
+      },
+    };
+    h.renderer.setData(payload);
+    expect(Object.keys(received(h).nodes).sort()).toEqual(["notes/a.md", "notes/deep/b.md"]);
+
+    // An exclusion inside the workspace narrows it further...
+    h.excludeFolders.push("notes/deep/");
+    h.renderer.setData(payload);
+    expect(Object.keys(received(h).nodes)).toEqual(["notes/a.md"]);
+
+    // ...and with no workspace at all the same payload is left whole: unknown nodes
+    // are only dropped because the workspace says they are out of scope, never
+    // merely because our graph has not heard of them (attachments, skipped notes).
+    h.workingFolder = "";
+    h.excludeFolders.splice(0);
+    h.renderer.setData(payload);
+    expect(Object.keys(received(h).nodes).sort()).toEqual([
+      "elsewhere/c.md",
+      "notes/a.md",
+      "notes/deep/b.md",
+    ]);
+  });
+
   it("keeps an excluded prefix that is not a folder in the vault", async () => {
     // A prefix can be hand-written into a settings file, or name a folder that has
     // since gone. Applying must not silently drop it.

@@ -464,6 +464,24 @@ describe("discovery and loading", () => {
     expect(graph.nodes.map((node) => node.id)).toEqual(["keep"]);
   });
 
+  it("matches an excluded folder on its boundary, not on any shared prefix", async () => {
+    // `templates` excludes `templates/…` and not `templates-other/…`. Both halves of
+    // the workspace rule — the folder to read and the folders to leave out — go
+    // through one helper, so this is the same guarantee the working folder has.
+    const graph = await buildWikiGraph({
+      vault: new MemoryVault({
+        "templates/daily.md": "# Template",
+        "templates-other/keep.md": "# Not a template",
+        "notes/archive-old/x.md": "# Not the archive",
+      }),
+      excludeFolders: ["templates", "notes/archive"],
+    });
+    expect(graph.nodes.map((node) => node.id).sort()).toEqual([
+      "notes/archive-old/x",
+      "templates-other/keep",
+    ]);
+  });
+
   it("reads only the working folder, and the whole vault when it is empty", async () => {
     const vault = new MemoryVault({
       "keep.md": "# Root note",
