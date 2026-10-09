@@ -52,6 +52,7 @@ const zh = {
   "legend.sparse": "内聚度偏低（{value}）",
   "legend.core": "核心节点",
   "legend.showAll": "显示全部",
+  "legend.typeEmpty": "这类页面全部被过滤掉了（共 {count} 个）",
   "legend.hint": "点击排除或恢复该节点类型",
   "legend.hintCluster": "点击排除或恢复该知识集群",
 
@@ -281,6 +282,7 @@ const en: Record<MessageKey, string> = {
   "legend.sparse": "Low cohesion ({value})",
   "legend.core": "Core nodes",
   "legend.showAll": "Show all",
+  "legend.typeEmpty": "Every page of this type is filtered out ({count} in the vault)",
   "legend.hint": "Click to exclude or restore this page type",
   "legend.hintCluster": "Click to exclude or restore this cluster",
 

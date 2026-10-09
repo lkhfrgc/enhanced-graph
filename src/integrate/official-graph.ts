@@ -828,6 +828,14 @@ export class OfficialGraphEnhancer {
       // Read through the live filters, so a row that is currently excluded is
       // drawn as excluded — the legend explains the state, it does not set it.
       hiddenTypes: filters.hiddenTypes,
+      // What the built-in graph is actually drawing, so a type with nothing left on
+      // screen is greyed rather than shown with a colour it has not got.
+      visibleTypes: new Set(
+        [...this.visibleNodeIds()].map((id) => {
+          const node = graph.nodes.find((candidate) => candidate.id === id);
+          return node ? nodeTypeKey(node) : "";
+        }),
+      ),
       hiddenCommunities: filters.hiddenCommunities,
       // The rows are controls too. They write the same shared visibility the
       // filters panel does, so a click here and a tick there are one setting, and
@@ -1819,6 +1827,26 @@ export class OfficialGraphEnhancer {
       console.error("[enhanced-graph] filtering the built-in graph failed:", error);
       return payload;
     }
+  }
+
+  /**
+   * The nodes of OUR graph the built-in graph is drawing right now.
+   *
+   * The same two gates `filterData` applies — the visibility rules, and the workspace
+   * by path — so a legend row and the canvas cannot disagree about what is on screen.
+   */
+  private visibleNodeIds(): Set<string> {
+    const filters = this.deps.getVisibility();
+    const workspace = this.deps.getWorkspace();
+    const scoped = workspace.folder !== "" || workspace.excluded.length > 0;
+    const { graph } = this.deps.getData();
+    return new Set(
+      filterNodes(graph.nodes, filters)
+        .filter(
+          (node) => !scoped || isInWorkspace(node.path, workspace.folder, workspace.excluded),
+        )
+        .map((node) => node.id),
+    );
   }
 
   /** Push the last payload through again, so a filter change takes effect. */

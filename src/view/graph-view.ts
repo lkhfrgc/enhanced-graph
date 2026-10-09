@@ -830,6 +830,10 @@ export class EnhancedGraphView extends ItemView {
       customNodeColor: this.plugin.settings.customNodeColor,
       typeColorOverrides: this.plugin.settings.typeColorOverrides,
       hiddenTypes: this.hiddenTypes,
+      // What is actually on the canvas, so a type whose pages are all excluded by some
+      // other rule (the workspace, 隐藏索引/概览/日志, a tag, a cluster) reads as empty
+      // instead of showing a colour and a count it does not have on screen.
+      visibleTypes: new Set(this.visibleGraph().nodes.map((node) => nodeTypeKey(node))),
       onToggleType: (type) => {
         if (this.hiddenTypes.has(type)) this.hiddenTypes.delete(type);
         else this.hiddenTypes.add(type);

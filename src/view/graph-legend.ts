@@ -50,6 +50,16 @@ export interface LegendOptions extends LegendGestures {
   readonly typeColorOverrides: Readonly<Record<string, string>>;
   /** Hidden types, keyed by what the user declared (a canonical id also matches). */
   readonly hiddenTypes: ReadonlySet<string>;
+  /**
+   * The types that still have at least one page ON THE GRAPH.
+   *
+   * A type can be empty on screen without being switched off: its pages may be hidden
+   * by the workspace, by 隐藏索引/概览/日志, by a tag rule or by their cluster. A row
+   * with a coloured dot and a count of one, beside a graph that draws none of them,
+   * reads as a bug — so a row is greyed whenever nothing of it is drawn. A host with no
+   * filtered view to report may omit it, and the row then follows `hiddenTypes` alone.
+   */
+  readonly visibleTypes?: ReadonlySet<string>;
   /** Clusters the user has excluded, by id. */
   readonly hiddenCommunities: ReadonlySet<number>;
 }
@@ -100,12 +110,18 @@ export function renderLegend(container: HTMLElement, options: LegendOptions): vo
 
 /** One row per page type actually present, with its node count. */
 function renderTypeRows(body: HTMLElement, options: LegendOptions): void {
-  const { graph, hiddenTypes } = options;
+  const { graph, hiddenTypes, visibleTypes } = options;
   // The types the vault declares, not the ones the plugin knows: a custom type is a
   // row of its own with its own colour, and the count is of the pages that say so.
   for (const type of collectTypes(graph.nodes)) {
     const { key, label, count } = type;
-    const hidden = hiddenTypes.has(key);
+    // Grey when nothing of this type is drawn — whether because the user switched it
+    // off or because every page of it is excluded by some other rule. A row that
+    // promises a colour and a count, beside a graph showing none of it, is a lie about
+    // what is on screen; the count stays the vault's own so the row still says how much
+    // is being held back.
+    const drawn = visibleTypes === undefined || visibleTypes.has(key);
+    const hidden = hiddenTypes.has(key) || !drawn;
     const row = body.createDiv({
       cls: `enhanced-graph-legend-row${hidden ? " is-hidden-type" : ""}`,
     });
@@ -124,10 +140,11 @@ function renderTypeRows(body: HTMLElement, options: LegendOptions): void {
       text: typeLabel(key, label),
     });
     row.createSpan({ cls: "enhanced-graph-legend-count", text: String(count) });
+    if (!drawn) row.title = t("legend.typeEmpty", { count: String(count) });
     const toggle = options.onToggleType;
     if (toggle) {
       row.addClass("is-interactive");
-      row.title = t("legend.hint");
+      if (drawn) row.title = t("legend.hint");
       // A click, like the cluster rows: one gesture for both groups, and the
       // hidden row stays in place (shaded) so it can be clicked straight back.
       row.addEventListener("click", () => toggle(key));

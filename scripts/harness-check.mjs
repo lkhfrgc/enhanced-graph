@@ -380,10 +380,27 @@ async function main() {
       await rows.nth(0).click();
       await page.waitForTimeout(500);
       const hidden = await visibleCount();
-      const marked = await page.evaluate(() => ({
-        rows: document.querySelectorAll(".enhanced-graph-legend-row.is-hidden-type").length,
-        stored: window.__HARNESS__.settings.hiddenTypes.slice(),
-      }));
+      const marked = await page.evaluate(() => {
+        const visible = new Set(window.__HARNESS__.visibleNodeIds());
+        const keyOf = (node) => ((node.rawType ?? "").trim().toLowerCase() || node.type);
+        const drawnKeys = new Set(
+          window.__HARNESS__.snapshot.graph.nodes
+            .filter((node) => visible.has(node.id))
+            .map(keyOf),
+        );
+        return {
+          rows: document.querySelectorAll(".enhanced-graph-legend-row.is-hidden-type").length,
+          // Every greyed row must be one with nothing left on the graph, and every
+          // such row must be greyed — the rule, not a count of them.
+          greyedLabels: [...document.querySelectorAll(".enhanced-graph-legend-row.is-hidden-type")]
+            .map((row) => row.querySelector(".enhanced-graph-legend-label")?.textContent ?? "")
+            .sort(),
+          emptyCount: [...new Set(window.__HARNESS__.snapshot.graph.nodes.map(keyOf))].filter(
+            (key) => !drawnKeys.has(key),
+          ).length,
+          stored: window.__HARNESS__.settings.hiddenTypes.slice(),
+        };
+      });
       const enabledWhileHidden = !(await showAll.isDisabled());
 
       await showAll.click();
@@ -406,7 +423,11 @@ async function main() {
       "clicking a type row excludes that type, and the header's 显示全部 brings it back",
       typeFilter.rowCount >= 5 &&
         typeFilter.hidden < typeFilter.before &&
-        typeFilter.marked.rows === 1 &&
+        // Greyed means "nothing of this type is drawn": the row that was clicked, and
+        // any other row the same click emptied (a vault can declare both `concept` and
+        // `概念`; hiding one hides both, so both rows have to grey).
+        typeFilter.marked.rows === typeFilter.marked.emptyCount &&
+        typeFilter.marked.rows >= 1 &&
         typeFilter.disabledBefore === true &&
         typeFilter.enabledWhileHidden &&
         typeFilter.afterShowAll === typeFilter.before &&
@@ -2282,6 +2303,49 @@ async function main() {
       `label found ${typeRows.customLabelFound}, ticked off ${typeRows.unticked}, ` +
         `visible 概念 pages after hiding ${typeRows.hidExactly}, drawn ${typeRows.visibleBefore} → ` +
         `${typeRows.visibleAfter} → ${typeRows.restoredCount}`,
+    );
+
+    // --- 11a-5. rows with nothing left on the graph ------------------------
+    // With 隐藏索引/概览/日志 on (as the snapshot defaults to), the vault's structural
+    // pages are not drawn — so the rows for the types they declare must be greyed
+    // rather than showing a colour and a count they do not have on screen.
+    const emptyRows = await page.evaluate(async () => {
+      const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const visible = new Set(window.__HARNESS__.visibleNodeIds());
+      const keyOf = (node) => ((node.rawType ?? "").trim().toLowerCase() || node.type);
+      const drawnTypes = new Set(
+        window.__HARNESS__.snapshot.graph.nodes
+          .filter((node) => visible.has(node.id))
+          .map(keyOf),
+      );
+      const allTypes = new Set(window.__HARNESS__.snapshot.graph.nodes.map(keyOf));
+      const expectedEmpty = [...allTypes].filter((key) => !drawnTypes.has(key));
+
+      const rows = [...document.querySelectorAll(".enhanced-graph-legend-row")]
+        .filter((row) => row.querySelector(".enhanced-graph-legend-dot"))
+        .map((row) => ({
+          label: row.querySelector(".enhanced-graph-legend-label")?.textContent ?? "",
+          greyed: row.classList.contains("is-hidden-type"),
+          title: row.getAttribute("title") ?? "",
+        }));
+      const greyed = rows.filter((row) => row.greyed).length;
+      return { expectedEmpty, greyed, total: rows.length, rows };
+    });
+
+    console.log(
+      `\n  legend rows: ${emptyRows.total} types, ${emptyRows.greyed} greyed; ` +
+        `types with nothing drawn: ${emptyRows.expectedEmpty.length} ` +
+        `(${emptyRows.expectedEmpty.join(", ")})\n`,
+    );
+    check(
+      "a type with no page left on the graph is greyed, and only those",
+      emptyRows.expectedEmpty.length > 0 &&
+        emptyRows.greyed === emptyRows.expectedEmpty.length &&
+        emptyRows.rows
+          .filter((row) => row.greyed)
+          .every((row) => row.title.length > 0),
+      `${emptyRows.greyed} greyed rows for ${emptyRows.expectedEmpty.length} empty types ` +
+        `(${emptyRows.expectedEmpty.join(", ")}); labels ${JSON.stringify(emptyRows.rows.map((r) => r.label))}`,
     );
 
     // --- 11b. the "no matching nodes" message ------------------------------

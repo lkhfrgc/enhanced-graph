@@ -2808,6 +2808,45 @@ describe("the built-in graph's legend", () => {
     expect(community.hiddenCommunities).toEqual([]);
   });
 
+  it("greys a type row whose pages are all excluded by another rule", async () => {
+    // 隐藏索引/概览/日志 is on, so overview.md is not drawn — the row must not show a
+    // colour and a count as if it were, which is what the report was about.
+    const h = setup(
+      [{ id: "note.md" }, { id: "overview.md" }],
+      [
+        makeNode({ id: "note" }),
+        makeNode({ id: "overview", type: "overview", isStructural: true }),
+      ],
+      "type",
+    );
+    h.hideStructural = true;
+    h.enhancer.start();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const rowFor = (label: string): HTMLElement =>
+      Array.from(legendOf(h).querySelectorAll<HTMLElement>(".enhanced-graph-legend-row")).find(
+        (row) => row.textContent?.includes(label),
+      )!;
+    const dotColor = (row: HTMLElement): string =>
+      (row.querySelector<HTMLElement>(".enhanced-graph-legend-dot")!.style.backgroundColor ?? "");
+
+    const overview = rowFor(t("type.overview"));
+    const note = rowFor(t("type.concept"));
+    expect(overview.classList.contains("is-hidden-type")).toBe(true);
+    expect(note.classList.contains("is-hidden-type")).toBe(false);
+    // Greyed means grey: the swatch is not the type colour, and the row says why.
+    expect(dotColor(overview)).not.toBe("");
+    expect(dotColor(overview)).not.toBe(dotColor(note));
+    expect(overview.title).toBe(t("legend.typeEmpty", { count: "1" }));
+    // And it is not the row's own switch doing it: nothing has been ticked off.
+    expect(h.hiddenTypes).toEqual([]);
+
+    // Turning the structural switch off brings the row back to full colour.
+    h.hideStructural = false;
+    h.enhancer.refresh();
+    expect(rowFor(t("type.overview")).classList.contains("is-hidden-type")).toBe(false);
+  });
+
   it("excludes and restores a page type by clicking its card in the built-in graph", async () => {
     const types = setup(
       [{ id: "a.md" }, { id: "b.md" }],
