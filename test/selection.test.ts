@@ -24,6 +24,7 @@ function node(id: string): GraphNode {
     rawType: "concept",
     path: `${id}.md`,
     linkCount: 0,
+    vaultLinkCount: 0,
     inLinks: 0,
     outLinks: 0,
     community: 0,

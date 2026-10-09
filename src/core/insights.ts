@@ -185,8 +185,11 @@ export function findCoverageGaps(
   const nodeById = resolveNodes(graph);
   const gaps: CoverageGap[] = [];
 
+  // Vault-wide degree, for the same reason the visibility switch uses it: a note
+  // whose links all point outside the current scope is not an isolated page, and
+  // reporting it as one would be a claim about the vault that is not true.
   const isolated = uniqueNodes(graph)
-    .filter((node) => !node.isStructural && node.linkCount <= 1)
+    .filter((node) => !node.isStructural && node.vaultLinkCount <= 1)
     .sort(compareByLabel);
 
   if (isolated.length > 0) {

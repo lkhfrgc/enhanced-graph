@@ -30,6 +30,9 @@ function node(id: string, overrides: Partial<GraphNode> = {}): GraphNode {
     rawType: "concept",
     path: `${id}.md`,
     linkCount: 3,
+    // The fixtures are their own vault, so the two counts agree unless a test says
+    // otherwise.
+    vaultLinkCount: 3,
     inLinks: 1,
     outLinks: 2,
     community: 0,
@@ -141,13 +144,26 @@ describe("isNodeVisible", () => {
   });
 
   it("hides isolated pages on request", () => {
-    const target = node("a", { linkCount: 0 });
+    const target = node("a", { linkCount: 0, vaultLinkCount: 0 });
     expect(isNodeVisible(target, filters({ hideIsolated: true }))).toBe(false);
     expect(isNodeVisible(target, filters({ hideIsolated: false }))).toBe(true);
   });
 
+  it("keeps a page whose links all point outside the current build", () => {
+    // The reported case: scoped to a folder, this note's only links point out of it,
+    // so its in-build degree is 0 — but the vault has it linked in both directions,
+    // and "isolated" is a claim about the vault.
+    const target = node("solo", { linkCount: 0, vaultLinkCount: 4 });
+    expect(isNodeVisible(target, filters({ hideIsolated: true }))).toBe(true);
+  });
+
   it("combines rules conjunctively", () => {
-    const target = node("a", { tags: ["rag"], isStructural: true, linkCount: 0 });
+    const target = node("a", {
+      tags: ["rag"],
+      isStructural: true,
+      linkCount: 0,
+      vaultLinkCount: 0,
+    });
     expect(isNodeVisible(target, filters({ hiddenTags: new Set(["rag"]) }))).toBe(false);
     expect(isNodeVisible(target, filters({ hideStructural: true }))).toBe(false);
     expect(isNodeVisible(target, filters({ hideIsolated: true }))).toBe(false);

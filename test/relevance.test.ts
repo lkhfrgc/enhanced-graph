@@ -33,6 +33,7 @@ function node(id: string, init: NodeInit = {}): GraphNode {
     rawType: type,
     path: `${id}.md`,
     linkCount: 0,
+    vaultLinkCount: 0,
     inLinks: 0,
     outLinks: 0,
     community: init.community ?? 0,

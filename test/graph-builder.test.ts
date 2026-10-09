@@ -647,6 +647,41 @@ describe("discovery and loading", () => {
     expect(absoluteWouldFlag).toBe(true);
   });
 
+  it("counts a note's links against the vault, not just the current scope", async () => {
+    // The reported bug: scoped to `work/`, a note whose only links point out of it
+    // counted as degree 0 and was hidden by 隐藏孤立节点 — while two notes linked back
+    // to it and it linked to two others, all of which exist.
+    const vault = new MemoryVault({
+      "work/solo.md": "# Solo\n\n[[outside]] [[elsewhere]]",
+      "work/pair-a.md": "# Pair A\n\n[[pair-b]] [[outside]]",
+      "work/pair-b.md": "# Pair B\n\n[[pair-a]]",
+      "outside.md": "# Outside\n\n[[solo]] [[pair-a]]",
+      "elsewhere.md": "# Elsewhere\n\n[[solo]]",
+    });
+
+    const scoped = await buildWikiGraph({ vault, workingFolder: "work" });
+    const byId = new Map(scoped.nodes.map((node) => [node.id, node]));
+
+    // In this build `solo` has no neighbours at all...
+    expect(byId.get("work/solo")?.linkCount).toBe(0);
+    // ...but the vault still shows it linking out to two notes that exist, which is
+    // what the fix counts. Not four: the two notes that link BACK to it were never
+    // read by this build, and finding their links would mean parsing the whole vault
+    // a second time. Outgoing links are knowable from the files a build read;
+    // incoming ones are only knowable from files it skipped.
+    expect(byId.get("work/solo")?.vaultLinkCount).toBe(2);
+    // A note with a partner inside the scope keeps its in-build degree, and gains the
+    // link it has to the outside.
+    expect(byId.get("work/pair-a")?.linkCount).toBe(2);
+    expect(byId.get("work/pair-a")?.vaultLinkCount).toBe(3);
+
+    // And the whole-vault build agrees with itself, as it must.
+    const whole = await buildWikiGraph({ vault });
+    for (const node of whole.nodes) {
+      expect(node.vaultLinkCount).toBe(node.linkCount);
+    }
+  });
+
   it("skips oversized notes by UTF-8 byte count, not character count", async () => {
     const ascii = "# Big\n\n" + "x".repeat(400);
     const cjk = "# 标题\n\n" + "知".repeat(40); // 46 chars, 130 UTF-8 bytes

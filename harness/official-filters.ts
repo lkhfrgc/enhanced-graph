@@ -38,6 +38,8 @@ function makeNode(id: string, tags: string[], community: number): GraphNode {
     rawType: "concept",
     path,
     linkCount: 3,
+    // The fixture's graph IS its vault, so the two counts agree.
+    vaultLinkCount: 3,
     inLinks: 2,
     outLinks: 1,
     community,

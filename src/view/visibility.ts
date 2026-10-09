@@ -74,7 +74,10 @@ export function isNodeVisible(node: GraphNode, filters: VisibilityFilters): bool
   if (filters.hiddenTypes.has(node.type)) return false;
   if (filters.hiddenCommunities.has(node.community)) return false;
   if (filters.hideStructural && node.isStructural) return false;
-  if (filters.hideIsolated && node.linkCount === 0) return false;
+  // Vault-wide, not build-wide: a note whose only links point outside the current
+  // scope is a linked note that happens to have no visible neighbours, and the
+  // switch is for notes that link to nothing at all.
+  if (filters.hideIsolated && node.vaultLinkCount === 0) return false;
   if (filters.tagFilterMode === "include") {
     const keep = filters.includedTags;
     // `null` is "nothing picked yet", which keeps everything; an EMPTY selection is

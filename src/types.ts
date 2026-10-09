@@ -52,8 +52,21 @@ export interface GraphNode {
   readonly rawType: string;
   /** Vault-relative path including `.md`. */
   readonly path: string;
-  /** inbound + outbound resolved links. */
+  /** inbound + outbound resolved links, within the current build. */
   readonly linkCount: number;
+  /**
+   * Links in and out counted against the WHOLE vault rather than this build.
+   *
+   * `linkCount` only counts links whose target is part of the current build, so it
+   * answers "how connected is this note on screen". Isolation is not that question:
+   * a note whose only links point outside the working folder, or at a page type the
+   * build hides, is still a linked note, and hiding it under 隐藏孤立节点 was wrong.
+   * This count resolves link targets against every markdown file the vault has.
+   *
+   * Non-markdown targets (attachments) are not counted: the vault adapter lists
+   * markdown only, so a note linked solely to an image still reads as isolated.
+   */
+  readonly vaultLinkCount: number;
   readonly inLinks: number;
   readonly outLinks: number;
   /** Louvain community id, remapped so 0 is the largest cluster. */

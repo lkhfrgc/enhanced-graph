@@ -39,6 +39,7 @@ function makeNode(overrides: NodeOverrides): GraphNode {
     rawType: "",
     path: `${overrides.id}.md`,
     linkCount: overrides.linkCount ?? 0,
+    vaultLinkCount: overrides.linkCount ?? 0,
     inLinks: overrides.linkCount ?? 0,
     outLinks: 0,
     community: overrides.community ?? 0,

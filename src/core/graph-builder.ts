@@ -282,12 +282,26 @@ export async function loadNotes(
  * `[[folder/note]]` reach the note inside `folder/` before a same-named note
  * elsewhere, while a real file name always outranks an alias.
  */
-export function buildLinkIndex(notes: readonly ParsedNote[]): LinkIndex {
+/**
+ * The notes a link index is built from.
+ *
+ * Structural rather than `ParsedNote`, so the same resolution rules can be applied
+ * to files the build never read — the vault-wide index below has paths but no
+ * parsed aliases.
+ */
+export interface LinkableNote {
+  readonly id: string;
+  readonly rawId: string;
+  readonly basename: string;
+  readonly aliases: readonly string[];
+}
+
+export function buildLinkIndex(notes: readonly LinkableNote[]): LinkIndex {
   const byKey = new Map<string, string>();
   const ids: string[] = [];
   const seenIds = new Set<string>();
 
-  const idOf = (note: ParsedNote): string => (note.id || note.rawId).toLowerCase();
+  const idOf = (note: LinkableNote): string => (note.id || note.rawId).toLowerCase();
   const claim = (key: string, id: string): void => {
     if (key && !byKey.has(key)) byKey.set(key, id);
   };
@@ -439,6 +453,29 @@ function countCommonNeighbors(a: string, b: string, ctx: RelevanceContext): numb
 // ---------------------------------------------------------------------------
 
 /**
+ * Every markdown file the vault has, normalised and sorted, before any of this
+ * build's filters: the working folder, the exclusions, the byte budget and the
+ * hidden types all narrow the graph, and none of them may narrow this.
+ */
+export async function listVaultMarkdown(vault: VaultAdapter): Promise<string[]> {
+  let listed: readonly string[];
+  try {
+    listed = await vault.listMarkdownFiles();
+  } catch {
+    return [];
+  }
+  const configDir = vault.configDir();
+  const out: string[] = [];
+  for (const raw of listed) {
+    const path = normalizeVaultPath(raw);
+    if (!/\.md$/i.test(path)) continue;
+    if (isExcludedPath(path, [], configDir)) continue;
+    out.push(path);
+  }
+  return out.sort(compareStrings);
+}
+
+/**
  * Every folder in the vault that holds a note, plus its ancestors, with the number
  * of notes in each one's whole subtree. The vault root is first, counting the notes
  * that sit directly in it.
@@ -447,24 +484,20 @@ function countCommonNeighbors(a: string, b: string, ctx: RelevanceContext): numb
  * picker offers, and a list narrowed by the current scope could only ever offer
  * folders already inside it — no way back up. The user's own `excludeFolders` are
  * ignored here too, so an excluded folder stays selectable and can be un-excluded.
+ *
+ * `listed` is the vault's file list when the caller already has it, so a build does
+ * not walk the vault twice.
  */
-export async function listVaultFolders(vault: VaultAdapter): Promise<FolderInfo[]> {
-  let listed: readonly string[];
-  try {
-    listed = await vault.listMarkdownFiles();
-  } catch {
-    return [];
-  }
+export async function listVaultFolders(
+  vault: VaultAdapter,
+  listed: readonly string[] = [],
+): Promise<FolderInfo[]> {
+  const paths = listed.length > 0 ? listed : await listVaultMarkdown(vault);
+  if (paths.length === 0) return [];
 
-  const configDir = vault.configDir();
-  // Counted per folder, then folded upwards: a parent's total is its own notes plus
-  // every descendant's, which is the number a chooser should show.
   const direct = new Map<string, number>();
   const present = new Set<string>();
-  for (const raw of listed) {
-    const path = normalizeVaultPath(raw);
-    if (!/\.md$/i.test(path)) continue;
-    if (isExcludedPath(path, [], configDir)) continue;
+  for (const path of paths) {
     const parts = path.split("/");
     parts.pop();
     const folder = parts.join("/");
@@ -504,9 +537,10 @@ export async function listVaultFolders(vault: VaultAdapter): Promise<FolderInfo[
 export async function buildWikiGraph(options: BuildGraphOptions): Promise<WikiGraph> {
   // Collected before the working folder is applied, so the scope can be widened
   // again from the panel afterwards.
+  const vaultPaths = await listVaultMarkdown(options.vault);
   const [notes, folders] = await Promise.all([
     loadNotes(options.vault, options),
-    listVaultFolders(options.vault),
+    listVaultFolders(options.vault, vaultPaths),
   ]);
   // An empty scope is not the same as an empty vault: the folders are kept so the
   // picker still offers a way out of a folder that turned out to hold nothing.
@@ -518,6 +552,29 @@ export async function buildWikiGraph(options: BuildGraphOptions): Promise<WikiGr
 
   const index = buildLinkIndex(notes);
 
+  /**
+   * A link index over the WHOLE vault, not this build.
+   *
+   * `linkCount` answers "how connected is this note on screen"; the isolation switch
+   * needs the other question, and a note whose only links point outside the working
+   * folder — or at a page type this build hides — was being hidden as isolated while
+   * the vault (and the built-in graph, which draws Obsidian's own node set) showed it
+   * linked. Paths only: the files a build skipped were never parsed, so their
+   * frontmatter aliases are not available here.
+   */
+  const vaultIndex = buildLinkIndex(
+    vaultPaths.map((vaultPath) => {
+      const rawId = vaultPath.replace(/\.md$/i, "");
+      return {
+        id: rawId.toLowerCase(),
+        rawId,
+        basename: vaultPath.split("/").pop() ?? vaultPath,
+        aliases: [] as string[],
+      };
+    }),
+  );
+  const noteKey = (note: ParsedNote): string => (note.id || note.rawId).toLowerCase();
+
   // --- Directed links -----------------------------------------------------
   // De-duplicated per (source, target) so `[[x]] [[x]]` counts once, but kept
   // directed: the association engine needs the orientation for its
@@ -526,11 +583,25 @@ export async function buildWikiGraph(options: BuildGraphOptions): Promise<WikiGr
   const directedKeys = new Set<string>();
   const outCounts = new Map<string, number>();
   const inCounts = new Map<string, number>();
+  /** The same counting, but a target only has to exist SOMEWHERE in the vault. */
+  const vaultOutCounts = new Map<string, number>();
+  const vaultInCounts = new Map<string, number>();
 
   for (const note of notes) {
     const targets = new Set<string>();
+    const vaultTargets = new Set<string>();
+    const self = noteKey(note);
     for (const raw of note.links) {
-      const targetId = resolveLinkTarget(raw, index);
+      // In-build resolution first: it knows this build's aliases, and when a
+      // basename is ambiguous it is the one the rendered graph agrees with.
+      const inBuild = resolveLinkTarget(raw, index);
+      const anywhere = inBuild ?? resolveLinkTarget(raw, vaultIndex);
+      if (anywhere !== null && anywhere !== self && !vaultTargets.has(anywhere)) {
+        vaultTargets.add(anywhere);
+        vaultOutCounts.set(self, (vaultOutCounts.get(self) ?? 0) + 1);
+        vaultInCounts.set(anywhere, (vaultInCounts.get(anywhere) ?? 0) + 1);
+      }
+      const targetId = inBuild;
       if (targetId === null || targetId === note.id) continue; // self-links dropped
       if (targets.has(targetId)) continue;
       targets.add(targetId);
@@ -547,6 +618,7 @@ export async function buildWikiGraph(options: BuildGraphOptions): Promise<WikiGr
   const preliminary: GraphNode[] = notes.map((note) => {
     const inLinks = inCounts.get(note.id) ?? 0;
     const outLinks = outCounts.get(note.id) ?? 0;
+    const key = noteKey(note);
     return Object.freeze({
       id: note.id,
       label: note.title,
@@ -554,6 +626,7 @@ export async function buildWikiGraph(options: BuildGraphOptions): Promise<WikiGr
       rawType: note.rawType,
       path: normalizeVaultPath(note.path),
       linkCount: inLinks + outLinks,
+      vaultLinkCount: (vaultInCounts.get(key) ?? 0) + (vaultOutCounts.get(key) ?? 0),
       inLinks,
       outLinks,
       community: 0,
