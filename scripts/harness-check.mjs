@@ -2373,6 +2373,14 @@ async function main() {
         for (let i = 3; i < data.length; i += 4) if (data[i] > 0) painted += 1;
         return painted;
       };
+      // What the row looks like, as computed style, against a row that is NOT marked:
+      // the highlight has to be visible, not just a class name in the DOM.
+      const ringOf = (element) => (element ? getComputedStyle(element).boxShadow : null);
+      const plainRing = ringOf(
+        [...document.querySelectorAll(".enhanced-graph-legend-row")].find(
+          (candidate) => !candidate.classList.contains("is-marked") && candidate !== row,
+        ),
+      );
       const paintedBefore = paintedPixels();
       row?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
       await sleep(400);
@@ -2385,6 +2393,8 @@ async function main() {
         visibleAfter: window.__HARNESS__.visibleNodeIds().length,
         visibleBefore,
         markedRow: sameRow?.classList.contains("is-marked") ?? false,
+        markedRing: ringOf(sameRow),
+        plainRing,
         // The dots are painted on the overlay canvas, so the mark can be checked as ink
         // rather than as state: pixels before, and many more after.
         paintedBefore,
@@ -2419,6 +2429,13 @@ async function main() {
         !markCheck.stillMarkedRow,
       `${markCheck.marked}/${markCheck.expected} dotted, drawn ${markCheck.visibleBefore} → ` +
         `${markCheck.visibleAfter}, row marked ${markCheck.markedRow} → cleared ${markCheck.cleared}`,
+    );
+    check(
+      "the marked row is highlighted, visibly",
+      markCheck.markedRing !== null &&
+        markCheck.plainRing === "none" &&
+        markCheck.markedRing.includes("inset"),
+      `marked row ring ${JSON.stringify(markCheck.markedRing)} vs plain ${JSON.stringify(markCheck.plainRing)}`,
     );
     check(
       "the dots are actually painted, and go away again",

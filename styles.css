@@ -312,6 +312,15 @@
   opacity: 0.45;
 }
 
+/* The group the user right-clicked: every node of it is dotted on the graph, and this
+   row says which group that is. Drawn with an inset ring rather than a background so it
+   reads the same on a row that is also greyed out (marked while excluded) — the greyed
+   row keeps its faded text, the ring still shows. */
+.enhanced-graph-legend-row.is-marked {
+  background: var(--background-modifier-active-hover, var(--background-modifier-hover));
+  box-shadow: inset 0 0 0 2px var(--interactive-accent);
+}
+
 .enhanced-graph-legend-dot {
   width: 9px;
   height: 9px;
