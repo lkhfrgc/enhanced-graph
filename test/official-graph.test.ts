@@ -182,6 +182,8 @@ function makeLeaf(renderer: unknown, engine?: unknown): { view: unknown } {
 }
 
 interface Harness {
+  /** The leaves the fake workspace reports; a test may replace them. */
+  appLeaves: Record<string, unknown[]>;
   renderer: FakeOfficialRenderer;
   enhancer: OfficialGraphEnhancer;
   graph: WikiGraph;
@@ -245,7 +247,12 @@ function setup(
   const leaf = makeLeaf(renderer, {
     render: () => renderer.setData({ nodes: Object.fromEntries(ids.map((e) => [e.id, { type: "concept" }])) }),
   });
+  // Handed over mutable so a test can close the graph and open a new one: in
+  // Obsidian that is a new view with a new renderer, while the enhancer — and the
+  // panel mode it holds — stays.
+  const appLeaves: Record<string, unknown[]> = { graph: [leaf] };
   const state: Harness = {
+    appLeaves,
     renderer,
     graph,
     dismissed: [],
@@ -276,7 +283,7 @@ function setup(
     enhancer: null as unknown as OfficialGraphEnhancer,
   };
   state.enhancer = new OfficialGraphEnhancer({
-    app: makeApp({ graph: [leaf] }) as never,
+    app: makeApp(appLeaves) as never,
     getData: () => ({ graph: state.graph, insights: state.insights }),
     // Read through the state, not the `setup` argument: the toolbar and the colour
     // tabs change the mode at runtime, and a frozen closure would hide that.
@@ -2009,6 +2016,69 @@ describe("the built-in graph's toolbar", () => {
     expect(fields().map((field) => Number(field.value))).toEqual([4, 2, 2, 1, 1]);
     expect({ ...h.weights }).toEqual(appliedBefore);
     expect(h.appliedClustering).toEqual([]);
+  });
+
+  it("reopens the graph showing the tab its toolbar button says is open", async () => {
+    // The reported bug: with the filters open, closing the graph and opening it again
+    // showed 图谱洞察 under a highlighted 过滤器. The panel is created per graph view
+    // and the mode lives on the enhancer, which outlives it — so a new panel fell
+    // back to its own default while the toolbar read the mode still in force.
+    // Which body each toggle must produce. The filters body is found by its tab row
+    // (the 工作区 group is behind a tab), the clustering body by its steppers — both
+    // share the same outer container class, so the marker has to be what is inside.
+    const modes: Array<{ button: string; marker: string }> = [
+      { button: t("toolbar.filter"), marker: ".enhanced-graph-panel-tabs" },
+      { button: t("toolbar.appearance"), marker: ".enhanced-graph-official-colors" },
+      { button: t("toolbar.clustering"), marker: ".enhanced-graph-stepper" },
+      { button: t("toolbar.insights"), marker: ".enhanced-graph-official-insights" },
+    ];
+
+    for (const { button, marker } of modes) {
+      const h = setup([{ id: "a.md" }], [makeNode({ id: "a" })]);
+      h.enhancer.start();
+      // Open a different tab first: a toggle press is a toggle, so pressing the mode
+      // that is already current would close the panel instead of opening it — and
+      // every iteration starts from the same default.
+      const opener = button === t("toolbar.filter") ? t("toolbar.appearance") : t("toolbar.filter");
+      buttonSaying(toolbarOf(h), opener)?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      buttonSaying(toolbarOf(h), button)?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      const panelOf = (renderer: FakeOfficialRenderer): Element | null =>
+        renderer.containerEl.querySelector(".enhanced-graph-official-panel");
+      expect(panelOf(h.renderer)?.querySelector(marker)).not.toBeNull();
+      expect(panelOf(h.renderer)?.classList.contains("is-hidden")).toBe(false);
+
+      // Close the graph and open a new one: a new renderer, the same enhancer.
+      const reopened = new FakeOfficialRenderer([{ id: "a.md" }]);
+      h.appLeaves.graph = [makeLeaf(reopened, { render: () => reopened.setData({ nodes: {} }) })];
+      h.enhancer.sync();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      // Among the four panel toggles, exactly one may be lit — the one whose body is
+      // on screen. (The colour-mode buttons are a different group and one of them is
+      // legitimately active at the same time.)
+      const panelLabels = [
+        t("toolbar.insights"),
+        t("toolbar.filter"),
+        t("toolbar.appearance"),
+        t("toolbar.clustering"),
+      ];
+      const active = Array.from(
+        reopened.containerEl.querySelectorAll<HTMLElement>(
+          ".enhanced-graph-official-toolbar button.is-active",
+        ),
+      )
+        .map((el) => el.textContent ?? "")
+        // The insights toggle carries its undismissed-card count in the same label,
+        // so the group is matched by prefix rather than equality.
+        .map((label) => panelLabels.find((name) => label.startsWith(name)))
+        .filter((label): label is string => label !== undefined);
+      expect(panelOf(reopened)?.querySelector(marker)).not.toBeNull();
+      expect(active).toEqual([button]);
+      h.enhancer.stop();
+    }
   });
 
   it("hides a filtered type from the built-in graph itself", () => {

@@ -472,6 +472,14 @@ export class OfficialGraphEnhancer {
     if (!containerEl) return null;
     try {
       const overlay = containerEl.createDiv({ cls: "enhanced-graph-official-overlay" });
+      const panel = new OfficialSidePanel(overlay, this.panelOptions(renderer));
+      // The panel is new; the mode is not. This enhancer lives as long as the plugin
+      // while a graph view can be closed and reopened, so a view reopened with the
+      // filters open has to come back with the filters open AND its toolbar button
+      // lit. It used to come back showing insights under a highlighted 过滤器: the
+      // panel fell back to its own default while the toolbar read the mode that was
+      // still in force.
+      panel.showTab(this.tabForMode(this.panelMode), this.panelMode !== "none");
       const attachment: Attachment = {
         viewType,
         overlay,
@@ -481,7 +489,7 @@ export class OfficialGraphEnhancer {
         originalUnhover: renderer.onNodeUnhover ?? null,
         originalSetData: renderer.setData,
         setDataWasOwn: false,
-        panel: new OfficialSidePanel(overlay, this.panelOptions(renderer)),
+        panel,
         tooltip: new OfficialHoverTooltip(containerEl, this.hoverOptions()),
         legend: new OfficialLegend(containerEl, () => this.legendOptions()),
         markers: new OfficialMarkerLayer(containerEl),
@@ -819,6 +827,19 @@ export class OfficialGraphEnhancer {
     await this.deps.onSetMode(mode);
     this.refresh();
   }
+  /**
+   * Which panel tab a toolbar mode means.
+   *
+   * The one mapping, used both when the toolbar is pressed and when a panel is
+   * created — the two have to agree, and they are computed at different times.
+   */
+  private tabForMode(mode: "none" | "insights" | "filters" | "appearance" | "clustering"): PanelTab {
+    if (mode === "appearance") return "colors";
+    if (mode === "filters") return "filters";
+    if (mode === "clustering") return "clustering";
+    return "insights";
+  }
+
   private toolbarOptions(renderer: OfficialRenderer): ConstructorParameters<typeof OfficialToolbar>[1] {
     return {
       colorMode: () => {
@@ -854,15 +875,7 @@ export class OfficialGraphEnhancer {
         this.panelMode = this.panelMode === mode ? "none" : mode;
         for (const attachment of this.attachments.values()) {
           if (attachment.renderer !== renderer) continue;
-          const tab: PanelTab =
-            this.panelMode === "appearance"
-              ? "colors"
-              : this.panelMode === "filters"
-                ? "filters"
-                : this.panelMode === "clustering"
-                  ? "clustering"
-                  : "insights";
-          attachment.panel.showTab(tab, this.panelMode !== "none");
+          attachment.panel.showTab(this.tabForMode(this.panelMode), this.panelMode !== "none");
           attachment.toolbar.render();
           return;
         }
