@@ -2081,6 +2081,44 @@ describe("the built-in graph's toolbar", () => {
     }
   });
 
+  it("wires each visibility switch to its own setting, not its neighbour's", async () => {
+    // Reported as a suspicion that 隐藏孤立节点 hid index/overview pages: the two
+    // switches sit next to each other in the same group, and a swapped pair would
+    // look exactly like that. They are not swapped — this pins it.
+    const h = setup([{ id: "a.md" }], [makeNode({ id: "a" })]);
+    h.enhancer.start();
+    buttonSaying(toolbarOf(h), t("toolbar.filter"))?.dispatchEvent(
+      new MouseEvent("click", { bubbles: true }),
+    );
+    const panel = h.renderer.containerEl.querySelector<HTMLElement>(".enhanced-graph-official-panel")!;
+    selectTab(panel, t("filter.visibility"));
+    const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
+    const rowFor = (label: string): HTMLElement =>
+      Array.from(panel.querySelectorAll<HTMLElement>(".enhanced-graph-checkbox")).find((row) =>
+        row.textContent?.includes(label),
+      )!;
+    const toggle = async (label: string): Promise<void> => {
+      const box = rowFor(label).querySelector<HTMLInputElement>("input[type=checkbox]")!;
+      box.checked = !box.checked;
+      box.dispatchEvent(new Event("change", { bubbles: true }));
+      await settle();
+    };
+
+    await toggle(t("filter.hideIsolated"));
+    expect(h.hideIsolated).toBe(true);
+    expect(h.hideStructural).toBe(false);
+
+    await toggle(t("filter.hideStructural"));
+    expect(h.hideIsolated).toBe(true);
+    expect(h.hideStructural).toBe(true);
+
+    // Unticking the first leaves the second alone: two settings, two switches.
+    await toggle(t("filter.hideIsolated"));
+    expect(h.hideIsolated).toBe(false);
+    expect(h.hideStructural).toBe(true);
+  });
+
   it("hides a filtered type from the built-in graph itself", () => {
     const h = setup(
       [{ id: "a.md" }, { id: "b.md" }],

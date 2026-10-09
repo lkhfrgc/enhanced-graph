@@ -74,10 +74,17 @@ export function normalizePageType(raw: unknown): PageType {
   return TYPE_ALIASES[key] ?? (TYPE_ALIASES[raw.trim()] || "other");
 }
 
-/** Ids that are navigational scaffolding rather than knowledge. */
+/**
+ * Ids that are navigational scaffolding rather than knowledge.
+ *
+ * The Chinese entries include every word the visibility switch names — 索引, 概览,
+ * 日志 — because a switch that says it hides those and does not is worse than a
+ * shorter label. The English pattern below catches the same words as prefixes
+ * (`Index of Things`, `Log 2026-01`).
+ */
 const STRUCTURAL_SLUGS = new Set([
   "index", "overview", "log", "purpose", "schema", "home", "readme", "moc", "inbox",
-  "索引", "概述", "目录", "首页",
+  "索引", "概述", "目录", "首页", "概览", "日志",
 ]);
 
 export function isStructuralSlug(basename: string): boolean {

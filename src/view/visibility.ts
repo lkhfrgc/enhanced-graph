@@ -77,7 +77,12 @@ export function isNodeVisible(node: GraphNode, filters: VisibilityFilters): bool
   // Vault-wide, not build-wide: a note whose only links point outside the current
   // scope is a linked note that happens to have no visible neighbours, and the
   // switch is for notes that link to nothing at all.
-  if (filters.hideIsolated && node.vaultLinkCount === 0) return false;
+  //
+  // Structural pages are left to the switch that names them. An index with no links
+  // yet is still an index, and the isolated-page insight already excludes them for
+  // the same reason — a filter that hid them here would disagree with the report
+  // the panel shows.
+  if (filters.hideIsolated && !node.isStructural && node.vaultLinkCount === 0) return false;
   if (filters.tagFilterMode === "include") {
     const keep = filters.includedTags;
     // `null` is "nothing picked yet", which keeps everything; an EMPTY selection is

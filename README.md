@@ -43,6 +43,8 @@ Overlays community colouring, the association tooltip, an insights sidebar and c
 
 Toolbar, filters (type / tag / structural / isolated), appearance panel, weights panel, right-click focus and two-point connectivity, and Markdown export of the relevance report.
 
+The **structural** switch (隐藏索引 / 概览 / 日志) covers navigational pages, decided two ways: a frontmatter `type` that normalises to `overview` (`overview`, `概述`, `index`, `索引`, `moc`, `目录`, `导航`, `hub`), or a filename that is exactly one of `index`, `overview`, `log`, `purpose`, `schema`, `home`, `readme`, `moc`, `inbox`, `索引`, `概述`, `目录`, `首页`, `概览`, `日志` — or begins with `index`/`overview`/`log`/`purpose`/`schema`/`moc`. A note called `purpose.md` therefore counts as structural on its name alone. The **isolated** switch hides pages with no links anywhere in the vault and deliberately skips structural pages, which that switch owns.
+
 ---
 
 ## Installation

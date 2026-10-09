@@ -157,17 +157,30 @@ describe("isNodeVisible", () => {
     expect(isNodeVisible(target, filters({ hideIsolated: true }))).toBe(true);
   });
 
+  it("leaves structural pages to the switch that names them", () => {
+    // An index with no links yet is still an index. The isolated-page insight already
+    // excludes structural pages, so hiding them here would contradict the report the
+    // panel shows — and it is how a purpose/overview note vanished under 隐藏孤立节点.
+    const index = node("index", { isStructural: true, linkCount: 0, vaultLinkCount: 0 });
+    expect(isNodeVisible(index, filters({ hideIsolated: true }))).toBe(true);
+    expect(isNodeVisible(index, filters({ hideStructural: true }))).toBe(false);
+    // A structural page with links is visible either way.
+    expect(
+      isNodeVisible(node("overview", { isStructural: true, vaultLinkCount: 9 }), filters({ hideStructural: false })),
+    ).toBe(true);
+  });
+
   it("combines rules conjunctively", () => {
-    const target = node("a", {
-      tags: ["rag"],
-      isStructural: true,
-      linkCount: 0,
-      vaultLinkCount: 0,
-    });
+    const target = node("a", { tags: ["rag"], isStructural: true, vaultLinkCount: 9 });
     expect(isNodeVisible(target, filters({ hiddenTags: new Set(["rag"]) }))).toBe(false);
     expect(isNodeVisible(target, filters({ hideStructural: true }))).toBe(false);
-    expect(isNodeVisible(target, filters({ hideIsolated: true }))).toBe(false);
     expect(isNodeVisible(target, NO_FILTERS)).toBe(true);
+
+    // Each rule on its own node: hidden tags and an unlinked page are different
+    // reasons to be invisible, and the structural one has its own switch.
+    const unlinked = node("b", { linkCount: 0, vaultLinkCount: 0 });
+    expect(isNodeVisible(unlinked, filters({ hideIsolated: true }))).toBe(false);
+    expect(isNodeVisible(unlinked, filters({ hideIsolated: false }))).toBe(true);
   });
 
   it("does not mutate the filters it is given", () => {

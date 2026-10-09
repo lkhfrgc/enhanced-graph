@@ -274,6 +274,19 @@ describe("isStructuralSlug", () => {
     expect(isStructuralSlug("logs")).toBe(false);
     expect(isStructuralSlug("logo")).toBe(false);
   });
+
+  it("covers every word the visibility switch names, in both languages", () => {
+    // The switch reads 隐藏索引 / 概览 / 日志. All three have to be caught, or the
+    // label promises something the rule does not do — which is how a note called
+    // 概览.md stayed visible while the switch that names it was on.
+    for (const slug of ["索引", "概览", "日志"]) {
+      expect(isStructuralSlug(slug)).toBe(true);
+      expect(isStructuralSlug(`${slug}.md`)).toBe(true);
+    }
+    expect(isStructuralSlug("概述")).toBe(true);
+    expect(isStructuralSlug("目录")).toBe(true);
+    expect(isStructuralSlug("首页")).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------
