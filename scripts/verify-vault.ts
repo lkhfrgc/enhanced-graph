@@ -195,6 +195,41 @@ async function main(): Promise<void> {
           `(want ${scoped.expected}), ${scoped.stray.length} stray`,
   });
 
+  // What the workspace is FOR: the analysis runs over the scoped notes and nothing
+  // else. Clusters, insights and reports all read this graph, so a single
+  // out-of-scope node anywhere in them would mean a page that was never read is
+  // still being reported on.
+  if (scoped.folder !== "") {
+    const scopedGraph = await buildWikiGraph({ vault: new NodeVault(), workingFolder: scoped.folder });
+    const scopedInsights = analyzeGraph(scopedGraph);
+    // Everything the analysis reports is checked by PATH, wherever it appears: a
+    // cluster member, a connection endpoint, a gap's notes.
+    const reportedPaths = [
+      ...scopedGraph.communities.flatMap((community) =>
+        community.nodeIds.map((id) => [scopedGraph.nodeIndex.get(id)?.path ?? id, "cluster"] as const),
+      ),
+      ...scopedInsights.connections.flatMap((c) => [
+        [c.source.path, "connection"] as const,
+        [c.target.path, "connection"] as const,
+      ]),
+      ...scopedInsights.gaps.flatMap((gap) =>
+        gap.nodeIds.map((id) => [scopedGraph.nodeIndex.get(id)?.path ?? id, "coverage gap"] as const),
+      ),
+    ];
+    const outside = reportedPaths.filter(([path]) => !path.startsWith(`${scoped.folder}/`));
+    checks.push({
+      name: "the analysis covers the workspace and nothing else",
+      pass:
+        outside.length === 0 &&
+        scopedGraph.communities.length > 0 &&
+        scopedGraph.communities.every((community) => community.nodeIds.length > 0),
+      detail:
+        `${scopedInsights.connections.length} connections, ${scopedGraph.communities.length} clusters, ` +
+        `${scopedInsights.gaps.length} gaps; ${outside.length} out-of-scope ` +
+        `(${outside.slice(0, 3).map(([id, what]) => `${what}:${id}`).join(", ") || "none"})`,
+    });
+  }
+
   fs.mkdirSync(path.dirname(outFile), { recursive: true });
   fs.writeFileSync(
     outFile,

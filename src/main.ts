@@ -433,13 +433,15 @@ export default class EnhancedGraphPlugin extends Plugin implements PluginHost, S
   /**
    * Hand a finished rebuild to every open graph.
    *
-   * The built-in graph needs telling, and used to not be: it draws Obsidian's own
-   * node set, filtered by ours, and only asks the engine for a fresh payload when
-   * something refreshes it. A rebuild that only reloaded the standalone views left
-   * the built-in graph looking untouched until an unrelated repaint came along —
-   * which is what applying a workspace looked like from the outside.
+   * The build comes first, and is awaited for everything that follows. A rebuild
+   * request empties the cached graph, and the built-in graph has no view of ours to
+   * trigger a new one: refreshing it against the emptied cache gave it nothing to
+   * colour by and nothing to list in its panel — the graph filtered correctly,
+   * because that part reads payload paths, but its nodes lost their community
+   * colours and the workspace fields lost their folder suggestions.
    */
   private async applyRebuiltGraph(): Promise<void> {
+    await this.getGraph();
     for (const view of this.openViews()) await view.setGraphFromPlugin();
     this.officialGraph?.refresh();
   }
