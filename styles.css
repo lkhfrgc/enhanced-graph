@@ -582,26 +582,91 @@
   padding: 3px 6px;
 }
 
-/* The workspace group: a folder to read, folders to leave out, and the button that
-   makes both take effect. The rows are labelled rather than self-explanatory — one
-   select and a list of checkboxes look alike otherwise. */
-.enhanced-graph-workspace-row,
-.enhanced-graph-workspace-excluded {
+/* The workspace tree: one row per folder, children nested under their parent.
+   Indentation is this rule on the children container rather than a computed
+   padding per row, which keeps the code out of inline styles. */
+.enhanced-graph-folder-tree {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 1px;
   margin-bottom: 8px;
 }
 
-.enhanced-graph-workspace-label {
-  color: var(--text-muted);
-  font-size: var(--font-ui-smaller);
+.enhanced-graph-folder-children {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-left: 14px;
 }
 
-/* Wide enough for a nested path, and it shrinks rather than pushing the panel. */
-.enhanced-graph-folder-select {
-  width: 100%;
+.enhanced-graph-folder-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 22px;
+}
+
+/* Fixed-width either way, so a folder without children lines up with one that has
+   a twisty. */
+.enhanced-graph-folder-twisty {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.enhanced-graph-folder-twisty:hover {
+  color: var(--text-normal);
+  background: none;
+}
+
+.enhanced-graph-folder-name {
+  flex: 1 1 auto;
   min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  color: var(--text-normal);
+  font-size: var(--font-ui-smaller);
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.enhanced-graph-folder-name:hover {
+  color: var(--text-accent);
+  background: none;
+}
+
+/* The folder being read: the one click that decides the scope. */
+.enhanced-graph-folder-name.is-active {
+  color: var(--text-accent);
+  font-weight: 600;
+}
+
+/* Outside the workspace: still choosable — that is how the scope widens — but not
+   where the current choice is. */
+.enhanced-graph-folder-row.is-outside .enhanced-graph-folder-name {
+  opacity: 0.55;
+}
+
+.enhanced-graph-folder-row.is-outside .enhanced-graph-legend-count {
+  opacity: 0.55;
+}
+
+.enhanced-graph-folder-exclude {
+  flex: 0 0 auto;
+  margin: 0;
 }
 
 .enhanced-graph-workspace-actions {
@@ -612,12 +677,6 @@
 }
 
 /* The checkboxes themselves scroll with the panel, like every other list here. */
-.enhanced-graph-workspace-excluded .enhanced-graph-checkbox {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
 /* The search box and its restore button on one line: the button undoes what the
    search and the checkboxes below it did, so it sits with them. */
 .enhanced-graph-tag-search-row {

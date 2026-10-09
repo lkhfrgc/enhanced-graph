@@ -14,7 +14,7 @@
  */
 
 import { t } from "../i18n";
-import { PAGE_TYPES, type CommunityInfo, type PageType, type WikiGraph } from "../types";
+import { PAGE_TYPES, type CommunityInfo, type FolderInfo, type PageType, type WikiGraph } from "../types";
 import { collectTags, tagMatches, type TagFilterMode } from "./visibility";
 import { checkboxRow, tabRow } from "./controls";
 
@@ -97,7 +97,7 @@ export interface WorkspaceChoice {
   readonly folder: string;
   /** The applied excluded folder prefixes. */
   readonly excluded: readonly string[];
-  readonly folders: readonly string[];
+  readonly folders: readonly FolderInfo[];
 }
 
 /** One group's rows, and how the panel should label its tab. */
@@ -205,9 +205,21 @@ function renderVisibilityRows(section: HTMLElement, options: FilterOptions): voi
  */
 let pendingWorkspace: { folder: string; excluded: Set<string>; from: string } | null = null;
 
+/** Folders the user has folded shut. Expanded is the default; see the renderer. */
+const collapsedFolders = new Set<string>();
+
+/** The folder tree's search box text; module-level for the same reason as the tags'. */
+let workspaceQuery = "";
+
 /** `archive/old/` and `/archive/old` are the same folder to a reader. */
 function folderKey(prefix: string): string {
   return prefix.replace(/^\/+|\/+$/g, "");
+}
+
+/** `a/b/c` → `a/b`; a top-level folder and the root both have `""`. */
+function parentOf(path: string): string {
+  const cut = path.lastIndexOf("/");
+  return cut === -1 ? "" : path.slice(0, cut);
 }
 
 /**
@@ -225,54 +237,165 @@ function renderWorkspaceRows(section: HTMLElement, options: FilterOptions): void
   const appliedKey = `${applied.folder}\u0000${appliedExcluded.join("\u0000")}`;
   if (pendingWorkspace === null || pendingWorkspace.from !== appliedKey) {
     pendingWorkspace = { folder: applied.folder, excluded: new Set(appliedExcluded), from: appliedKey };
+    // A folder list that shrank (or a stored root that no longer exists) would
+    // otherwise leave a staged root with no row to show for it.
+    collapsedFolders.clear();
   }
   const pending = pendingWorkspace;
 
   section.createDiv({ cls: "enhanced-graph-hint", text: t("filter.workspaceHint") });
 
-  // --- the folder to read -------------------------------------------------
-  const picker = section.createDiv({ cls: "enhanced-graph-workspace-row" });
-  picker.createSpan({ cls: "enhanced-graph-workspace-label", text: t("filter.workspaceFolder") });
-  const select = picker.createEl("select", { cls: "enhanced-graph-folder-select dropdown" });
-  select.createEl("option", { text: t("filter.workspaceWholeVault"), value: "" });
-  for (const folder of applied.folders) {
-    // Indented by depth, so a nested list reads as a tree inside a flat select.
-    const depth = folder.split("/").length - 1;
-    select.createEl("option", { text: `${"\u00a0\u00a0".repeat(depth)}${folder}/`, value: folder });
-  }
-  // A folder that is applied but not in the vault's list — mistyped, or deleted
-  // since — is still listed, so the select cannot quietly show "whole vault" while
-  // the graph is in fact scoped to something.
-  if (pending.folder !== "" && !applied.folders.includes(pending.folder)) {
-    select.createEl("option", { text: pending.folder, value: pending.folder });
-  }
-  select.value = pending.folder;
-  select.addEventListener("change", () => {
-    pending.folder = select.value;
-    syncApply();
-  });
+  // --- the search box -----------------------------------------------------
+  const searchRow = section.createDiv({ cls: "enhanced-graph-tag-search-row" });
+  const search = searchRow.createEl("input", { cls: "enhanced-graph-tag-search" });
+  search.type = "search";
+  search.placeholder = t("filter.workspaceSearch");
+  search.value = workspaceQuery;
 
-  // --- the folders to leave out -------------------------------------------
-  const excludedBox = section.createDiv({ cls: "enhanced-graph-workspace-excluded" });
-  excludedBox.createSpan({ cls: "enhanced-graph-workspace-label", text: t("filter.workspaceExcluded") });
-  // Prefixes that are not among the vault's folders — hand-written into an older
-  // settings file, say — stay in the list, so applying cannot drop them unseen.
-  const unknown = appliedExcluded.filter((key) => key !== "" && !applied.folders.includes(key));
-  const rows = [...applied.folders, ...unknown];
-  if (rows.length === 0) {
-    excludedBox.createDiv({ cls: "enhanced-graph-tag-empty", text: t("filter.workspaceNoFolders") });
-  }
-  for (const folder of rows) {
-    const row = excludedBox.createEl("label", { cls: "enhanced-graph-checkbox" });
-    const input = row.createEl("input", { type: "checkbox" });
-    input.checked = pending.excluded.has(folder);
-    input.addEventListener("change", () => {
-      if (input.checked) pending.excluded.add(folder);
-      else pending.excluded.delete(folder);
-      syncApply();
+  // --- the tree -----------------------------------------------------------
+  // One row per folder, nested by depth, and ONE model behind it: a single root to
+  // read, minus any number of excluded subtrees. A tree rather than two lists
+  // because the two halves are not independent — excluding `templates` excludes
+  // everything under it, and a flat list of checkboxes showed those children as if
+  // they were still being read.
+  const tree = section.createDiv({ cls: "enhanced-graph-folder-tree" });
+
+  /** Folders to draw: the query's matches, plus the ancestors that lead to them. */
+  const visible = (): FolderInfo[] => {
+    const query = workspaceQuery.trim().toLowerCase();
+    if (query === "") return [...applied.folders];
+    const matched = new Set<string>();
+    for (const entry of applied.folders) {
+      if (entry.path.toLowerCase().includes(query)) {
+        matched.add(entry.path);
+        // The path down to a match, so a deep match is still reachable.
+        const parts = entry.path.split("/");
+        for (let depth = 1; depth <= parts.length; depth += 1) matched.add(parts.slice(0, depth).join("/"));
+      }
+    }
+    return applied.folders.filter((entry) => matched.has(entry.path));
+  };
+
+  const rows = visible();
+  /** Children of a folder among the rows actually drawn. */
+  const childrenOf = (path: string): FolderInfo[] =>
+    rows.filter((entry) => entry.path !== path && parentOf(entry.path) === path);
+  /** Folders the settings exclude that the vault no longer has, drawn as leaves. */
+  const extra = appliedExcluded
+    .filter((key) => key !== "" && !applied.folders.some((folder) => folder.path === key))
+    .map((path) => ({ path, count: 0 }));
+
+  /**
+   * Excluded by its own tick or by any ancestor's — the rule the UI has to show.
+   *
+   * A prefix excludes its whole subtree, so a child of an excluded folder is not
+   * read whether or not it is ticked itself. Reporting that (checked and disabled)
+   * is the difference between a tree the user can predict and one that lies.
+   */
+  const excludedWithAncestors = (path: string): boolean => {
+    if (path === "") return false;
+    const parts = path.split("/");
+    for (let depth = 1; depth <= parts.length; depth += 1) {
+      if (pending.excluded.has(parts.slice(0, depth).join("/"))) return true;
+    }
+    return false;
+  };
+  /** Inside the staged root — the only folders an exclusion can act on. */
+  const inRoot = (path: string): boolean =>
+    pending.folder === "" || path === pending.folder || path.startsWith(`${pending.folder}/`);
+  const redraw = (): void => {
+    section.empty();
+    renderWorkspaceRows(section, options);
+  };
+
+  /**
+   * Draws one row and, unless it is folded shut, its children beneath it.
+   *
+   * Nesting is real DOM nesting rather than an indent computed per row: the
+   * indentation is a stylesheet rule on the children container, so it stays out of
+   * the code and out of the inline styles the plugin guidelines forbid.
+   */
+  const drawRow = (entry: FolderInfo, container: HTMLElement): void => {
+    const { path, count } = entry;
+    const row = container.createDiv({ cls: "enhanced-graph-folder-row" });
+    row.dataset.folder = path;
+    row.dataset.depth = String(path === "" ? 0 : path.split("/").length - 1);
+    if (path === pending.folder) row.classList.add("is-root");
+    if (!inRoot(path)) row.classList.add("is-outside");
+
+    const children = childrenOf(path);
+    const collapsed = collapsedFolders.has(path);
+    // The twisty, or the gap where one would be, so names line up.
+    if (children.length > 0) {
+      const twisty = row.createEl("button", { cls: "enhanced-graph-folder-twisty" });
+      twisty.setText(collapsed ? "▸" : "▾");
+      twisty.setAttribute("aria-label", collapsed ? t("filter.workspaceExpand") : t("filter.workspaceCollapse"));
+      twisty.addEventListener("click", () => {
+        if (collapsed) collapsedFolders.delete(path);
+        else collapsedFolders.add(path);
+        redraw();
+      });
+    } else {
+      row.createSpan({ cls: "enhanced-graph-folder-twisty" });
+    }
+
+    // The name chooses the root: one click, and it says which one is chosen.
+    const name = row.createEl("button", {
+      cls: `enhanced-graph-folder-name${path === pending.folder ? " is-active" : ""}`,
+      text: path === "" ? t("filter.workspaceWholeVault") : `${path}/`,
     });
-    row.createSpan({ text: `${folder}/` });
+    name.addEventListener("click", () => {
+      pending.folder = path;
+      // The choice's own path is opened up, so the row that is now the root cannot
+      // be hidden behind a folded ancestor.
+      const parts = path.split("/");
+      for (let depth = 1; depth <= parts.length; depth += 1) {
+        collapsedFolders.delete(parts.slice(0, depth).join("/"));
+      }
+      redraw();
+    });
+
+    row.createSpan({ cls: "enhanced-graph-legend-count", text: String(count) });
+
+    if (path !== "") {
+      const box = row.createEl("input", { cls: "enhanced-graph-folder-exclude", type: "checkbox" });
+      const inherited = excludedWithAncestors(path) && !pending.excluded.has(path);
+      box.checked = excludedWithAncestors(path);
+      // Disabled in the two states where ticking would say something the model
+      // cannot do: outside the root there is nothing to exclude, and under an
+      // exclusion the ancestor wins — untick that one instead.
+      box.disabled = !inRoot(path) || inherited;
+      if (inherited) box.title = t("filter.workspaceInherited");
+      box.addEventListener("change", () => {
+        if (box.checked) pending.excluded.add(path);
+        else pending.excluded.delete(path);
+        redraw();
+      });
+    }
+
+    // Folded shut means the children are not drawn at all, which is what makes a
+    // vault with dozens of nested folders navigable: what is on screen is the path
+    // to the choice, and the rest stays one twisty away.
+    if (children.length > 0 && !collapsed) {
+      const nested = container.createDiv({ cls: "enhanced-graph-folder-children" });
+      nested.dataset.parent = path;
+      for (const child of children) drawRow(child, nested);
+    }
+  };
+
+  const roots = [rows.find((entry) => entry.path === "") ?? { path: "", count: 0 }, ...extra];
+  for (const entry of roots) drawRow(entry, tree);
+
+  if (rows.length === 0 && extra.length === 0) {
+    tree.createDiv({ cls: "enhanced-graph-tag-empty", text: t("filter.workspaceNoFolders") });
   }
+
+  search.addEventListener("input", () => {
+    workspaceQuery = search.value;
+    // A search answers "where is that folder?", so anything it matches is opened.
+    collapsedFolders.clear();
+    redraw();
+  });
 
   // --- apply ---------------------------------------------------------------
   const actions = section.createDiv({ cls: "enhanced-graph-workspace-actions" });
@@ -285,10 +408,8 @@ function renderWorkspaceRows(section: HTMLElement, options: FilterOptions): void
     pending.excluded.size !== appliedExcluded.length ||
     [...pending.excluded].some((folder) => !appliedExcluded.includes(folder));
 
-  function syncApply(): void {
-    apply.disabled = !isDirty();
-    reset.classList.toggle("is-hidden", !isDirty());
-  }
+  apply.disabled = !isDirty();
+  reset.classList.toggle("is-hidden", !isDirty());
 
   apply.addEventListener("click", () => {
     if (!isDirty()) return;
@@ -312,8 +433,6 @@ function renderWorkspaceRows(section: HTMLElement, options: FilterOptions): void
     section.empty();
     renderWorkspaceRows(section, options);
   });
-
-  syncApply();
 }
 
 /**

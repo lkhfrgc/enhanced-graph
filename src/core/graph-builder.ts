@@ -19,6 +19,7 @@
 import { EMPTY_GRAPH } from "../types";
 import type {
   CommunityInfo,
+  FolderInfo,
   GraphEdge,
   GraphNode,
   PageType,
@@ -433,14 +434,16 @@ function countCommonNeighbors(a: string, b: string, ctx: RelevanceContext): numb
 // ---------------------------------------------------------------------------
 
 /**
- * Every folder in the vault that holds a note, plus its ancestors, sorted.
+ * Every folder in the vault that holds a note, plus its ancestors, with the number
+ * of notes in each one's whole subtree. The vault root is first, counting the notes
+ * that sit directly in it.
  *
  * Deliberately independent of the working folder: this is the list the workspace
  * picker offers, and a list narrowed by the current scope could only ever offer
  * folders already inside it — no way back up. The user's own `excludeFolders` are
  * ignored here too, so an excluded folder stays selectable and can be un-excluded.
  */
-export async function listVaultFolders(vault: VaultAdapter): Promise<string[]> {
+export async function listVaultFolders(vault: VaultAdapter): Promise<FolderInfo[]> {
   let listed: readonly string[];
   try {
     listed = await vault.listMarkdownFiles();
@@ -449,21 +452,48 @@ export async function listVaultFolders(vault: VaultAdapter): Promise<string[]> {
   }
 
   const configDir = vault.configDir();
-  const folders = new Set<string>();
+  // Counted per folder, then folded upwards: a parent's total is its own notes plus
+  // every descendant's, which is the number a chooser should show.
+  const direct = new Map<string, number>();
+  const present = new Set<string>();
   for (const raw of listed) {
     const path = normalizeVaultPath(raw);
     if (!/\.md$/i.test(path)) continue;
     if (isExcludedPath(path, [], configDir)) continue;
     const parts = path.split("/");
     parts.pop();
-    // Every ancestor, not just the immediate parent: `a/b/c.md` makes `a` and
-    // `a/b` selectable, so a deeply nested vault can still be scoped to a top
-    // folder.
-    for (let depth = 1; depth <= parts.length; depth += 1) {
-      folders.add(parts.slice(0, depth).join("/"));
+    const folder = parts.join("/");
+    direct.set(folder, (direct.get(folder) ?? 0) + 1);
+    // Every ancestor of the note's folder exists as a row, so a deeply nested vault
+    // can still be scoped to a top folder.
+    for (let depth = 0; depth <= parts.length; depth += 1) {
+      present.add(parts.slice(0, depth).join("/"));
     }
   }
-  return [...folders].sort(compareStrings);
+
+  const countOf = (folder: string): number => {
+    if (folder === "") return direct.get("") ?? 0;
+    let total = 0;
+    for (const [path, count] of direct) {
+      if (path === folder || path.startsWith(`${folder}/`)) total += count;
+    }
+    return total;
+  };
+
+  // A vault with no notes has no folders to offer, not even the root: an empty list
+  // is what keeps `buildWikiGraph` returning the EMPTY_GRAPH singleton for a vault
+  // (or a byte budget) that yields nothing.
+  if (present.size === 0) return [];
+
+  // The root first, then every folder depth-first — the order the picker draws them
+  // in, and stable across rebuilds.
+  return [
+    { path: "", count: countOf("") },
+    ...[...present]
+      .filter((folder) => folder !== "")
+      .sort(compareStrings)
+      .map((folder) => ({ path: folder, count: countOf(folder) })),
+  ];
 }
 
 export async function buildWikiGraph(options: BuildGraphOptions): Promise<WikiGraph> {

@@ -1886,9 +1886,9 @@ async function main() {
     // --- 11a-2. the workspace group, in the standalone view ----------------
     // The same panel module serves both views, and the built-in graph's copy is
     // driven in `verify-official-filters.mjs`. What is measured here is the
-    // standalone view's own half: that its panel offers the folders, that the
-    // choice is staged until 应用, and that applying writes the settings and asks
-    // the plugin to rebuild — against a fake plugin that counts the requests.
+    // standalone view's own half: that its panel draws the vault's folder tree,
+    // that the choice is staged until 应用, and that applying writes the settings and
+    // asks the plugin to rebuild — against a fake plugin that counts the requests.
     const workspace = await page.evaluate(async () => {
       const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       const tab = [...document.querySelectorAll(".enhanced-graph-panel-tabs button")].find((el) =>
@@ -1897,36 +1897,64 @@ async function main() {
       tab?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       await sleep(450);
 
-      const picker = document.querySelector(".enhanced-graph-folder-select");
-      const options = picker ? [...picker.options].map((option) => option.value) : [];
-      const rows = [...document.querySelectorAll(".enhanced-graph-workspace-excluded label")];
-      const applyButton = [...document.querySelectorAll(".enhanced-graph-workspace-actions button")].find(
-        (el) => el.textContent?.includes("应用"),
-      );
-      const disabledAtRest = applyButton?.disabled ?? null;
+      const rows = () => [...document.querySelectorAll(".enhanced-graph-folder-row")];
+      const shape = rows().map((row) => ({
+        folder: row.dataset.folder,
+        count: row.querySelector(".enhanced-graph-legend-count")?.textContent,
+      }));
+      const applyButton = () =>
+        [...document.querySelectorAll(".enhanced-graph-workspace-actions button")].find((el) =>
+          el.textContent?.includes("应用"),
+        );
+      const disabledAtRest = applyButton()?.disabled ?? null;
       const rebuildsBefore = window.__HARNESS__.rebuilds();
       const settingsBefore = {
         folder: window.__HARNESS__.settings.workingFolder,
         excluded: [...window.__HARNESS__.settings.excludeFolders],
       };
 
-      // Stage: pick a folder and tick one exclusion.
-      picker.value = options[1] ?? "";
-      picker.dispatchEvent(new Event("change", { bubbles: true }));
-      const tickBox = rows[1]?.querySelector("input");
-      if (tickBox) {
-        tickBox.checked = true;
-        tickBox.dispatchEvent(new Event("change", { bubbles: true }));
-      }
+      // Stage: name a folder as the root, then go back to the whole vault and
+      // exclude one folder. Naming proves the root control; the exclusion proves the
+      // other half, and the demo vault is flat, so it is exercised this way round.
+      const target = shape.find((row) => row.folder !== "")?.folder ?? "";
+      rows()
+        .find((row) => row.dataset.folder === target)
+        ?.querySelector(".enhanced-graph-folder-name")
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       await sleep(300);
+      const stagedRoot = document.querySelector(".enhanced-graph-folder-name.is-active")?.closest(
+        ".enhanced-graph-folder-row",
+      )?.dataset.folder;
+
+      rows()
+        .find((row) => row.dataset.folder === "")
+        ?.querySelector(".enhanced-graph-folder-name")
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await sleep(300);
+      // The folder after the one just named: still inside the whole vault, so its
+      // exclusion control is live.
+      const excludedFolder =
+        shape.find((row) => row.folder !== "" && row.folder !== target)?.folder ?? null;
+      let exclusionDisabled = null;
+      if (excludedFolder) {
+        const box = rows()
+          .find((row) => row.dataset.folder === excludedFolder)
+          ?.querySelector(".enhanced-graph-folder-exclude");
+        exclusionDisabled = box?.disabled ?? null;
+        if (box && !box.disabled) {
+          box.checked = true;
+          box.dispatchEvent(new Event("change", { bubbles: true }));
+          await sleep(250);
+        }
+      }
       const staged = {
         rebuilds: window.__HARNESS__.rebuilds() - rebuildsBefore,
         folder: window.__HARNESS__.settings.workingFolder,
         excluded: [...window.__HARNESS__.settings.excludeFolders],
-        enabled: applyButton?.disabled === false,
+        enabled: applyButton()?.disabled === false,
       };
 
-      applyButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      applyButton()?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       await sleep(500);
       const applied = {
         rebuilds: window.__HARNESS__.rebuilds() - rebuildsBefore,
@@ -1935,57 +1963,113 @@ async function main() {
       };
 
       // Put the workspace back so the checks that follow see the whole vault.
-      const restore = document.querySelector(".enhanced-graph-folder-select");
-      if (restore) {
-        restore.value = "";
-        restore.dispatchEvent(new Event("change", { bubbles: true }));
-        const box = document.querySelector(
-          ".enhanced-graph-workspace-excluded label:nth-child(2) input",
-        );
-        if (box?.checked) {
+      rows()
+        .find((row) => row.dataset.folder === "")
+        ?.querySelector(".enhanced-graph-folder-name")
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await sleep(300);
+      for (const row of rows()) {
+        const box = row.querySelector(".enhanced-graph-folder-exclude");
+        if (box && box.checked && !box.disabled) {
           box.checked = false;
           box.dispatchEvent(new Event("change", { bubbles: true }));
+          await sleep(200);
         }
-        const apply = [...document.querySelectorAll(".enhanced-graph-workspace-actions button")].find((el) =>
-          el.textContent?.includes("应用"),
-        );
-        apply?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-        await sleep(500);
       }
+      applyButton()?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await sleep(500);
 
-      return { options, rows: rows.length, disabledAtRest, settingsBefore, staged, applied };
+      // The controls that make a vault with many folders navigable, on the demo
+      // vault's ten: collapsing the root hides everything under it, and the search
+      // box cuts the tree down to the folders that match.
+      const rowsNow = () => rows().length;
+      const beforeCollapse = rowsNow();
+      document
+        .querySelector('.enhanced-graph-folder-row[data-folder=""] .enhanced-graph-folder-twisty')
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await sleep(400);
+      const collapsed = rowsNow();
+      document
+        .querySelector('.enhanced-graph-folder-row[data-folder=""] .enhanced-graph-folder-twisty')
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await sleep(400);
+      const expandedAgain = rowsNow();
+
+      const search = document.querySelector(".enhanced-graph-tag-search");
+      search.value = "con";
+      search.dispatchEvent(new Event("input", { bubbles: true }));
+      await sleep(400);
+      const searched = rows().map((row) => row.dataset.folder);
+      search.value = "";
+      search.dispatchEvent(new Event("input", { bubbles: true }));
+      await sleep(400);
+
+      return {
+        shape,
+        disabledAtRest,
+        settingsBefore,
+        stagedRoot,
+        excludedFolder,
+        exclusionDisabled,
+        staged,
+        applied,
+        beforeCollapse,
+        collapsed,
+        expandedAgain,
+        searched,
+      };
     });
 
     console.log(
-      `\n  workspace (standalone): folders ${JSON.stringify(workspace.options)}; ` +
-        `${workspace.rows} exclusion rows; disabled at rest ${workspace.disabledAtRest}; ` +
-        `staged → ${workspace.staged.rebuilds} rebuild(s), ${JSON.stringify(workspace.staged.folder)}/` +
+      `\n  workspace tree (standalone): ${workspace.shape.length} rows, first ` +
+        `${JSON.stringify(workspace.shape[0])}; disabled at rest ${workspace.disabledAtRest}; ` +
+        `staged root ${JSON.stringify(workspace.stagedRoot)} excluding ${JSON.stringify(workspace.excludedFolder)} ` +
+        `(box disabled ${workspace.exclusionDisabled}) → ` +
+        `${workspace.staged.rebuilds} rebuild(s), settings ${JSON.stringify(workspace.staged.folder)}/` +
         `${JSON.stringify(workspace.staged.excluded)}; applied → ${workspace.applied.rebuilds} rebuild(s), ` +
         `${JSON.stringify(workspace.applied.folder)}/${JSON.stringify(workspace.applied.excluded)}\n`,
     );
     check(
-      "工作区 in the standalone view offers the vault's folders, whole vault first",
-      workspace.options.length > 1 && workspace.options[0] === "" && workspace.rows === workspace.options.length - 1,
-      `${JSON.stringify(workspace.options)} with ${workspace.rows} exclusion rows`,
+      "工作区 in the standalone view draws the vault root first, with a row per folder",
+      workspace.shape.length > 2 &&
+        workspace.shape[0].folder === "" &&
+        workspace.shape.slice(1).every((row) => row.folder !== "") &&
+        workspace.shape.slice(1).every((row) => Number(row.count) > 0),
+      workspace.shape.map((row) => `${row.folder || "(root)"}=${row.count}`).join(", "),
     );
     check(
       "staging a workspace in the standalone view changes nothing yet",
       workspace.disabledAtRest === true &&
+        workspace.stagedRoot !== undefined &&
+        workspace.exclusionDisabled === false &&
         workspace.staged.rebuilds === 0 &&
         workspace.staged.folder === workspace.settingsBefore.folder &&
         JSON.stringify(workspace.staged.excluded) === JSON.stringify(workspace.settingsBefore.excluded) &&
         workspace.staged.enabled === true,
-      `disabled at rest ${workspace.disabledAtRest}; staged ${workspace.staged.rebuilds} rebuilds, ` +
-        `${JSON.stringify(workspace.staged.folder)}/${JSON.stringify(workspace.staged.excluded)} ` +
+      `disabled at rest ${workspace.disabledAtRest}, staged root ${JSON.stringify(workspace.stagedRoot)}, ` +
+        `exclusion box disabled ${workspace.exclusionDisabled}; ` +
+        `${workspace.staged.rebuilds} rebuilds, ${JSON.stringify(workspace.staged.folder)}/` +
+        `${JSON.stringify(workspace.staged.excluded)} ` +
         `(was ${JSON.stringify(workspace.settingsBefore.folder)}/${JSON.stringify(workspace.settingsBefore.excluded)})`,
     );
     check(
       "应用 in the standalone view writes both settings and asks for one rebuild",
       workspace.applied.rebuilds === 1 &&
-        workspace.applied.folder === workspace.options[1] &&
-        workspace.applied.excluded.length === 1,
+        workspace.applied.folder === "" &&
+        JSON.stringify(workspace.applied.excluded) === JSON.stringify([`${workspace.excludedFolder}/`]),
       `${workspace.applied.rebuilds} rebuild(s), ${JSON.stringify(workspace.applied.folder)}/` +
-        `${JSON.stringify(workspace.applied.excluded)}`,
+        `${JSON.stringify(workspace.applied.excluded)} (wanted ""/${JSON.stringify(workspace.excludedFolder)}/)`,
+    );
+    check(
+      "a long folder list stays navigable: the tree folds and the search narrows it",
+      workspace.beforeCollapse > 2 &&
+        workspace.collapsed === 1 &&
+        workspace.expandedAgain === workspace.beforeCollapse &&
+        workspace.searched.length < workspace.beforeCollapse &&
+        workspace.searched.includes("concepts") &&
+        workspace.searched.every((folder) => folder.includes("con") || folder === "" || "concepts".startsWith(folder)),
+      `${workspace.beforeCollapse} rows → collapsed ${workspace.collapsed} → expanded ${workspace.expandedAgain}; ` +
+        `search "con" → ${JSON.stringify(workspace.searched)}`,
     );
 
     // --- 11b. the "no matching nodes" message ------------------------------

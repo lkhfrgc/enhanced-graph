@@ -115,19 +115,34 @@ export interface CommunityInfo {
   readonly nodeIds: readonly string[];
 }
 
+/**
+ * A folder the workspace picker can offer.
+ *
+ * `count` is the notes in this folder AND everything below it, so choosing a
+ * folder shows how much of the vault it stands for — the only number that helps
+ * when a vault has dozens of nested folders.
+ */
+export interface FolderInfo {
+  /** Vault-relative path; empty means the vault root. */
+  readonly path: string;
+  /** Notes in this folder and its subfolders. */
+  readonly count: number;
+}
+
 export interface WikiGraph {
   readonly nodes: readonly GraphNode[];
   readonly edges: readonly GraphEdge[];
   readonly communities: readonly CommunityInfo[];
   readonly nodeIndex: ReadonlyMap<string, GraphNode>;
   /**
-   * Every folder in the vault that holds a note, and its ancestors, sorted.
+   * Every folder in the vault that holds a note, plus its ancestors, sorted, with
+   * the vault root first.
    *
    * Collected BEFORE the working folder narrows the build, so the scope can always
    * be widened again from the panel: a list built from the scoped notes would only
    * ever offer the folders already inside it, and there would be no way back up.
    */
-  readonly folders: readonly string[];
+  readonly folders: readonly FolderInfo[];
   readonly builtAt: number;
 }
 

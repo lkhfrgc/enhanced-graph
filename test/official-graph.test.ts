@@ -31,6 +31,7 @@ import type { GraphInsights } from "../src/core/insights";
 import {
   EMPTY_GRAPH,
   type CommunityInfo,
+  type FolderInfo,
   type GraphNode,
   type PageType,
   type UnexpectedLink,
@@ -157,7 +158,7 @@ function makeGraph(
   nodes: GraphNode[],
   communities: CommunityInfo[] = [],
   edges: Array<WikiGraph["edges"][number]> = [],
-  folders: readonly string[] = [],
+  folders: readonly FolderInfo[] = [],
 ): WikiGraph {
   return {
     nodes,
@@ -222,7 +223,11 @@ function setup(
   graphNodes: GraphNode[],
   mode: "off" | "community" | "type" = "community",
   /** Graph metadata the workspace group reads: the vault's folders, and what is applied. */
-  workspace: { folders?: readonly string[]; workingFolder?: string; excludeFolders?: readonly string[] } = {},
+  workspace: {
+    folders?: readonly FolderInfo[];
+    workingFolder?: string;
+    excludeFolders?: readonly string[];
+  } = {},
 ): Harness {
   const renderer = new FakeOfficialRenderer(ids);
   const graph = makeGraph(
@@ -1731,9 +1736,16 @@ describe("the built-in graph's toolbar", () => {
       [{ id: "a.md" }, { id: "b.md" }, { id: "c.md" }],
       [makeNode({ id: "a" }), makeNode({ id: "b" }), makeNode({ id: "c" })],
       "community",
-      // The folder list the builder reports: every folder holding a note, plus its
-      // ancestors — collected before the scope narrowed anything.
-      { folders: ["notes", "notes/deep", "archive"] },
+      // What the builder reports: the vault root first, then each folder with the
+      // notes in its whole subtree.
+      {
+        folders: [
+          { path: "", count: 3 },
+          { path: "notes", count: 2 },
+          { path: "notes/deep", count: 1 },
+          { path: "archive", count: 1 },
+        ],
+      },
     );
     h.enhancer.start();
     buttonSaying(toolbarOf(h), t("toolbar.filter"))?.dispatchEvent(
@@ -1743,33 +1755,44 @@ describe("the built-in graph's toolbar", () => {
     selectTab(panel, t("filter.workspace"));
     const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
 
-    const picker = (): HTMLSelectElement =>
-      panel.querySelector<HTMLSelectElement>(".enhanced-graph-folder-select")!;
-    const excludedRows = (): HTMLLabelElement[] =>
-      Array.from(panel.querySelectorAll<HTMLLabelElement>(".enhanced-graph-workspace-excluded label"));
+    const folderRow = (path: string): HTMLElement =>
+      panel.querySelector<HTMLElement>(`.enhanced-graph-folder-row[data-folder="${path}"]`)!;
+    const nameOf = (path: string): HTMLButtonElement =>
+      folderRow(path).querySelector<HTMLButtonElement>(".enhanced-graph-folder-name")!;
+    const boxOf = (path: string): HTMLInputElement =>
+      folderRow(path).querySelector<HTMLInputElement>(".enhanced-graph-folder-exclude")!;
     const applyButton = (): HTMLButtonElement =>
       Array.from(panel.querySelectorAll<HTMLButtonElement>("button")).find(
         (button) => button.textContent === t("filter.workspaceApply"),
       )!;
 
-    // Every folder is offered, with the whole vault first, and nothing is staged
-    // yet — so Apply has nothing to do.
-    expect(Array.from(picker().options).map((option) => option.value)).toEqual([
-      "",
-      "notes",
-      "notes/deep",
-      "archive",
+    // The whole tree, in depth-first order: the vault root, then each folder with
+    // the number of notes it stands for. Nothing is staged yet, so Apply is idle.
+    expect(
+      Array.from(panel.querySelectorAll<HTMLElement>(".enhanced-graph-folder-row")).map((row) => [
+        row.dataset.folder,
+        row.dataset.depth,
+        row.querySelector(".enhanced-graph-legend-count")?.textContent,
+      ]),
+    ).toEqual([
+      ["", "0", "3"],
+      ["notes", "0", "2"],
+      ["notes/deep", "1", "1"],
+      ["archive", "0", "1"],
     ]);
-    expect(picker().value).toBe("");
-    expect(excludedRows().map((row) => row.textContent)).toEqual(["notes/", "notes/deep/", "archive/"]);
+    expect(nameOf("").textContent).toBe(t("filter.workspaceWholeVault"));
+    expect(nameOf("").classList.contains("is-active")).toBe(true);
     expect(applyButton().disabled).toBe(true);
 
-    // Choosing and ticking only stages: the host is told nothing, and the graph is
-    // asked for no rebuild, until the button is pressed.
-    picker().value = "notes";
-    picker().dispatchEvent(new Event("change", { bubbles: true }));
-    const deepRow = excludedRows().find((row) => row.textContent === "notes/deep/")!;
-    const deepBox = deepRow.querySelector<HTMLInputElement>("input")!;
+    // Naming a folder and ticking an exclusion only stage: the host is told nothing
+    // until the button is pressed.
+    nameOf("notes").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await settle();
+    expect(nameOf("notes").classList.contains("is-active")).toBe(true);
+    expect(nameOf("").classList.contains("is-active")).toBe(false);
+    expect(h.appliedWorkspaces).toEqual([]);
+
+    const deepBox = boxOf("notes/deep");
     deepBox.checked = true;
     deepBox.dispatchEvent(new Event("change", { bubbles: true }));
     await settle();
@@ -1783,11 +1806,60 @@ describe("the built-in graph's toolbar", () => {
     expect(h.appliedWorkspaces).toEqual([{ folder: "notes", excluded: ["notes/deep/"] }]);
   });
 
+  it("shows a folder under an excluded one as excluded, and stops it being ticked", async () => {
+    // The prefix rule excludes the whole subtree, so a child of an excluded folder
+    // is not read whether or not it is ticked. A flat list of checkboxes showed it
+    // unticked — claiming a folder was being read when it was not.
+    const h = setup([{ id: "a.md" }], [makeNode({ id: "a" })], "community", {
+      folders: [
+        { path: "", count: 3 },
+        { path: "notes", count: 3 },
+        { path: "notes/deep", count: 2 },
+        { path: "notes/deep/deeper", count: 1 },
+      ],
+      excludeFolders: ["notes/"],
+    });
+    h.enhancer.start();
+    buttonSaying(toolbarOf(h), t("toolbar.filter"))?.dispatchEvent(
+      new MouseEvent("click", { bubbles: true }),
+    );
+    const panel = h.renderer.containerEl.querySelector<HTMLElement>(".enhanced-graph-official-panel")!;
+    selectTab(panel, t("filter.workspace"));
+    const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+    const folderRow = (path: string): HTMLElement =>
+      panel.querySelector<HTMLElement>(`.enhanced-graph-folder-row[data-folder="${path}"]`)!;
+    const boxOf = (path: string): HTMLInputElement =>
+      folderRow(path).querySelector<HTMLInputElement>(".enhanced-graph-folder-exclude")!;
+
+    // The excluded folder itself: ticked, and still tickable — it is the control
+    // that undoes the exclusion.
+    expect(boxOf("notes").checked).toBe(true);
+    expect(boxOf("notes").disabled).toBe(false);
+    // Everything under it: shown as excluded, and not tickable — unticking would
+    // promise to keep a folder the prefix rule takes away anyway.
+    expect(boxOf("notes/deep").checked).toBe(true);
+    expect(boxOf("notes/deep").disabled).toBe(true);
+    expect(boxOf("notes/deep/deeper").checked).toBe(true);
+    expect(boxOf("notes/deep/deeper").disabled).toBe(true);
+    expect(boxOf("notes/deep").title).toBe(t("filter.workspaceInherited"));
+
+    // Unticking the parent frees the subtree again.
+    const parent = boxOf("notes");
+    parent.checked = false;
+    parent.dispatchEvent(new Event("change", { bubbles: true }));
+    await settle();
+    expect(boxOf("notes/deep").checked).toBe(false);
+    expect(boxOf("notes/deep").disabled).toBe(false);
+  });
+
   it("keeps an excluded prefix that is not a folder in the vault", async () => {
     // A prefix can be hand-written into a settings file, or name a folder that has
     // since gone. Applying must not silently drop it.
     const h = setup([{ id: "a.md" }], [makeNode({ id: "a" })], "community", {
-      folders: ["notes"],
+      folders: [
+        { path: "", count: 2 },
+        { path: "notes", count: 1 },
+      ],
       excludeFolders: ["gone/"],
     });
     h.enhancer.start();
@@ -1797,20 +1869,20 @@ describe("the built-in graph's toolbar", () => {
     const panel = h.renderer.containerEl.querySelector<HTMLElement>(".enhanced-graph-official-panel")!;
     selectTab(panel, t("filter.workspace"));
 
-    const rows = Array.from(
-      panel.querySelectorAll<HTMLLabelElement>(".enhanced-graph-workspace-excluded label"),
-    );
-    expect(rows.map((row) => row.textContent)).toEqual(["notes/", "gone/"]);
-    expect(rows[1].querySelector<HTMLInputElement>("input")!.checked).toBe(true);
+    const count = (): number =>
+      panel.querySelectorAll(".enhanced-graph-folder-row").length;
+    expect(count()).toBe(3);
+    const goneRow = panel.querySelector<HTMLElement>('.enhanced-graph-folder-row[data-folder="gone"]')!;
+    expect(goneRow.querySelector<HTMLInputElement>(".enhanced-graph-folder-exclude")!.checked).toBe(true);
 
     // Staging something else and applying keeps it.
-    const picker = panel.querySelector<HTMLSelectElement>(".enhanced-graph-folder-select")!;
-    picker.value = "notes";
-    picker.dispatchEvent(new Event("change", { bubbles: true }));
-    const apply = Array.from(panel.querySelectorAll<HTMLButtonElement>("button")).find(
-      (button) => button.textContent === t("filter.workspaceApply"),
-    )!;
-    apply.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    panel
+      .querySelector<HTMLButtonElement>('.enhanced-graph-folder-row[data-folder="notes"] .enhanced-graph-folder-name')!
+      .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    Array.from(panel.querySelectorAll<HTMLButtonElement>("button"))
+      .find((button) => button.textContent === t("filter.workspaceApply"))!
+      .dispatchEvent(new MouseEvent("click", { bubbles: true }));
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(h.appliedWorkspaces).toEqual([{ folder: "notes", excluded: ["gone/"] }]);
   });

@@ -307,40 +307,79 @@ try {
       `(want 1 and ${carriers})`,
   );
 
-  // The workspace group: staged choices, applied on the button. On the real vault
-  // this is what narrows the build; the fixture has no vault to re-read, so what is
-  // measured here is exactly the part the panel owns — the folder list it offers,
-  // that nothing is applied until the button is pressed, and the pair it then asks
-  // for. The narrowing itself is measured on the real vault in `verify:vault`.
+  // The workspace group: a nested tree, staged choices, applied on the button. On
+  // the real vault this is what narrows the build; the fixture has no vault to
+  // re-read, so what is measured here is exactly the part the panel owns — the tree
+  // it draws, that nothing is applied until the button is pressed, and the pair it
+  // then asks for. The narrowing itself is measured on the real vault in
+  // `verify:vault`.
   await selectTab("工作区");
-  await page.waitForSelector(".enhanced-graph-folder-select", { timeout: 15_000 });
+  await page.waitForSelector(".enhanced-graph-folder-row", { timeout: 15_000 });
   await page.waitForTimeout(300);
 
-  const workspaceFolders = await page.evaluate(() => window.__OFFICIAL_FILTERS__.folders.slice());
-  const pickerOptions = await page.evaluate(() => {
-    const select = document.querySelector(".enhanced-graph-folder-select");
-    return select ? Array.from(select.options).map((option) => option.value) : [];
-  });
-  const excludedRows = await page.evaluate(() =>
-    Array.from(document.querySelectorAll(".enhanced-graph-workspace-excluded label")).map(
-      (row) => row.textContent,
-    ),
+  const treeRows = await page.evaluate(() =>
+    Array.from(document.querySelectorAll(".enhanced-graph-folder-row")).map((row) => ({
+      folder: row.dataset.folder,
+      depth: Number(row.dataset.depth),
+      count: row.querySelector(".enhanced-graph-legend-count")?.textContent,
+      // Nested containers, not a computed indent: `depth` has to match the number
+      // of `.enhanced-graph-folder-children` wrappers the row sits in.
+      nesting: (() => {
+        let levels = 0;
+        let node = row.parentElement;
+        while (node && !node.classList.contains("enhanced-graph-folder-tree")) {
+          if (node.classList.contains("enhanced-graph-folder-children")) levels += 1;
+          node = node.parentElement;
+        }
+        return levels;
+      })(),
+      checked: row.querySelector(".enhanced-graph-folder-exclude")?.checked ?? null,
+      disabled: row.querySelector(".enhanced-graph-folder-exclude")?.disabled ?? null,
+    })),
+  );
+  const graphFolders = await page.evaluate(() =>
+    window.__OFFICIAL_FILTERS__.folders.map((entry) => ({ path: entry.path, count: entry.count })),
   );
   const applyButton = page.locator(".enhanced-graph-workspace-actions button", { hasText: "应用" }).first();
   const applyDisabledFirst = await applyButton.isDisabled();
 
-  // Stage a folder and an exclusion, with real presses, and check that nothing has
-  // been applied yet: a rebuild that has not been asked for must not happen.
-  await page.locator(".enhanced-graph-folder-select").selectOption("notes", { force: true });
-  await page.waitForTimeout(200);
-  const deepRow = page.locator(".enhanced-graph-workspace-excluded label", { hasText: "notes/deep/" }).first();
-  await deepRow.locator("input[type=checkbox]").click({ delay: PRESS_MS });
+  // Excluding a folder excludes its whole subtree, so a child of an excluded folder
+  // is not read whatever its own box says. The panel has to show that: ticked, and
+  // not tickable. Before applying, so this is the staged state — the one the user
+  // makes decisions in.
+  const notesBox = page.locator('.enhanced-graph-folder-row[data-folder="notes"] .enhanced-graph-folder-exclude');
+  await notesBox.click({ delay: PRESS_MS });
+  await page.waitForTimeout(300);
+  const inheritance = await page.evaluate(() => {
+    const read = (folder) => {
+      const box = document.querySelector(
+        `.enhanced-graph-folder-row[data-folder="${folder}"] .enhanced-graph-folder-exclude`,
+      );
+      return box ? { checked: box.checked, disabled: box.disabled, title: box.title } : null;
+    };
+    return { notes: read("notes"), deep: read("notes/deep") };
+  });
+  // Untick it again, so the rest of the block works from a clean sheet.
+  await notesBox.click({ delay: PRESS_MS });
+  await page.waitForTimeout(300);
+
+  // Name `notes/` as the root, then exclude `notes/deep/`, with real presses.
+  await page.locator('.enhanced-graph-folder-row[data-folder="notes"] .enhanced-graph-folder-name').click({
+    delay: PRESS_MS,
+  });
+  await page.waitForTimeout(250);
+  const deepBox = page.locator(
+    '.enhanced-graph-folder-row[data-folder="notes/deep"] .enhanced-graph-folder-exclude',
+  );
+  await deepBox.click({ delay: PRESS_MS });
   await page.waitForTimeout(300);
 
   const staged = await page.evaluate(() => ({
     applied: window.__OFFICIAL_FILTERS__.appliedWorkspaces.length,
     folder: window.__OFFICIAL_FILTERS__.settings.workingFolder,
     excluded: window.__OFFICIAL_FILTERS__.settings.excludeFolders.slice(),
+    active: document.querySelector(".enhanced-graph-folder-name.is-active")?.closest(".enhanced-graph-folder-row")
+      ?.dataset.folder,
   }));
   const applyEnabledAfterStaging = !(await applyButton.isDisabled());
 
@@ -353,23 +392,34 @@ try {
   }));
 
   console.log(
-    `\n  workspace: folders ${JSON.stringify(workspaceFolders)} offered as ${JSON.stringify(pickerOptions)}; ` +
-      `exclusion rows ${JSON.stringify(excludedRows)}; ` +
-      `staged → ${staged.applied} applied, settings ${JSON.stringify(staged.folder)}/${JSON.stringify(staged.excluded)}; ` +
+    `\n  workspace tree: ${JSON.stringify(treeRows)}; ` +
+      `graph folders ${JSON.stringify(graphFolders)}; ` +
+      `staged → active ${JSON.stringify(staged.active)}, ${staged.applied} applied, ` +
+      `settings ${JSON.stringify(staged.folder)}/${JSON.stringify(staged.excluded)}; ` +
       `after 应用 → ${JSON.stringify(applied.calls)}\n`,
   );
   check(
-    "工作区 offers the vault's folders, with the whole vault first",
-    pickerOptions.length === workspaceFolders.length + 1 &&
-      pickerOptions[0] === "" &&
-      workspaceFolders.every((folder) => pickerOptions.includes(folder)),
-    `${JSON.stringify(pickerOptions)} for folders ${JSON.stringify(workspaceFolders)}`,
+    "工作区 draws a row per folder, nested one container deeper per path segment",
+    // The vault root is a row of its own and owns the top-level folders, so a
+    // folder's number of nested containers is its path depth plus that row.
+    treeRows.length === graphFolders.length &&
+      treeRows.every((row, index) => row.folder === graphFolders[index].path) &&
+      treeRows.every((row) => row.nesting === (row.folder === "" ? 0 : row.depth + 1)),
+    treeRows.map((row) => `${row.folder || "(root)"}@${row.nesting} (depth ${row.depth})`).join(", "),
   );
   check(
-    "工作区 lists every folder as an exclusion row",
-    excludedRows.length === workspaceFolders.length &&
-      workspaceFolders.every((folder) => excludedRows.includes(`${folder}/`)),
-    `${JSON.stringify(excludedRows)}`,
+    "工作区 shows each folder's own note count",
+    treeRows.every((row, index) => row.count === String(graphFolders[index].count)),
+    treeRows.map((row) => `${row.folder}=${row.count}`).join(", "),
+  );
+  check(
+    "excluding a folder shows its whole subtree as excluded, and not tickable",
+    inheritance.notes?.checked === true &&
+      inheritance.notes.disabled === false &&
+      inheritance.deep?.checked === true &&
+      inheritance.deep.disabled === true &&
+      (inheritance.deep.title?.length ?? 0) > 0,
+    `notes: ${JSON.stringify(inheritance.notes)}; notes/deep: ${JSON.stringify(inheritance.deep)}`,
   );
   check(
     "应用 is disabled until something is staged",
@@ -378,8 +428,12 @@ try {
   );
   check(
     "staging a workspace applies nothing",
-    staged.applied === 0 && staged.folder === "" && staged.excluded.length === 0,
-    `${staged.applied} calls, settings ${JSON.stringify(staged.folder)}/${JSON.stringify(staged.excluded)} (want none)`,
+    staged.active === "notes" &&
+      staged.applied === 0 &&
+      staged.folder === "" &&
+      staged.excluded.length === 0,
+    `active ${JSON.stringify(staged.active)}, ${staged.applied} calls, ` +
+      `settings ${JSON.stringify(staged.folder)}/${JSON.stringify(staged.excluded)} (want none)`,
   );
   check(
     "应用 hands over the folder to read and the folder to leave out, in one call",
@@ -391,12 +445,13 @@ try {
     `${JSON.stringify(applied.calls)}; settings ${JSON.stringify(applied.folder)}/${JSON.stringify(applied.excluded)}`,
   );
 
-  // Back to the tag group for the checks that follow, and to a clean workspace.
-  await selectTab("工作区");
-  await page.locator(".enhanced-graph-folder-select").selectOption("", { force: true });
-  await page.waitForTimeout(200);
-  await deepRow.locator("input[type=checkbox]").click({ delay: PRESS_MS });
-  await page.waitForTimeout(200);
+  // Back to the whole vault, so the checks that follow see every node.
+  await page.locator('.enhanced-graph-folder-row[data-folder=""] .enhanced-graph-folder-name').click({
+    delay: PRESS_MS,
+  });
+  await page.waitForTimeout(250);
+  await deepBox.click({ delay: PRESS_MS });
+  await page.waitForTimeout(250);
   await page.locator(".enhanced-graph-workspace-actions button", { hasText: "应用" }).first().click({ delay: PRESS_MS });
   await page.waitForTimeout(400);
   await selectTab("标签");

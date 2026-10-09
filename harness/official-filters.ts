@@ -18,7 +18,7 @@
 import "./dom-polyfill";
 import type { GraphInsights } from "../src/core/insights";
 import { OfficialGraphEnhancer } from "../src/integrate/official-graph";
-import type { GraphNode, PageType, WikiGraph } from "../src/types";
+import type { FolderInfo, GraphNode, PageType, WikiGraph } from "../src/types";
 
 // Enough tags for the tag list to reach its own scroll cap, so the tags tab has
 // more content than the panel can ever show.
@@ -67,10 +67,13 @@ const graph: WikiGraph = {
     };
   }),
   nodeIndex: new Map(nodes.map((node) => [node.id, node])),
-  // What `listVaultFolders` would report for the paths above, plus a folder no note
-  // lives in — the picker offers folders, not just the ones with notes in the
-  // current scope.
-  folders: ["notes", "notes/deep"],
+  // What `listVaultFolders` would report for the paths above: the vault root first,
+  // then each folder with the number of notes in its whole subtree.
+  folders: [
+    { path: "", count: 15 },
+    { path: "notes", count: 15 },
+    { path: "notes/deep", count: 10 },
+  ],
   builtAt: 1,
 };
 const insights: GraphInsights = {
@@ -242,7 +245,7 @@ interface OfficialFiltersApi {
   /** Workspaces the panel has applied, in order. */
   appliedWorkspaces: Array<{ folder: string; excluded: string[] }>;
   /** The folders the graph reports, so a check can compare them with the picker. */
-  folders: readonly string[];
+  folders: readonly FolderInfo[];
 }
 
 (window as unknown as { __OFFICIAL_FILTERS__: OfficialFiltersApi }).__OFFICIAL_FILTERS__ = {

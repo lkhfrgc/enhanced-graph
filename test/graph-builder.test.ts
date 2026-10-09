@@ -514,7 +514,12 @@ describe("discovery and loading", () => {
       vault: new MemoryVault({ "cjk.md": cjk, "ascii.md": ascii }),
       maxFileBytes: 100,
     });
-    expect(byBytes).toBe(EMPTY_GRAPH);
+    // Not `toBe(EMPTY_GRAPH)`: the vault has notes, so the folder list survives even
+    // though the byte budget leaves no nodes — the workspace picker still needs a way
+    // back to a scope that fits.
+    expect(byBytes.nodes).toEqual([]);
+    expect(byBytes.edges).toEqual([]);
+    expect(byBytes.folders.some((entry) => entry.path === "")).toBe(true);
 
     const fits = await buildWikiGraph({
       vault: new MemoryVault({ "cjk.md": cjk }),
