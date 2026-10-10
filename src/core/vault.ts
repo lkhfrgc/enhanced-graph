@@ -20,19 +20,32 @@ export interface VaultAdapter {
   exists(path: string): Promise<boolean>;
   /** Creates parent folders as needed. */
   write(path: string, content: string): Promise<void>;
+  /**
+   * File timestamps, when the host has them.
+   *
+   * Optional because the engine must keep working without them: a memory vault in a
+   * test, or a future host with no stat, simply has no age-based insight rather than
+   * a wrong one. A missing timestamp must read as *unknown*, never as *old* — an age
+   * finding derived from an absent value would accuse every note in the vault.
+   */
+  stat?(path: string): Promise<{ readonly created: number; readonly modified: number }>;
 }
 
 /** In-memory adapter used by tests and the browser harness. */
 export class MemoryVault implements VaultAdapter {
   private readonly files = new Map<string, string>();
+  private readonly stamps = new Map<string, { created: number; modified: number }>();
 
   configDir(): string {
     return ".obsidian";
   }
 
-  constructor(initial: Record<string, string> = {}) {
+  constructor(initial: Record<string, string> = {}, stamps: Record<string, { created: number; modified: number }> = {}) {
     for (const [path, content] of Object.entries(initial)) {
       this.files.set(normalizeVaultPath(path), content);
+    }
+    for (const [path, stamp] of Object.entries(stamps)) {
+      this.stamps.set(normalizeVaultPath(path), stamp);
     }
   }
 
@@ -53,6 +66,13 @@ export class MemoryVault implements VaultAdapter {
 
   async write(path: string, content: string): Promise<void> {
     this.files.set(normalizeVaultPath(path), content);
+  }
+
+  async stat(path: string): Promise<{ created: number; modified: number }> {
+    const key = normalizeVaultPath(path);
+    const stamp = this.stamps.get(key);
+    if (stamp === undefined) throw new Error(`ENOENT: ${key}`);
+    return stamp;
   }
 }
 

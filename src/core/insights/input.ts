@@ -36,6 +36,18 @@ export interface GraphAugmentations {
    * every note in the vault.
    */
   readonly timestamps?: ReadonlyMap<string, { readonly created: number; readonly modified: number }>;
+  /**
+   * Per-window count series, for burst detection.
+   *
+   * Supplied by the caller rather than read by the analyser: `core/**` does no I/O, so
+   * the edge-history file is read in the plugin and handed in. Absent means no
+   * history, and the burst analyser then returns nothing rather than guessing.
+   */
+  readonly series?: readonly {
+    readonly term: string;
+    readonly counts: readonly number[];
+    readonly nodeIds: readonly string[];
+  }[];
   /** Wall-clock milliseconds the analysis should treat as "now". */
   readonly now?: number;
 }

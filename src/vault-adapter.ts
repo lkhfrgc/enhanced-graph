@@ -43,4 +43,20 @@ export class ObsidianVaultAdapter implements VaultAdapter {
       await this.app.vault.create(normalized, content);
     }
   }
+
+  /**
+   * `TFile#stat`, which is where Obsidian keeps `ctime` and `mtime`.
+   *
+   * Resolved through the file index rather than the low-level adapter so the times
+   * are the ones the app itself shows. A file the index does not know is an error,
+   * not a zero: a zero timestamp would read as 1970 and make every note look
+   * impossibly stale.
+   */
+  async stat(path: string): Promise<{ created: number; modified: number }> {
+    const file = this.app.vault.getAbstractFileByPath(normalizePath(path));
+    if (!file || !("stat" in file)) throw new Error(`ENOENT: ${path}`);
+    const stamp = (file as { stat?: { ctime: number; mtime: number } }).stat;
+    if (!stamp) throw new Error(`ENOENT: ${path}`);
+    return { created: stamp.ctime, modified: stamp.mtime };
+  }
 }

@@ -38,6 +38,15 @@ export interface ParsedNote {
    * holding a vault's text in memory for the session.
    */
   readonly body: string;
+  /**
+   * File timestamps in epoch milliseconds, when the host could supply them.
+   *
+   * Optional, and the distinction matters: absent means *unknown*, not *new* and not
+   * *old*. `parseNote` never sets them — it parses a string and knows nothing about
+   * the filesystem — so they are attached by whoever read the file.
+   */
+  readonly created?: number;
+  readonly modified?: number;
 }
 
 // ---------------------------------------------------------------------------

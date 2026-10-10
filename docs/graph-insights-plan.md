@@ -1388,3 +1388,93 @@ The generator now reads the existing grades off the sheet and writes them back, 
 source + target + term, so a candidate that survives keeps its verdict and one that
 disappears simply leaves the file — which is the clearest possible statement of what a
 rule change did.
+
+---
+
+## 14. Phases 3–5 and 7: implementation status
+
+### Phase 3 — link prediction: implemented, and it reproduces §8.2 exactly
+
+`src/core/insights/link-prediction.ts`. Two-hop candidate generation (1 396 pairs on the
+real vault), scored by Adamic-Adar, resource allocation and common-neighbour count, with
+**sampling** rather than a degree cap so the pool degrades in size instead of losing a
+class of pairs.
+
+Measured on the real vault, the six cards it offers:
+
+```
+向量检索 ↔ 评估与基准测试          shared=15  maxSharedDegree=42
+向量检索 ↔ RAG 系统评测方法         shared=15  maxSharedDegree=42
+分块策略 ↔ 检索技术选型指南          shared=14  maxSharedDegree=38
+分块策略 ↔ 大模型应用技术全景         shared=14  maxSharedDegree=38
+上下文窗口 ↔ 检索增强生成           shared=11  maxSharedDegree=42
+云端 API 与本地部署对比 ↔ 大模型应用技术全景  shared=12  maxSharedDegree=38
+```
+
+Every card is routed through a page with 38–42 links, and the shared-neighbour counts are
+two to three times what a real link has (5.06, measured in §3.2). **The analyser built
+from the plan's recommendations reproduces the plan's own warning**: on this vault it
+proposes exactly the pairs a user has already considered. That is now an observation with
+a mechanism rather than a prediction, and it is why the human rating at the end matters
+more for this phase than for Phase 2.
+
+### Phase 4 — structure: implemented, and it found a real single point of failure
+
+`src/core/insights/structure.ts`. Iterative Tarjan cut vertices and bridges, k-core by
+bucket peeling, Burt constraint, and per-community exit-edge counts. All `O(n + m)`;
+`analyzeGraph` on 80 notes costs 22 ms in total for every analyser.
+
+On the real vault: **2 cut vertices, 4 bridges, 0 single-exit clusters**. The head card
+is `检索增强生成`, whose removal separates **78 of 80 notes** — the graph hangs off one
+page, and that is exactly the class of finding the plan said no offline metric could
+produce. Scores are real numbers now rather than the `0.00` the first version displayed
+for every structural card, which had made the ordering between them meaningless.
+
+### Phase 5a — trends: implemented, and correct to return nothing here
+
+`src/core/insights/trend.ts`, plus an optional `stat` on `VaultAdapter` and optional
+`created`/`modified` on `GraphNode` and `ParsedNote`. Measured, all 80 notes carry
+timestamps.
+
+**Both cards are empty on this vault, and that is the right answer**: the vault is three
+days old (79 notes created 2026-10-07), so nothing is older than the 7-day orphan bar or
+the 180-day staleness bar. The rule is exercised against fixtures instead. A card that
+reported old notes in a three-day-old vault would be the failure.
+
+### Phase 5b — edge history: implemented
+
+`src/core/edge-history.ts`. Append-only JSONL, tolerant parsing (a truncated last line is
+the expected shape of a crash mid-append and costs one line, not the file), `firstSeen`
+never moved once set, and `deliberateNonLinks` — the negative class §8.2 needs, gated so
+that a history which had not started yet reports nothing rather than declaring every
+candidate a rejection.
+
+Burst detection is Kleinberg's two-state model. Its first implementation never fired at
+all: the cost function was written as `count·ln(count/rate) + rate − count`, which is zero
+at `count == rate`, so a spike produced no evidence. Replaced with the Poisson deviance,
+verified by hand — for the injected burst in the test, `9` against a base of `1.67` gives
+a difference of about `9.3` against a threshold of `2.5`.
+
+### Phase 7 — stability: measured, and it found the worst problem in the feature
+
+`npm run eval:insights` now reports two things the plan asks for and nothing measured
+before:
+
+```
+top-6 after dropping 2 % of links: 2.0/6 cards kept (worst 2/6),
+  Jaccard mean 20.0 % — 12 perturbations
+dismissal survival across a rebuild: 6/6 of the top-6 stay dismissed
+```
+
+**Dismissal survives**, which is the key design of §4.3 doing its job — the failure the
+review caught (a key derived from the member list) would show here as cards reappearing.
+
+**But the panel churns.** Removing 2 % of links — one note's worth of editing — keeps
+only 2 of the 6 cards. Every file save triggers a rebuild, so a user editing a note sees
+most of the panel replaced. That is worse than a stale list, and it is now a number
+rather than an impression. The cause is not yet diagnosed; the ranking has no
+hysteresis, so any change in the score distribution can reorder a set of near-ties, and
+§3.2 measured that near-ties are common (3.6 candidates share the K=6 boundary score).
+Fixing it means adding stickiness — preferring a card that was on screen last build when
+its score is within the tie band — which is a design decision that needs its own
+measurement, so it is recorded here rather than guessed at.

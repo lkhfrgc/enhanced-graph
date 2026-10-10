@@ -255,7 +255,20 @@ export async function loadNotes(
     let note: ParsedNote | null = null;
     try {
       const content = await vault.read(path);
-      if (!exceedsByteBudget(content, maxFileBytes)) note = parseNote(path, content);
+      if (!exceedsByteBudget(content, maxFileBytes)) {
+        note = parseNote(path, content);
+        // Timestamps ride along with the read, when the host has them. Absent means
+        // unknown, and the trend analysers treat it that way — a zero here would
+        // read as 1970 and make every note look impossibly stale.
+        if (vault.stat) {
+          try {
+            const stamp = await vault.stat(path);
+            note = { ...note, created: stamp.created, modified: stamp.modified };
+          } catch {
+            // A file that vanished between read and stat keeps its content.
+          }
+        }
+      }
     } catch {
       // One unreadable (or deleted mid-build) file must never fail the build.
       note = null;
@@ -634,6 +647,8 @@ export async function buildWikiGraph(options: BuildGraphOptions): Promise<WikiGr
       sources: Object.freeze([...note.sources]),
       tags: Object.freeze([...note.tags]),
       isStructural: note.isStructural,
+      ...(note.created !== undefined ? { created: note.created } : {}),
+      ...(note.modified !== undefined ? { modified: note.modified } : {}),
     });
   });
   const nodeById = new Map<string, GraphNode>(preliminary.map((node) => [node.id, node]));

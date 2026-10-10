@@ -86,7 +86,39 @@ import {
   type RankOptions,
 } from "./insights/ranking";
 import { buildBundle, countUndismissed, visibleFindings, visibleSections } from "./insights/sections";
-import { createContext, registerAnalyser, type InsightInput } from "./insights/input";
+import {
+  createContext,
+  registerAnalyser,
+  type GraphAugmentations,
+  type InsightInput,
+} from "./insights/input";
+import {
+  LINK_PREDICTION_ANALYSER_ID,
+  MISSING_LINK_LIMIT,
+  confidenceForMissingLink,
+  linkPredictionAnalyser,
+  linkPredictionFindings,
+  registerLinkPredictionAnalyser,
+} from "./insights/link-prediction";
+import {
+  STRUCTURE_ANALYSER_ID,
+  clusterGateways,
+  constraint,
+  coreNumbers,
+  cutAnalysis,
+  registerStructureAnalyser,
+  structureAnalyser,
+  structureFindings,
+} from "./insights/structure";
+import {
+  TREND_ANALYSER_ID,
+  agingOrphans,
+  detectBursts,
+  registerTrendAnalyser,
+  staleHubs,
+  trendAnalyser,
+  trendFindings,
+} from "./insights/trend";
 import { EMPTY_BUNDLE, type Finding, type InsightBundle } from "./insights/model";
 
 // ---------------------------------------------------------------------------
@@ -117,6 +149,15 @@ export interface AnalyzeOptions extends InsightOptions {
   readonly previous?: InsightBundle;
   /** Drop findings an analyser labelled `weak`. */
   readonly dropWeak?: boolean;
+  /** Caps the missing-link analyser's contribution. */
+  readonly missingLinkLimit?: number;
+  /**
+   * Signals the graph does not carry: timestamps and per-window count series.
+   *
+   * Optional so every existing caller keeps working, and so a test can exercise the
+   * trend analysers without a filesystem.
+   */
+  readonly augmentations?: GraphAugmentations;
 }
 
 /**
@@ -155,9 +196,20 @@ export interface GraphInsights {
  * phases; a caller that wants it drives `listAnalysers()` itself.
  */
 export function analyzeGraph(graph: WikiGraph, options: AnalyzeOptions = {}): GraphInsights {
-  const input: InsightInput = { graph, ...(options.previous ? { previous: options.previous } : {}) };
+  const input: InsightInput = {
+    graph,
+    ...(options.previous ? { previous: options.previous } : {}),
+    ...(options.augmentations ? { augmentations: options.augmentations } : {}),
+  };
   const ctx = createContext(input);
-  const analysers = [connectionsAnalyser(options), gapsAnalyser(options), contentAnalyser()];
+  const analysers = [
+    connectionsAnalyser(options),
+    gapsAnalyser(options),
+    contentAnalyser(),
+    linkPredictionAnalyser(options.missingLinkLimit),
+    structureAnalyser(),
+    trendAnalyser(),
+  ];
 
   // The legacy arrays are produced by the same calls the analysers make, so a
   // migration cannot report one thing in `connections` and another on a card.
@@ -177,6 +229,9 @@ export function analyzeGraph(graph: WikiGraph, options: AnalyzeOptions = {}): Gr
     ),
     ...toGapFindings(gaps),
     ...content,
+    ...linkPredictionFindings(ctx, options.missingLinkLimit),
+    ...structureFindings(ctx),
+    ...trendFindings(ctx, ctx.augmentations.series ?? []),
   ];
 
   const { ranked, droppedByCap } = rankFindings(findings, capsFrom(analysers), {

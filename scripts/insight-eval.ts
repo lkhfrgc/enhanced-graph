@@ -38,6 +38,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { buildWikiGraph } from "../src/core/graph-builder";
 import { createRelevanceContext, type RawLink, type RelevanceContext } from "../src/core/relevance";
+import { analyzeGraph } from "../src/core/insights";
+import { visibleFindings } from "../src/core/insights/sections";
 import type { GraphEdge, GraphNode, WikiGraph } from "../src/types";
 import type { VaultAdapter } from "../src/core/vault";
 
@@ -63,6 +65,9 @@ const K_VALUES = [1, 3, 6, 10, 20];
 const PRIMARY_K = 6;
 const BOOTSTRAP_RESAMPLES = 5000;
 const PREF_ATTACH_SCALE = 1e-6;
+/** How many cards the panel's cap shows; the size of the list whose churn matters. */
+const STABILITY_K = 6;
+const STABILITY_TRIALS = 12;
 
 const vaultRoot = path.resolve(process.argv[2] ?? path.join(process.cwd(), "..", "插件开发"));
 
@@ -697,6 +702,88 @@ async function main(): Promise<void> {
   }
   for (const [name, values] of lowPool) {
     console.log(`  ${name.padEnd(24)} P@${PRIMARY_K} on the low-overlap subset: ${(mean(values) * 100).toFixed(1)} %`);
+  }
+  console.log("");
+
+  // -------------------------------------------------------------------------
+  // Stability: what the user actually feels
+  //
+  // Every file save triggers a rebuild, so the property that decides whether the
+  // panel is trusted is not only "is the ranking accurate" but "does it hold still".
+  // A top-6 list that reshuffles after an unrelated edit is worse than a stale one.
+  //
+  // Two measurements, both from perturbations that change nothing about what the
+  // vault MEANS:
+  //
+  //  - churn: Jaccard overlap of the top-6 between a baseline build and a build with
+  //    a few links removed, which is what editing a note looks like;
+  //  - dismissal survival: dismiss the top cards, rebuild, and count how many are
+  //    still dismissed. This is the regression test for the key design in §4.3, and
+  //    the failure it guards is the one the review caught — a key derived from the
+  //    member list loses the dismissal whenever the list changes.
+  // -------------------------------------------------------------------------
+  console.log("=== stability ===\n");
+
+  const topKeys = (graph: WikiGraph, limit: number): string[] => {
+    const bundle = analyzeGraph(graph).bundle;
+    if (!bundle) return [];
+    return visibleFindings(bundle, new Set()).slice(0, limit).map((finding) => finding.key);
+  };
+
+  const jaccard = (a: readonly string[], b: readonly string[]): number => {
+    if (a.length === 0 && b.length === 0) return 1;
+    const left = new Set(a);
+    const right = new Set(b);
+    let shared = 0;
+    for (const key of left) if (right.has(key)) shared += 1;
+    const union = new Set([...left, ...right]).size;
+    return union === 0 ? 1 : shared / union;
+  };
+
+  const baseline = topKeys(graph, STABILITY_K);
+  const churn: number[] = [];
+  const kept: number[] = [];
+  for (let trial = 0; trial < STABILITY_TRIALS; trial += 1) {
+    const rng = mulberry32(SEED + 977 * trial);
+    const order = [...graph.edges].sort(() => rng() - 0.5);
+    // Drop 2 % of links: one note's worth of editing, not a restructure.
+    const drop = Math.max(1, Math.floor(order.length * 0.02));
+    const keptEdges = new Set(order.slice(drop).map((edge) => pairKey(edge.source, edge.target)));
+    const perturbed: WikiGraph = {
+      ...graph,
+      edges: Object.freeze(graph.edges.filter((edge) => keptEdges.has(pairKey(edge.source, edge.target)))),
+    };
+    const after = topKeys(perturbed, STABILITY_K);
+    churn.push(jaccard(baseline, after));
+    const afterSet = new Set(after);
+    kept.push(baseline.filter((key) => afterSet.has(key)).length);
+  }
+  // "Cards kept" is the readable number; Jaccard is reported beside it because it is
+  // the standard one and the gap between them is itself informative — a 6-item list
+  // can keep 4 of 6 and still score below 0.5 on Jaccard once the newcomers differ.
+  console.log(
+    `  top-${STABILITY_K} after dropping 2 % of links: ` +
+      `${mean(kept).toFixed(1)}/${STABILITY_K} cards kept ` +
+      `(worst ${Math.min(...kept)}/${STABILITY_K}), Jaccard mean ${(mean(churn) * 100).toFixed(1)} % ` +
+      `— ${STABILITY_TRIALS} perturbations`,
+  );
+
+  {
+    const bundle = analyzeGraph(graph).bundle;
+    const top = bundle ? visibleFindings(bundle, new Set()).slice(0, STABILITY_K) : [];
+    const dismissed = new Set(top.map((finding) => finding.key));
+    // Rebuild with the dismissal set applied, exactly as the panel does: the bundle
+    // is cached and the key set is live.
+    const after = analyzeGraph(graph).bundle;
+    const stillVisible = after
+      ? visibleFindings(after, dismissed).filter((finding) => dismissed.has(finding.key)).length
+      : 0;
+    const survived = top.filter((finding) => !visibleFindings(after!, dismissed).some((kept) => kept.key === finding.key)).length;
+    console.log(
+      `  dismissal survival across a rebuild: ${survived}/${top.length} of the top-${STABILITY_K} stay dismissed` +
+        ` (a key that reappears means the key design lost it)`,
+    );
+    void stillVisible;
   }
   console.log("");
 

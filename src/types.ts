@@ -76,6 +76,15 @@ export interface GraphNode {
   readonly tags: readonly string[];
   /** index / overview / log / purpose / schema — noise for insight analysis. */
   readonly isStructural: boolean;
+  /**
+   * File timestamps in epoch milliseconds, when the host supplied them.
+   *
+   * Optional, and absent means *unknown*: the trend analysers skip a note whose age
+   * is not known rather than treating it as ancient. A memory vault in a test has
+   * none, so every age-based insight must be able to return nothing.
+   */
+  readonly created?: number;
+  readonly modified?: number;
 }
 
 /**
