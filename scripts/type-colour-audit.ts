@@ -64,7 +64,9 @@ async function main(): Promise<void> {
       `declared types: ${types.length}\n`,
   );
 
-  console.log("type                 pages   label shown      legend swatch  node colour    older build   analysis type");
+  console.log(
+    "type              pages  label       legend swatch  node colour   old: declared  old: normalised  analysis type",
+  );
   let mismatched = 0;
   for (const type of types) {
     const legendSwatch = assignment.get(type.key) ?? "-";
@@ -73,10 +75,11 @@ async function main(): Promise<void> {
     const node = graph.nodes.find((candidate) => nodeTypeKey(candidate) === type.key);
     const nodeColour = node ? assignment.get(nodeTypeKey(node)) ?? "-" : "-";
     if (nodeColour !== legendSwatch) mismatched += 1;
+    const analysis = normalizePageType(type.label);
     console.log(
-      `  ${type.key.padEnd(18)} ${String(type.count).padStart(4)}   ${type.label.padEnd(15)} ` +
-        `${legendSwatch.padEnd(14)} ${nodeColour.padEnd(14)} ${typeColor(type.key).padEnd(13)} ` +
-        `${normalizePageType(type.label)}`,
+      `  ${type.key.padEnd(15)} ${String(type.count).padStart(4)}  ${type.label.padEnd(11)} ` +
+        `${legendSwatch.padEnd(14)} ${nodeColour.padEnd(13)} ${typeColor(type.key).padEnd(14)} ` +
+        `${typeColor(analysis).padEnd(16)} ${analysis}`,
     );
   }
 
@@ -95,9 +98,14 @@ async function main(): Promise<void> {
 
   console.log("\nreading this table:");
   console.log("  - if the colour on screen matches `node colour`, the plugin is behaving;");
-  console.log("  - if it matches `older build` instead, the plugin copy in that vault predates");
-  console.log("    1.2.0 — reinstall it from this repository (`npm run build`, then copy main.js,");
-  console.log("    manifest.json and styles.css into the vault's plugin folder);");
+  console.log("  - `old: declared` is what a build before 1.2.0 drew — a hash of the type's name;");
+  console.log("  - `old: normalised` is what a build that coloured pages by their ANALYSIS type");
+  console.log("    drew. Two declared types that normalise the same way (connection and question,");
+  console.log("    both `other`) came out identical there, which is how a vault can show two");
+  console.log("    types in one colour, and how the legend and the nodes could disagree;");
+  console.log("  - a match on either `old` column means the plugin copy in that vault is stale:");
+  console.log("    rebuild with `npm run build` and copy main.js, manifest.json and styles.css");
+  console.log("    into the vault's plugin folder, or run `npm run verify`, which builds both copies;");
   console.log("  - if it matches neither, send me this table.");
 }
 
