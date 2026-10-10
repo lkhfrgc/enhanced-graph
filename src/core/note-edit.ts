@@ -156,13 +156,77 @@ export function insertWikilink(content: string, options: InsertWikilinkOptions):
   const chosen = prose ?? heading;
   if (chosen === null) return { changed: false, content, reason: "term-not-found" };
 
-  const next = `${body.slice(0, chosen.start)}${text}${body.slice(chosen.end)}`;
+  const next = applyLink(body, chosen, text);
   const result = `${content.slice(0, bodyOffset)}${next}`;
   // `changed` means "the file is different", not "a term was found": a term that
   // already is the link text would otherwise be reported as a successful write of
   // an identical file.
   if (result === content) return { changed: false, content, reason: "no-change" };
   return { changed: true, content: result };
+}
+
+/**
+ * Opening bracket characters that introduce a gloss on the term before them.
+ *
+ * Both widths, because both are used: `偏好优化（DPO）` in a Chinese sentence and
+ * `alignment tax (alignment tax)` in an English one.
+ */
+const OPEN_GLOSS = new Set(["（", "("]);
+
+/** The closing counterpart of each opening bracket. */
+const CLOSE_FOR: Readonly<Record<string, string>> = { "（": "）", "(": ")" };
+
+/**
+ * How far ahead a closing bracket may be and still belong to the gloss.
+ *
+ * A gloss is short — an abbreviation, a translated term. Without a bound, a `（` that
+ * opens a clause would be treated as the term's gloss and the link put in the wrong
+ * sentence entirely, which is worse than not making the edit.
+ */
+const MAX_GLOSS = 24;
+
+/**
+ * Put the link where it does not delete the reader's words.
+ *
+ * The edit is nominally "replace the matched term with the link text", and that is
+ * wrong in one very common shape. A note that writes a short form and glosses it —
+ * `直接偏好优化（DPO）` — matches the short form, and substituting the page's *name*
+ * for it produces `直接[[RLHF 与 DPO]]（DPO）`: the gloss is left dangling behind a
+ * link that already says what it was explaining. The reader's text was not wrong; the
+ * edit was.
+ *
+ * So when a term is followed by a bracketed gloss, the link goes inside the brackets
+ * and nothing is deleted:
+ *
+ *    直接偏好优化（DPO）  →  直接偏好优化（[[RLHF 与 DPO]]）
+ *
+ * This is the smaller edit — it adds and deletes nothing — which is also why it is the
+ * safer default: a reader who dislikes the placement has an insertion to move, not a
+ * word to restore from memory.
+ *
+ * A space may separate the term from its bracket, as English prose does; the CJK case
+ * has none. Exactly one optional space is absorbed, so an unrelated parenthesis
+ * further along the sentence is not mistaken for a gloss.
+ */
+function applyLink(body: string, span: Span, text: string): string {
+  let bracket = span.end;
+  if (body[bracket] === " " && OPEN_GLOSS.has(body[bracket + 1] ?? "")) bracket += 1;
+
+  const open = body[bracket] ?? "";
+  const close = CLOSE_FOR[open];
+  if (close !== undefined) {
+    const limit = Math.min(body.length, bracket + 1 + MAX_GLOSS);
+    const at = body.indexOf(close, bracket + 1);
+    // The existing brackets already delimit the gloss, so the link goes between them
+    // rather than inside the abbreviation they were explaining.
+    if (at > 0 && at <= limit) {
+      return `${body.slice(0, bracket + 1)}${text}${body.slice(at)}`;
+    }
+    // An opening bracket with no nearby close is a clause, not a gloss: inserting
+    // here would put the link outside the group of words it belongs to.
+  }
+
+  return `${body.slice(0, span.start)}${text}${body.slice(span.end)}`;
 }
 
 /**

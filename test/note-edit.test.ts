@@ -369,6 +369,68 @@ describe("insertWikilink: negative controls", () => {
 });
 
 // ---------------------------------------------------------------------------
+// A term with a bracketed gloss
+// ---------------------------------------------------------------------------
+
+describe("insertWikilink: a term that is glossed in brackets", () => {
+  it("links inside the brackets instead of deleting the gloss", () => {
+    // The reported defect, reproduced from the real vault. Substituting the page name
+    // for the matched term produced `直接[[RLHF 与 DPO]]（DPO）` — the gloss left
+    // dangling behind a link that already said what it was explaining.
+    const input = "再用强化学习或直接偏好优化（DPO）把模型推向被偏好的方向。\n";
+    const result = run(input, "偏好优化");
+
+    expect(result.changed).toBe(true);
+    expect(result.content).toBe("再用强化学习或直接偏好优化（[[Beta|Beta Display]]）把模型推向被偏好的方向。\n");
+    // The reader's own words survive, which is the whole point.
+    expect(result.content).toContain("偏好优化（[[");
+    expect(result.content).not.toContain("（DPO）");
+  });
+
+  it("keeps the term itself, so nothing is deleted", () => {
+    // The negative control for the fix: the earlier behaviour replaced the term, so
+    // asserting the term is still present is what distinguishes the two.
+    const result = run("见偏好优化（DPO）一节。\n", "偏好优化");
+    expect(result.content).toContain("偏好优化");
+    expect(result.content).toContain("（[[Beta|Beta Display]]）");
+  });
+
+  it("handles an English gloss separated by a space", () => {
+    const result = run("Defence has a cost (alignment tax) to weigh.\n", "cost");
+    expect(result.content).toBe("Defence has a cost ([[Beta|Beta Display]]) to weigh.\n");
+  });
+
+  it("does not reach into a long bracketed clause", () => {
+    // A `（` that opens a whole clause is not a gloss. The bound is what stops a long
+    // parenthetical from being mistaken for one: past it, the ordinary substitution is
+    // the safer reading, because a link dropped into the wrong group of words is worse
+    // than a link in the usual place.
+    const long = "这一点在别的笔记里展开说过很长一段话所以超出了上限";
+    const input = `偏好优化（${long}）是主题。\n`;
+    const result = run(input, "偏好优化");
+
+    expect(result.content).toContain("[[Beta|Beta Display]]（");
+    expect(result.content).not.toContain("偏好优化（[[");
+    // The clause is untouched either way, so nothing was deleted in the fallback.
+    expect(result.content).toContain(long);
+  });
+
+  it("still replaces the term when no bracket follows", () => {
+    // Negative control: the bracket rule must not swallow the ordinary case.
+    const result = run("偏好优化很重要。\n", "偏好优化");
+    expect(result.content).toBe("[[Beta|Beta Display]]很重要。\n");
+  });
+
+  it("does not treat a bracket in the next sentence as a gloss", () => {
+    const input = "偏好优化很好。（另见别的页）\n";
+    const result = run(input, "偏好优化");
+    // Two characters away but a sentence boundary between them, and the bracket is
+    // well beyond the term — the substitution stands.
+    expect(result.content).toContain("[[Beta|Beta Display]]很好。");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // insertedSpan: where the highlight goes in the preview
 // ---------------------------------------------------------------------------
 
