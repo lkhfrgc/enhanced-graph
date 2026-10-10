@@ -102,6 +102,14 @@ export interface EnhancedGraphSettings {
   customNodeColor: string;
   /** Per-page-type colour overrides, keyed by page type. */
   typeColorOverrides: Record<string, string>;
+  /**
+   * The colour each declared type was given, keyed by the type as written (lower-cased).
+   *
+   * Stored rather than recomputed: sorted assignment is stable only while the set of types
+   * is, and adding one type re-picked the colours of every type that sorted after it. A type
+   * keeps its colour while it exists; a type that disappears releases it.
+   */
+  typeColorAssignments: Record<string, string>;
   /** Per-community colour overrides. JSON keys are strings, so ids are stored as text. */
   communityColorOverrides: Record<string, string>;
   /** Whether to layer the enhancement onto Obsidian's built-in graph view. */
@@ -160,6 +168,7 @@ export const DEFAULT_SETTINGS: EnhancedGraphSettings = {
   focusMaxIntermediates: 0,
   customNodeColor: "#60a5fa",
   typeColorOverrides: {},
+  typeColorAssignments: {},
   communityColorOverrides: {},
   officialGraphEnabled: true,
   officialGraphColorMode: "community",
@@ -218,6 +227,7 @@ export function mergeSettings(raw: unknown): EnhancedGraphSettings {
     focusMaxIntermediates: source.focusMaxIntermediates ?? DEFAULT_SETTINGS.focusMaxIntermediates,
     customNodeColor: source.customNodeColor ?? DEFAULT_SETTINGS.customNodeColor,
     typeColorOverrides: source.typeColorOverrides ?? {},
+    typeColorAssignments: source.typeColorAssignments ?? {},
     communityColorOverrides: source.communityColorOverrides ?? {},
   };
 }

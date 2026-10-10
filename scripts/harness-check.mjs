@@ -2482,17 +2482,26 @@ async function main() {
       return {
         checked: rows.length,
         mismatched: rows.filter((row) => row.dot !== row.node).map((row) => `${row.label}: dot ${row.dot} vs node ${row.node}`),
+        // The view stores what it resolved, so the colours survive the vault changing.
+        stored: Object.keys(window.__HARNESS__.settings.typeColorAssignments ?? {}).length,
+        legendRows: rows.length,
       };
     });
 
     console.log(
       `\n  legend dot colours: ${legendColours.checked} type rows compared with their nodes; ` +
-        `${legendColours.mismatched.length} mismatched\n`,
+        `${legendColours.mismatched.length} mismatched; ` +
+        `${legendColours.stored} assignments stored\n`,
     );
     check(
       "every legend type row is drawn in the colour its nodes are",
       legendColours.checked >= 5 && legendColours.mismatched.length === 0,
       `${legendColours.checked} rows checked, mismatches: ${legendColours.mismatched.join("; ") || "none"}`,
+    );
+    check(
+      "the resolved colours are stored, so a type keeps its colour as the vault changes",
+      legendColours.stored >= legendColours.checked,
+      `${legendColours.stored} assignments stored for ${legendColours.checked} type rows`,
     );
 
     // --- 11b. the "no matching nodes" message ------------------------------

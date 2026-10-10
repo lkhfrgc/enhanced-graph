@@ -9226,6 +9226,9 @@ function pageTypeKey(rawType, fallback) {
   const raw = (rawType ?? "").trim();
   return (raw || fallback).toLowerCase();
 }
+function declaredTypeLabel(rawType, fallback) {
+  return (rawType ?? "").trim() || fallback;
+}
 var STRUCTURAL_SLUGS = /* @__PURE__ */ new Set([
   "index",
   "overview",
@@ -9820,7 +9823,7 @@ function collectTypes(nodes) {
     if (existing) {
       byKey.set(key, { ...existing, count: existing.count + 1 });
     } else {
-      byKey.set(key, { key, label: declared || node.type, count: 1 });
+      byKey.set(key, { key, label: nodeTypeLabel(node), count: 1 });
     }
   }
   return [...byKey.values()].sort(
@@ -9829,6 +9832,9 @@ function collectTypes(nodes) {
 }
 function nodeTypeKey(node) {
   return pageTypeKey(node.rawType, node.type);
+}
+function nodeTypeLabel(node) {
+  return declaredTypeLabel(node.rawType, node.type);
 }
 
 // src/view/palette.ts
@@ -9875,14 +9881,26 @@ function communityColor(community) {
   if (!Number.isFinite(community) || community < 0) return NEUTRAL_NODE_COLOR;
   return COMMUNITY_COLORS[community % COMMUNITY_COLORS.length];
 }
-function assignTypeColors(keys) {
-  const assigned = /* @__PURE__ */ new Map();
-  const custom = [...new Set(keys)];
-  custom.sort();
-  for (const [index, key] of custom.entries()) {
-    assigned.set(key, TYPE_COLORS[index % TYPE_COLORS.length]);
+function resolveTypeColors(keys, stored = {}) {
+  const live = [...new Set(keys)].sort();
+  const colors = /* @__PURE__ */ new Map();
+  const used = /* @__PURE__ */ new Set();
+  for (const key of live) {
+    const colour = stored[key];
+    if (!colour || used.has(colour)) continue;
+    colors.set(key, colour);
+    used.add(colour);
   }
-  return assigned;
+  let cursor = 0;
+  for (const key of live) {
+    if (colors.has(key)) continue;
+    while (cursor < TYPE_COLORS.length && used.has(TYPE_COLORS[cursor])) cursor += 1;
+    const colour = TYPE_COLORS[cursor % TYPE_COLORS.length];
+    cursor += 1;
+    colors.set(key, colour);
+    used.add(colour);
+  }
+  return { colors, stored: Object.fromEntries(colors) };
 }
 function typeColor(type2) {
   let hash = 0;
@@ -9921,10 +9939,22 @@ var NodeVault = class {
 async function main() {
   const graph = await buildWikiGraph({ vault: new NodeVault() });
   const types2 = collectTypes(graph.nodes);
-  const assignment = assignTypeColors(types2.map((type2) => type2.key));
+  const dataPath = import_node_path.default.join(vaultRoot, ".obsidian", "plugins", "enhanced-graph", "data.json");
+  let stored = {};
+  let storedFrom = "no data.json found \u2014 the plugin has not run in this vault";
+  try {
+    const raw = JSON.parse(import_node_fs.default.readFileSync(dataPath, "utf8"));
+    stored = raw.typeColorAssignments ?? {};
+    storedFrom = `${Object.keys(stored).length} colours stored in data.json`;
+  } catch {
+  }
+  const { colors: assignment } = resolveTypeColors(
+    types2.map((type2) => type2.key),
+    stored
+  );
   console.log(`vault: ${vaultRoot}`);
   console.log(
-    `notes: ${graph.nodes.length}   clusters: ${graph.communities.length}   declared types: ${types2.length}
+    `notes: ${graph.nodes.length}   clusters: ${graph.communities.length}   declared types: ${types2.length}   ${storedFrom}
 `
   );
   console.log(

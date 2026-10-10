@@ -104,25 +104,82 @@ export function communityColor(community: number): string {
 }
 
 /**
- * One colour per declared page type, all different.
+ * One colour per declared page type, all different, and stable while the vault changes.
  *
- * Assigning per vault rather than per key is the whole point: a hash cannot know which
- * other types are present, so two types collided about as often as not — on a real vault,
- * 13 declared types produced 12 colours, with `实体` and `资料` identical. Here the keys are
- * sorted (so the same vault always gets the same colours, across views and across sessions)
- * and each takes the next ramp entry nobody else has.
+ * Assigning per vault rather than per key is the point: a hash cannot know which other
+ * types are present, so two types collided about as often as not — on a real vault, 13
+ * declared types produced 12 colours, with `实体` and `资料` identical.
  *
- * No spelling is privileged: `concept` and `概念` are two declared types like any others,
- * and the plugin does not decide that one of them is the standard form.
+ * Order alone was not enough. Sorted assignment is stable while the *set* is stable, but a
+ * new type takes its sort position and everything after it shifts by one — measured, adding
+ * one type renamed the colours of 13 of 13 existing types when it sorted first, and 3 of 13
+ * when it sorted last. So the result is **stored**: a type is given a colour the first time
+ * it appears and keeps it, and adding a type cannot disturb the others.
+ *
+ * A type that disappears releases its colour — the stored map is rewritten to exactly the
+ * types present. A type that comes back is a new type and takes a free colour, which is the
+ * deliberate choice: keeping colours for pages that are gone would slowly fill the ramp with
+ * types nobody has.
+ *
+ * `stored` is what the settings held; the returned `stored` is what to write back (equal to
+ * `colors` — the same map, without the types that are gone).
+ */
+export function resolveTypeColors(
+  keys: readonly string[],
+  stored: Readonly<Record<string, string>> = {},
+): { colors: ReadonlyMap<string, string>; stored: Record<string, string> } {
+  const live = [...new Set(keys)].sort();
+  const colors = new Map<string, string>();
+  const used = new Set<string>();
+
+  // 1. Keep what each type already had, where the colour is real and not already taken —
+  //    a hand-edited or half-written settings file cannot put two types on one colour.
+  for (const key of live) {
+    const colour = stored[key];
+    if (!colour || used.has(colour)) continue;
+    colors.set(key, colour);
+    used.add(colour);
+  }
+
+  // 2. Everything else takes the first free entry of the ramp, in sorted order so a fresh
+  //    vault is deterministic.
+  let cursor = 0;
+  for (const key of live) {
+    if (colors.has(key)) continue;
+    while (cursor < TYPE_COLORS.length && used.has(TYPE_COLORS[cursor])) cursor += 1;
+    const colour = TYPE_COLORS[cursor % TYPE_COLORS.length];
+    cursor += 1;
+    colors.set(key, colour);
+    used.add(colour);
+  }
+
+  return { colors, stored: Object.fromEntries(colors) };
+}
+
+/**
+ * Whether two type-colour maps say the same thing.
+ *
+ * Used to decide whether a resolved assignment needs writing back: a vault whose types have
+ * not changed must not rewrite its settings file on every rebuild.
+ */
+export function sameColorMap(
+  a: Readonly<Record<string, string>>,
+  b: Readonly<Record<string, string>>,
+): boolean {
+  const keys = Object.keys(a);
+  if (keys.length !== Object.keys(b).length) return false;
+  return keys.every((key) => a[key] === b[key]);
+}
+
+/**
+ * One colour per declared page type, all different, computed from scratch.
+ *
+ * Used where there is nothing stored to respect — a vault's first build, the audit script, a
+ * test. The panels call {@link resolveTypeColors} instead, because a colour the user has
+ * seen should not move.
  */
 export function assignTypeColors(keys: readonly string[]): ReadonlyMap<string, string> {
-  const assigned = new Map<string, string>();
-  const custom = [...new Set(keys)];
-  custom.sort();
-  for (const [index, key] of custom.entries()) {
-    assigned.set(key, TYPE_COLORS[index % TYPE_COLORS.length]);
-  }
-  return assigned;
+  return resolveTypeColors(keys).colors;
 }
 
 /**

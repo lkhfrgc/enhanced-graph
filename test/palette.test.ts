@@ -19,6 +19,7 @@ import {
   EDGE_STRONG_PRESETS,
   EDGE_WIDTH_SCALE_RANGE,
   assignTypeColors,
+  resolveTypeColors,
   edgeAlphaForWeight,
   edgeColorForWeight,
   edgeWidthForWeight,
@@ -347,6 +348,45 @@ describe("nodeColorForMode with per-type and per-community overrides", () => {
     expect(nodeColorForMode({ ...base, typeOverrides: { entity: "" } })).toBe(
       assignTypeColors(["entity"]).get("entity"),
     );
+  });
+});
+
+describe("resolveTypeColors", () => {
+  it("keeps every existing type's colour when a type is added", () => {
+    // The reported problem: assignment by sort position meant one new type repainted every
+    // type that sorted after it. Measured before this: 13 of 13 changed when it sorted first.
+    const before = resolveTypeColors(["concept", "paper", "question"]);
+    const after = resolveTypeColors(["concept", "paper", "question", "analysis"], before.stored);
+    for (const key of ["concept", "paper", "question"]) {
+      expect(after.colors.get(key)).toBe(before.colors.get(key));
+    }
+    // The new one takes a colour nobody else has.
+    const used = ["concept", "paper", "question"].map((key) => before.colors.get(key));
+    expect(used).not.toContain(after.colors.get("analysis"));
+  });
+
+  it("releases the colour of a type that is gone", () => {
+    const before = resolveTypeColors(["concept", "paper"]);
+    const after = resolveTypeColors(["concept"], before.stored);
+    // Written back without the type that disappeared, so its colour is free again.
+    expect(Object.keys(after.stored).sort()).toEqual(["concept"]);
+    // A type that comes back is a new type: it takes a free colour rather than the old one.
+    const returned = resolveTypeColors(["concept", "paper"], after.stored);
+    expect(returned.colors.get("concept")).toBe(before.colors.get("concept"));
+    expect(returned.colors.get("paper")).toBeTruthy();
+  });
+
+  it("never lets a hand-edited settings file put two types on one colour", () => {
+    const { colors } = resolveTypeColors(["concept", "paper"], { concept: "#111111", paper: "#111111" });
+    expect(colors.get("concept")).toBe("#111111");
+    expect(colors.get("paper")).not.toBe("#111111");
+  });
+
+  it("gives a fresh vault the ramp in sorted order", () => {
+    const { colors, stored } = resolveTypeColors(["paper", "concept"]);
+    expect(colors.get("concept")).toBe(TYPE_COLORS[0]);
+    expect(colors.get("paper")).toBe(TYPE_COLORS[1]);
+    expect(stored).toEqual({ concept: TYPE_COLORS[0], paper: TYPE_COLORS[1] });
   });
 });
 

@@ -42,9 +42,10 @@ import type { GraphNode, OfficialGraphMode, RelevanceWeights, WikiGraph } from "
 import { t } from "../i18n";
 import { countUndismissed } from "../view/insights-panel";
 import {
-  assignTypeColors,
   communityColor,
   hexToRgbInt,
+  resolveTypeColors,
+  sameColorMap,
   themePalette,
   typeColor,
 } from "../view/palette";
@@ -173,6 +174,11 @@ export interface OfficialGraphDeps {
   readonly onSetVisibility: (patch: Partial<Record<string, unknown>>) => Promise<void> | void;
   /** Colour overrides, shared with the standalone view so both agree. */
   readonly getTypeColors: () => Readonly<Record<string, string>>;
+  /** The colour each declared type was given; see esolveTypeColors. */
+  readonly getTypeColorAssignments: () => Readonly<Record<string, string>>;
+  readonly onSetTypeColorAssignments: (
+    assignments: Readonly<Record<string, string>>,
+  ) => Promise<void> | void;
   readonly getCommunityColors: () => Readonly<Record<string, string>>;
   readonly onSetTypeColor: (type: string, color: string | null) => Promise<void> | void;
   readonly onSetCommunityColor: (community: number, color: string | null) => Promise<void> | void;
@@ -990,14 +996,23 @@ export class OfficialGraphEnhancer {
   /**
    * One colour per declared type in the current graph.
    *
-   * Cached against the graph object because `applyColors` runs per node and per frame
-   * tick: recomputing the assignment for every node would be O(nodes × types).
+   * Cached against the graph object because `applyColors` runs per node and per frame tick:
+   * recomputing the assignment for every node would be O(nodes × types). Resolved against
+   * the colours the settings already hold, so a type keeps the one it was given and adding a
+   * type cannot repaint the others; any change is written back.
    */
   private typeColorAssignment(): ReadonlyMap<string, string> {
     const { graph } = this.deps.getData();
     if (this.typeColorsFor !== graph) {
       this.typeColorsFor = graph;
-      this.typeColorsCache = assignTypeColors(collectTypes(graph.nodes).map((type) => type.key));
+      const { colors, stored } = resolveTypeColors(
+        collectTypes(graph.nodes).map((type) => type.key),
+        this.deps.getTypeColorAssignments(),
+      );
+      this.typeColorsCache = colors;
+      if (!sameColorMap(stored, this.deps.getTypeColorAssignments())) {
+        void this.deps.onSetTypeColorAssignments(stored);
+      }
     }
     return this.typeColorsCache;
   }

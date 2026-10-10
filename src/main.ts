@@ -255,6 +255,11 @@ export default class EnhancedGraphPlugin extends Plugin implements PluginHost, S
         this.refreshViews();
       },
       getTypeColors: () => this.settings.typeColorOverrides,
+      getTypeColorAssignments: () => this.settings.typeColorAssignments,
+      onSetTypeColorAssignments: async (assignments) => {
+        this.settings.typeColorAssignments = { ...assignments };
+        await this.saveSettings();
+      },
       getCommunityColors: () => this.settings.communityColorOverrides,
       onSetTypeColor: async (type, color) => {
         if (color === null) delete this.settings.typeColorOverrides[type];

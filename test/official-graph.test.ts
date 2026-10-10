@@ -217,6 +217,8 @@ interface Harness {
   toggled: string[];
   intermediates: number;
   typeColors: Record<string, string>;
+  /** The colours the enhancer has stored for the vault's declared types. */
+  typeColorAssignments: Record<string, string>;
   communityColors: Record<string, string>;
   lineColor: string | null;
   mode: string;
@@ -291,6 +293,7 @@ function setup(
     toggled: [],
     intermediates: 0,
     typeColors: {},
+    typeColorAssignments: {},
     communityColors: {},
     lineColor: null,
     mode,
@@ -341,6 +344,10 @@ function setup(
       state.enhancer.refresh();
     },
     getTypeColors: () => state.typeColors,
+    getTypeColorAssignments: () => state.typeColorAssignments,
+    onSetTypeColorAssignments: (assignments: Readonly<Record<string, string>>) => {
+      state.typeColorAssignments = { ...assignments };
+    },
     getCommunityColors: () => state.communityColors,
     onSetTypeColor: (type, color) => {
       if (color === null) delete state.typeColors[type];
@@ -661,6 +668,34 @@ describe("OfficialGraphEnhancer colouring", () => {
     expect(h.renderer.nodeLookup["b.md"].color?.rgb).toBe(hexToRgbInt(assignment.get("paper")!));
   });
 
+  it("keeps a type's colour when the vault gains a type", () => {
+    // The wiring, not just the resolver: the enhancer writes the assignment back to the
+    // settings and reads it again on the next build. Without that, a colour moves whenever
+    // the set of types changes — measured, adding one type repainted 13 of 13.
+    const h = setup(
+      [{ id: "a.md" }, { id: "b.md" }],
+      [
+        makeNode({ id: "a", rawType: "concept", type: "concept" as PageType }),
+        makeNode({ id: "b", rawType: "paper", type: "source" as PageType }),
+      ],
+      "type",
+    );
+    h.enhancer.start();
+    const first = { ...h.typeColorAssignments };
+    expect(Object.keys(first).sort()).toEqual(["concept", "paper"]);
+
+    // A third type appears, one that sorts before both of the others.
+    h.graph = makeGraph([
+      ...h.graph.nodes,
+      makeNode({ id: "c", rawType: "analysis", type: "other" as PageType }),
+    ]);
+    h.enhancer.refresh();
+
+    expect(h.typeColorAssignments.concept).toBe(first.concept);
+    expect(h.typeColorAssignments.paper).toBe(first.paper);
+    expect(h.typeColorAssignments.analysis).toBeTruthy();
+  });
+
   it("leaves virtual and unknown nodes untouched", () => {
     const tagColor = { a: 1, rgb: 0x123456 };
     const h = setup(
@@ -715,6 +750,8 @@ describe("OfficialGraphEnhancer colouring", () => {
       }),
       onSetVisibility: () => {},
       getTypeColors: () => ({}),
+      getTypeColorAssignments: () => ({}),
+      onSetTypeColorAssignments: () => undefined,
       getCommunityColors: () => ({}),
       onSetTypeColor: () => {},
       onSetCommunityColor: () => {},
@@ -795,6 +832,8 @@ describe("OfficialGraphEnhancer hover", () => {
       }),
       onSetVisibility: () => {},
       getTypeColors: () => ({}),
+      getTypeColorAssignments: () => ({}),
+      onSetTypeColorAssignments: () => undefined,
       getCommunityColors: () => ({}),
       onSetTypeColor: () => {},
       onSetCommunityColor: () => {},
@@ -952,6 +991,8 @@ describe("OfficialGraphEnhancer panel and lifecycle", () => {
       }),
       onSetVisibility: () => {},
       getTypeColors: () => ({}),
+      getTypeColorAssignments: () => ({}),
+      onSetTypeColorAssignments: () => undefined,
       getCommunityColors: () => ({}),
       onSetTypeColor: () => {},
       onSetCommunityColor: () => {},
@@ -1041,6 +1082,8 @@ describe("degradation", () => {
       }),
       onSetVisibility: () => {},
       getTypeColors: () => ({}),
+      getTypeColorAssignments: () => ({}),
+      onSetTypeColorAssignments: () => undefined,
       getCommunityColors: () => ({}),
       onSetTypeColor: () => {},
       onSetCommunityColor: () => {},
@@ -1089,6 +1132,8 @@ describe("degradation", () => {
       }),
       onSetVisibility: () => {},
       getTypeColors: () => ({}),
+      getTypeColorAssignments: () => ({}),
+      onSetTypeColorAssignments: () => undefined,
       getCommunityColors: () => ({}),
       onSetTypeColor: () => {},
       onSetCommunityColor: () => {},

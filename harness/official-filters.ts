@@ -241,6 +241,8 @@ enhancer = new OfficialGraphEnhancer({
     enhancer?.refresh();
   },
   getTypeColors: () => ({}),
+  getTypeColorAssignments: () => ({}),
+  onSetTypeColorAssignments: () => undefined,
   getCommunityColors: () => ({}),
   onSetTypeColor: () => undefined,
   onSetCommunityColor: () => undefined,

@@ -71,7 +71,7 @@ import {
   nodeTypeLabel,
   type VisibilityFilters,
 } from "./visibility";
-import { assignTypeColors, nodeColorForMode } from "./palette";
+import { nodeColorForMode, resolveTypeColors, sameColorMap } from "./palette";
 
 /**
  * ForceAtlas2 steps taken per gravity-drag event.
@@ -205,9 +205,10 @@ export class EnhancedGraphView extends ItemView {
     this.graph = graph;
     this.insights = insights;
     this.building = false;
-    // One colour per declared type, all different — recomputed with the graph, because
-    // which types share the ramp depends on which types are present.
-    this.typeColors = assignTypeColors(collectTypes(graph.nodes).map((type) => type.key));
+    // One colour per declared type, all different — resolved against what the settings
+    // already hold, so a type keeps the colour it was given and adding one cannot repaint
+    // the rest. Recomputed with the graph, because which types exist is what changes.
+    this.applyTypeColors();
     if (this.positionCache) {
       this.positionCache.prune(new Set(graph.nodes.map((node) => node.id)));
     }
@@ -914,6 +915,26 @@ export class EnhancedGraphView extends ItemView {
     this.renderer?.setDots(this.markedNodes);
     this.renderLegend();
     this.renderStatus();
+  }
+
+  /**
+   * Resolve the type colours, and store any change.
+   *
+   * The stored map is what makes a colour stick: without it, adding a type re-picks every
+   * colour that sorts after it — measured, one new type repainted 13 of 13 existing types.
+   * Written back only when it actually differs, so an unchanged vault does not rewrite its
+   * settings file on every rebuild.
+   */
+  private applyTypeColors(): void {
+    const { colors, stored } = resolveTypeColors(
+      collectTypes(this.graph.nodes).map((type) => type.key),
+      this.plugin.settings.typeColorAssignments,
+    );
+    this.typeColors = colors;
+    if (!sameColorMap(stored, this.plugin.settings.typeColorAssignments)) {
+      this.plugin.settings.typeColorAssignments = stored;
+      void this.plugin.saveSettings();
+    }
   }
 
   /** The dotted nodes, for hosts that report what is marked. */

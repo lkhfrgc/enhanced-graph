@@ -84,6 +84,7 @@ const settings: EnhancedGraphSettings = {
   labelOpacity: 1,
   focusMaxIntermediates: 0,
   typeColorOverrides: {} as Record<string, string>,
+  typeColorAssignments: {} as Record<string, string>,
   communityColorOverrides: {} as Record<string, string>,
   // The standalone harness drives the view, not the built-in graph enhancement.
   officialGraphEnabled: false,

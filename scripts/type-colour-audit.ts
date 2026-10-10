@@ -20,7 +20,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { buildWikiGraph } from "../src/core/graph-builder";
 import { collectTypes, nodeTypeKey } from "../src/view/visibility";
-import { assignTypeColors, communityColor, typeColor } from "../src/view/palette";
+import { communityColor, resolveTypeColors, typeColor } from "../src/view/palette";
 import { normalizePageType } from "../src/core/parse";
 import type { VaultAdapter } from "../src/core/vault";
 
@@ -56,12 +56,31 @@ class NodeVault implements VaultAdapter {
 async function main(): Promise<void> {
   const graph = await buildWikiGraph({ vault: new NodeVault() });
   const types = collectTypes(graph.nodes);
-  const assignment = assignTypeColors(types.map((type) => type.key));
+
+  // The colours the plugin is actually using: it stores them, so what is on screen comes
+  // from the vault's own settings rather than from a fresh computation. Reading the file
+  // makes this report the plugin's answer, not a second opinion.
+  const dataPath = path.join(vaultRoot, ".obsidian", "plugins", "enhanced-graph", "data.json");
+  let stored: Record<string, string> = {};
+  let storedFrom = "no data.json found — the plugin has not run in this vault";
+  try {
+    const raw = JSON.parse(fs.readFileSync(dataPath, "utf8")) as {
+      typeColorAssignments?: Record<string, string>;
+    };
+    stored = raw.typeColorAssignments ?? {};
+    storedFrom = `${Object.keys(stored).length} colours stored in data.json`;
+  } catch {
+    // Fall through with an empty map; the report says so.
+  }
+  const { colors: assignment } = resolveTypeColors(
+    types.map((type) => type.key),
+    stored,
+  );
 
   console.log(`vault: ${vaultRoot}`);
   console.log(
     `notes: ${graph.nodes.length}   clusters: ${graph.communities.length}   ` +
-      `declared types: ${types.length}\n`,
+      `declared types: ${types.length}   ${storedFrom}\n`,
   );
 
   console.log(
