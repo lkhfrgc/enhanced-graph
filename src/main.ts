@@ -22,7 +22,7 @@ import { GraphCache } from "./core/graph-cache";
 import { analyzeGraph, type GraphInsights } from "./core/insights";
 import { wikilinkText } from "./core/insights/content";
 import type { InsightAction } from "./core/insights/model";
-import { insertWikilink } from "./core/note-edit";
+import { insertWikilink, insertedSpan } from "./core/note-edit";
 import type { VaultAdapter } from "./core/vault";
 import { GRAPH_MENU_SOURCE, OfficialGraphEnhancer, probeOfficialGraph } from "./integrate/official-graph";
 import { captureOfficialLayout } from "./integrate/official-layout";
@@ -764,7 +764,8 @@ class LinkPreviewModal extends Modal {
     preview.createDiv({ cls: "enhanced-graph-preview-label", text: t("action.previewBefore") });
     preview.createDiv({ cls: "enhanced-graph-preview-line is-before", text: this.diff.before });
     preview.createDiv({ cls: "enhanced-graph-preview-label", text: t("action.previewAfter") });
-    preview.createDiv({ cls: "enhanced-graph-preview-line is-after", text: this.diff.after });
+    const afterLine = preview.createDiv({ cls: "enhanced-graph-preview-line is-after" });
+    this.renderHighlighted(afterLine);
 
     const buttons = contentEl.createDiv({ cls: "enhanced-graph-modal-buttons" });
     buttons
@@ -784,6 +785,28 @@ class LinkPreviewModal extends Modal {
     // closed is a refusal, and must never be read as consent to write.
     this.settle(false);
     this.contentEl.empty();
+  }
+
+  /**
+   * Draw the "after" line with the inserted link marked.
+   *
+   * Two versions of one line differing by a few characters is hard to read at a
+   * glance: the reader has to find the change themselves, and the change is the only
+   * reason the dialog is open. The highlight is the link, computed from the two
+   * strings rather than from the term, because a wikilink's text is not the term.
+   *
+   * Built from text nodes, never `innerHTML`: the line is the user's own prose, and a
+   * note may legitimately contain anything at all.
+   */
+  private renderHighlighted(line: HTMLElement): void {
+    const span = insertedSpan(this.diff.before, this.diff.after);
+    if (!span) {
+      line.setText(this.diff.after);
+      return;
+    }
+    line.appendText(this.diff.after.slice(0, span.start));
+    line.createEl("mark", { cls: "enhanced-graph-preview-insert", text: this.diff.after.slice(span.start, span.end) });
+    line.appendText(this.diff.after.slice(span.end));
   }
 
   private settle(apply: boolean): void {

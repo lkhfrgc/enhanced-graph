@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { insertWikilink, type LinkInsertion } from "../src/core/note-edit";
+import { insertedSpan, insertWikilink, type LinkInsertion } from "../src/core/note-edit";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -365,5 +365,94 @@ describe("insertWikilink: negative controls", () => {
       expect(result.reason, name).toBe(reason);
       expect(result.content, name).toBe(input);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// insertedSpan: where the highlight goes in the preview
+// ---------------------------------------------------------------------------
+
+describe("insertedSpan", () => {
+  const slice = (line: string, span: ReturnType<typeof insertedSpan>): string =>
+    span === null ? "" : line.slice(span.start, span.end);
+
+  it("finds the link that replaced a term in the middle of a line", () => {
+    // The preview's whole value: two versions of one line, and the mark has to land
+    // on the link, not on the sentence around it.
+    const before = "这意味着现有的评测方法需要改造。";
+    const after = "这意味着现有的[[评测方法]]需要改造。";
+
+    const span = insertedSpan(before, after);
+    expect(slice(after, span)).toBe("[[评测方法]]");
+  });
+
+  it("finds a link inserted at the very start", () => {
+    const span = insertedSpan("Beta 是主题。", "[[Beta]] 是主题。");
+    expect(slice("[[Beta]] 是主题。", span)).toBe("[[Beta]]");
+  });
+
+  it("finds a link at the very end", () => {
+    const span = insertedSpan("见 Beta", "见 [[Beta]]");
+    expect(slice("见 [[Beta]]", span)).toBe("[[Beta]]");
+  });
+
+  it("finds a link that replaced a longer name", () => {
+    // The replacement is a wikilink carrying an alias, so the inserted run is longer
+    // than the term it replaced — the span must cover the whole link, not the term.
+    const span = insertedSpan("关于 Beta Display 的说明。", "关于 [[Beta|Beta Display]] 的说明。");
+    expect(slice("关于 [[Beta|Beta Display]] 的说明。", span)).toBe("[[Beta|Beta Display]]");
+  });
+
+  it("returns null when the two lines are identical", () => {
+    // Negative control: no change means no highlight, rather than a full-line one.
+    expect(insertedSpan("一样的一行", "一样的一行")).toBeNull();
+  });
+
+  it("never returns a negative-width span when characters repeat", () => {
+    // `aa` → `a`: every character is shared with itself, so suffix pursuit bounded
+    // only by the shorter string would walk past the prefix and invert the span.
+    const span = insertedSpan("aaa", "aa");
+    expect(span === null || span.end > span.start).toBe(true);
+    const forward = insertedSpan("aa", "aaa");
+    expect(forward === null || forward.end > forward.start).toBe(true);
+  });
+
+  it("returns a forward span for every prefix-and-suffix combination", () => {
+    // Property check over the shapes this edit can produce, so the two bounds cannot
+    // drift into an inverted span for some length nobody thought to write a case for.
+    const base = "abcde";
+    for (let cut = 0; cut <= base.length; cut += 1) {
+      for (let end = cut; end <= base.length; end += 1) {
+        const shorter = base.slice(0, cut) + base.slice(end);
+        for (const [before, after] of [
+          [shorter, base],
+          [base, shorter],
+        ] as const) {
+          const span = insertedSpan(before, after);
+          if (span !== null) {
+            expect(span.start, `${before} → ${after}`).toBeGreaterThanOrEqual(0);
+            expect(span.end, `${before} → ${after}`).toBeLessThanOrEqual(after.length);
+            expect(span.end, `${before} → ${after}`).toBeGreaterThan(span.start);
+          }
+        }
+      }
+    }
+  });
+
+  it("agrees with what insertWikilink actually produced", () => {
+    // The guard that matters: the span comes from the two strings, the strings come
+    // from the edit. If they ever disagreed the preview would highlight the wrong
+    // characters, and the reader would be confirming one thing while writing another.
+    const input = "参考 Beta 的说明。\n";
+    const result = insertWikilink(input, { term: "Beta", text: LINK, targetId: TARGET });
+    expect(result.changed).toBe(true);
+
+    const beforeLine = input.split("\n")[0] ?? "";
+    const afterLine = result.content.split("\n")[0] ?? "";
+    const span = insertedSpan(beforeLine, afterLine);
+
+    expect(slice(afterLine, span)).toBe(LINK);
+    // And the mark's removal leaves exactly the un-marked text.
+    expect(beforeLine).not.toContain(LINK);
   });
 });

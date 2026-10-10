@@ -36,9 +36,47 @@ export interface InsertWikilinkOptions {
 }
 
 /** A half-open `[start, end)` span of the text. */
-interface Span {
+export interface Span {
   readonly start: number;
   readonly end: number;
+}
+
+/**
+ * Where the inserted text sits in the new line, as a span of that line.
+ *
+ * The preview shows the reader two versions of one line, and the only thing that
+ * changed is the link. Highlighting it needs its offsets, and they cannot come from
+ * the term: the replacement is a wikilink whose text was built elsewhere, so the
+ * position has to be derived from the pair of strings the preview is already showing.
+ *
+ * Common prefix and suffix, iteratively from both ends. This is exact rather than
+ * approximate for this edit, because the edit is defined as replacing one span — the
+ * matched term — with another, so exactly one run differs and everything outside it is
+ * shared. It would be wrong for a general diff, which is not what this is for.
+ *
+ * Returns `null` when the lines are identical, which the caller renders as no
+ * highlight rather than an empty one.
+ */
+export function insertedSpan(before: string, after: string): Span | null {
+  if (before === after) return null;
+
+  let start = 0;
+  const shortest = Math.min(before.length, after.length);
+  while (start < shortest && before[start] === after[start]) start += 1;
+
+  // The suffix must not reach back past the prefix: on `aa` → `a` every character is
+  // shared with itself, and unbounded pursuit would report a negative-width span.
+  let suffix = 0;
+  while (
+    suffix < shortest - start &&
+    before[before.length - 1 - suffix] === after[after.length - 1 - suffix]
+  ) {
+    suffix += 1;
+  }
+
+  const end = after.length - suffix;
+  if (end <= start) return null;
+  return { start, end };
 }
 
 /** Same shape as `parse.ts` uses, so this agrees with what the graph reads. */

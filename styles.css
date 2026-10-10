@@ -1443,3 +1443,68 @@
 .enhanced-graph-menu-item:hover {
   background: var(--background-modifier-hover);
 }
+
+/* ---------------------------------------------------------------------------
+   Link-insertion preview
+
+   Two versions of one line that differ by a few characters. Without the mark the
+   reader has to find the change themselves, and the change is the whole reason the
+   dialog is open.
+   --------------------------------------------------------------------------- */
+
+.enhanced-graph-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 10px 0;
+}
+
+.enhanced-graph-preview-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+.enhanced-graph-preview-line {
+  padding: 5px 7px;
+  border-radius: 5px;
+  border: 1px solid var(--background-modifier-border);
+  font-family: var(--font-monospace);
+  font-size: 12px;
+  line-height: 1.5;
+  /* The line is one note's prose, so it wraps rather than scrolling sideways. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* The before line is context, not the point: dimmed so the eye lands on the mark. */
+.enhanced-graph-preview-line.is-before {
+  color: var(--text-muted);
+}
+
+.enhanced-graph-preview-line.is-after {
+  color: var(--text-normal);
+  border-color: var(--interactive-accent);
+}
+
+/*
+ * The inserted link. `--text-on-accent` against `--interactive-accent` is Obsidian's
+ * own pairing, so the mark follows the theme's contrast rather than hard-coding a
+ * colour that would be unreadable in one of the two themes.
+ */
+.enhanced-graph-preview-insert {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  padding: 0 2px;
+  border-radius: 3px;
+  font-weight: 600;
+}
+
+.enhanced-graph-modal-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
