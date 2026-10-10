@@ -73,7 +73,7 @@ export interface ContentEntry {
   readonly nodeId: string;
   /** The page's display name, which is what duplicate detection compares. */
   readonly title: string;
-  /** Terms that name this page: its title and every alias. */
+  /** Terms that name this page: its title. Not its frontmatter aliases — see `termsOf`. */
   readonly terms: readonly string[];
   /** Body with code blocks removed, which is what matching runs against. */
   readonly body: string;
@@ -100,7 +100,7 @@ export interface MentionHit {
   readonly sourceId: string;
   /** The page being mentioned. */
   readonly targetId: string;
-  /** The exact term that matched — a title or an alias. */
+  /** The exact term that matched — the page's title, as the note spelled it. */
   readonly term: string;
   readonly occurrences: number;
   /** Surrounding prose for the first occurrence, whitespace-collapsed. */
@@ -142,18 +142,25 @@ export interface ContentIndex {
  * Lower-cased for matching, de-duplicated, and filtered by length. The original
  * spelling is kept in {@link ContentEntry.terms} for display.
  */
-function termsOf(title: string, aliases: readonly string[]): string[] {
-  const out: string[] = [];
-  const seen = new Set<string>();
-  for (const raw of [title, ...aliases]) {
-    const term = raw.trim();
-    if (term.length < MIN_TERM_LENGTH) continue;
-    const key = term.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(term);
-  }
-  return out;
+/**
+ * The terms that name a page for the purpose of finding mentions.
+ *
+ * **The title only — deliberately not `aliases`.** A frontmatter alias is a word the
+ * author uses for a page, but it is very often a *narrower* term than the title:
+ * `对齐税.md` lists `过度拒答` because over-refusal is one of the tax's symptoms, and
+ * `RLHF 与 DPO.md` lists `偏好优化`. Matching those turned "this note names that page"
+ * into "this note names something related to that page", and a link offered on that
+ * basis is wrong more often than it is right.
+ *
+ * The title and the file name are the page's own names, so a mention of either is a
+ * mention of *that page*. Everything else the author wrote in `aliases` is left to
+ * the link resolver, which is where `[[过度拒答]]` in a note still works — that has
+ * always been Obsidian's own behaviour and is untouched here.
+ */
+function termsOf(title: string): string[] {
+  const term = title.trim();
+  if (term.length < MIN_TERM_LENGTH) return [];
+  return [term];
 }
 
 /** Characters that end a word. Used to stop `Agent` matching inside `Agents`. */
@@ -177,18 +184,16 @@ function boundaryOk(text: string, start: number, length: number): boolean {
  * empty index rather than distinguishing "no content" from "no index".
  */
 export function buildContentIndex(
-  notes: readonly { readonly id: string; readonly title: string; readonly aliases: readonly string[]; readonly body: string }[],
+  notes: readonly { readonly id: string; readonly title: string; readonly body: string }[],
   adjacencyOf: (noteId: string) => ReadonlySet<string>,
 ): ContentIndex | null {
   if (notes.length === 0) return null;
 
   const entries = new Map<string, ContentEntry>();
   const termTargets = new Map<string, string[]>();
-  /** Lower-cased term -> the spelling the note itself uses. */
-  const termSpelling = new Map<string, string>();
 
   for (const note of notes) {
-    const terms = termsOf(note.title, note.aliases);
+    const terms = termsOf(note.title);
     if (terms.length === 0) continue;
     // Emphasised away, tables dropped and headings masked before scanning.
     const scanned = scanText(note.body);
@@ -202,7 +207,6 @@ export function buildContentIndex(
     });
     for (const term of terms) {
       const key = term.toLowerCase();
-      if (!termSpelling.has(key)) termSpelling.set(key, term);
       const bucket = termTargets.get(key);
       if (bucket) bucket.push(note.id);
       else termTargets.set(key, [note.id]);

@@ -156,7 +156,7 @@ export function insertWikilink(content: string, options: InsertWikilinkOptions):
   const chosen = prose ?? heading;
   if (chosen === null) return { changed: false, content, reason: "term-not-found" };
 
-  const replacement = applyLink(body, chosen, text, parseLink(text).display);
+  const replacement = applyLink(body, chosen, text);
   const next = `${body.slice(0, replacement.span.start)}${replacement.text}${body.slice(replacement.span.end)}`;
   const result = `${content.slice(0, bodyOffset)}${next}`;
   // `changed` means "the file is different", not "a term was found": a term that
@@ -166,75 +166,26 @@ export function insertWikilink(content: string, options: InsertWikilinkOptions):
   return { changed: true, content: result };
 }
 
-/**
- * Opening bracket characters that introduce a gloss on the term before them.
- *
- * Both widths, because both are used: `偏好优化（DPO）` in a Chinese sentence and
- * `alignment tax (alignment tax)` in an English one.
- */
-const OPEN_GLOSS = new Set(["（", "("]);
-
 /** The closing counterpart of each opening bracket. */
 const CLOSE_FOR: Readonly<Record<string, string>> = { "（": "）", "(": ")" };
 
 /**
- * How far ahead a closing bracket may be and still belong to the gloss.
+ * How far ahead a closing bracket may be and still be the term's own group.
  *
- * A gloss is short — an abbreviation, a translated term. Without a bound, a `（` that
- * opens a clause would be treated as the term's gloss and the link put in the wrong
- * sentence entirely, which is worse than not making the edit.
+ * Only a guard against an *unclosed* bracket — one from a malformed or quoted line,
+ * where stepping forward would jump the insertion somewhere unrelated. It is not a
+ * gloss-length limit: the link must not land between a word and a bracket group that
+ * belongs to it, whether that group is `（DPO）` or a clause the author wrote a sentence
+ * long. The value is generous for that reason, and bounded so a stray `（` cannot send
+ * the insertion to the far end of the note.
  */
-const MAX_GLOSS = 24;
+const MAX_GLOSS = 200;
 
 /**
- * A wikilink's parts: `[[target|alias]]` and `[[target]]` both parse.
+ * Where an insertion goes and what goes there.
  *
- * Display text is the alias when there is one, and the target's file name otherwise —
- * which is what Obsidian shows, and what decides whether an edit changes the prose.
- */
-function parseLink(text: string): { target: string; alias: string; display: string } {
-  const inner = text.replace(/^\[\[/, "").replace(/\]\]$/, "");
-  const bar = inner.indexOf("|");
-  const target = (bar >= 0 ? inner.slice(0, bar) : inner).trim();
-  const alias = bar >= 0 ? inner.slice(bar + 1).trim() : "";
-  const display = alias || (target.split("#")[0].split("/").pop() ?? target).replace(/\.md$/i, "");
-  return { target, alias, display };
-}
-
-/**
- * Keep the reader's word by making it the link's alias.
- *
- * A mention matches a page through its frontmatter aliases, and an alias is often a
- * *narrower* term than the page name. `对齐税.md` lists `过度拒答` because over-refusal
- * is one of the tax's symptoms — so replacing `过度拒答` with `[[对齐税]]` states the
- * category where the sentence said the symptom:
- *
- *    对齐会带来"对齐税"：过度拒答、回答趋同、…
- * →  对齐会带来"对齐税"：[[对齐税]]、回答趋同、…      ← the sentence got worse
- *
- * The author listed the alias because they do mean that page by that word, so the
- * matched spelling becomes the link's display text and the prose is untouched:
- *
- *    对齐会带来"对齐税"：[[对齐税|过度拒答]]、回答趋同、…
- *
- * No alias is added when the matched term *is* the page's name (case-insensitively),
- * so the ordinary case stays a plain `[[Target]]` rather than `[[Target|target]]`.
- * Where the note writes the name in different case, the note's own spelling wins:
- * it is the text the reader is looking at, and the link resolves either way.
- */
-function withTermAsAlias(text: string, term: string): string {
-  const { target, alias, display } = parseLink(text);
-  if (!target) return text;
-  if (alias === term) return text;
-  if (display.toLowerCase() === term.toLowerCase()) return text;
-  return `[[${target}|${term}]]`;
-}
-
-/**
- * Where an insertion goes and what it replaces: a span, and the text for it.
- *
- * Everything except the plain "replace the matched term" case is expressed as a span
- * whose text is different, so there is exactly one place that rebuilds the body.
+ * Expressed as a span plus its text so there is exactly one place that rebuilds the
+ * body, whatever shape the edit takes.
  */
 interface Replacement {
   readonly span: Span;
@@ -242,61 +193,66 @@ interface Replacement {
 }
 
 /**
- * Put the link where it does not delete the reader's words.
+ * Where an insertion goes and what goes there.
  *
- * The edit is nominally "replace the matched term with the link text", and that is
- * wrong in two common shapes — both found by reading a real preview rather than by
- * reasoning about the rules.
- *
- * **A term glossed in brackets.** A note writes a short form and then names the page —
- * `偏好优化（RLHF 与 DPO）` — and substituting the term left that name dangling after a
- * link that already said it. When the brackets hold the page's own name, the link
- * replaces their contents and the sentence is otherwise untouched:
- *
- *    再用…或直接偏好优化（RLHF 与 DPO）把模型推向…
- * →  再用…或直接偏好优化（[[RLHF 与 DPO]]）把模型推向…
- *
- * A bracket is only a gloss when its contents *are* the page name. `偏好优化（DPO）` is
- * an aside about a different term, and putting this link there would place it in the
- * wrong group of words.
- *
- * **A term that is an alias of the page.** The page's aliases are narrower words —
- * `对齐税.md` lists `过度拒答` — so the page name cannot stand in for the term. The
- * matched spelling becomes the link's display text, which keeps the sentence and still
- * resolves to the page ({@link withTermAsAlias}).
- *
- * The two cases take different text on purpose: the bracket case uses the caller's
- * `text` because the replaced word *is* the page's name, and the general case derives
- * an alias because the replaced word is the reader's, not the page's.
- *
- * The bracket case is decided first. An earlier version wrapped the term as an alias
- * before looking at the bracket, which meant the bracket could never match and the
- * gloss case silently stopped working — while every test still passed, because the
- * alias form was a reasonable-looking result.
+ * Expressed as a span plus its text so there is exactly one place that rebuilds the
+ * body, whatever shape the edit takes.
  */
-function applyLink(body: string, span: Span, text: string, pageName: string): Replacement {
-  let bracket = span.end;
-  if (body[bracket] === " " && OPEN_GLOSS.has(body[bracket + 1] ?? "")) bracket += 1;
+interface Replacement {
+  readonly span: Span;
+  readonly text: string;
+}
 
-  const open = body[bracket] ?? "";
+/**
+ * Insert the link in a new pair of brackets, leaving the word alone.
+ *
+ *            过度拒答  →  过度拒答（[[对齐税]]）
+ *    偏好优化（DPO）  →  偏好优化（DPO）（[[RLHF 与 DPO]]）
+ *
+ * The word stays and the link is added beside it, so the edit only ever inserts. That
+ * is the whole point of the shape: earlier versions replaced the matched word with the
+ * page's *name*, which silently rewrote the reader's prose — `过度拒答` became
+ * `对齐税`, and a term glossed in brackets lost the very word the brackets were
+ * explaining. Neither is an edit the reader asked for.
+ *
+ * The brackets carry the meaning too: the link is a *pointer to the page that word
+ * refers to*, not a replacement for the word. `偏好优化（[[RLHF 与 DPO]]）` reads as
+ * "this phrasing — see that page", which is what the card actually found.
+ *
+ * The insertion point is the end of the term's **existing bracket group**, when there
+ * is one immediately after it. The note's own `（DPO）` belongs to the word before it,
+ * and putting the link between the two would read as the definition of a bracket rather
+ * than of the term. Placing it after the group keeps the reader's text intact and the
+ * new link clearly attached to the same word.
+ *
+ * Full-width brackets, because these are Chinese notes and `（` is the mark a Chinese
+ * sentence uses. English prose gets the same pair; the character is not configurable,
+ * which is a deliberate simplification — one predictable behaviour beats two, and the
+ * link resolves either way.
+ */
+function applyLink(body: string, span: Span, text: string): Replacement {
+  const at = afterExistingGroup(body, span.end);
+  // An empty span at `at`: the brackets go after the word, which is what keeps the
+  // word. Using the term's own span would replace it — the exact defect this shape
+  // exists to remove, and one that is easy to write by accident.
+  return { span: { start: at, end: at }, text: `（${text}）` };
+}
+
+/**
+ * Where the term's own bracket group ends, or `at` when there is not one.
+ *
+ * Only a balanced, nearby group counts: `偏好优化（DPO）` yes, `偏好优化（见别处`
+ * no — an unclosed bracket is part of a longer sentence and stepping over it would put
+ * the link in the wrong place.
+ */
+function afterExistingGroup(body: string, at: number): number {
+  const open = body[at] ?? "";
   const close = CLOSE_FOR[open];
-  if (close !== undefined && pageName !== "") {
-    const limit = Math.min(body.length, bracket + 1 + MAX_GLOSS);
-    const at = body.indexOf(close, bracket + 1);
-    if (
-      at > 0 &&
-      at <= limit &&
-      body.slice(bracket + 1, at).trim().toLowerCase() === pageName.toLowerCase()
-    ) {
-      // The brackets already display the page's name, so the caller's plain text is
-      // exactly right and the sentence is left as it was.
-      return { span: { start: bracket + 1, end: at }, text };
-    }
-  }
-
-  // The matched spelling, not the trimmed term: a note may write `beta` where the page
-  // says `Beta`, and the reader's own casing is what the link should display.
-  return { span, text: withTermAsAlias(text, body.slice(span.start, span.end)) };
+  if (close === undefined) return at;
+  const limit = Math.min(body.length, at + 1 + MAX_GLOSS);
+  const end = body.indexOf(close, at + 1);
+  if (end < 0 || end > limit) return at;
+  return end + 1;
 }
 
 /**

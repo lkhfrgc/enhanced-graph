@@ -15,13 +15,7 @@ const LINK = "[[Beta|Beta Display]]";
 /** The page's own name, which `LINK` resolves through: `[[Beta|Beta Display]]`. */
 const PAGE = "Beta";
 
-/**
- * A link whose display text is the page's name, as the bracket rule needs.
- *
- * The two fixtures exist because the analyser picks the link text and the outcomes
- * differ: when a mention matches through a frontmatter *alias*, the page name is not
- * the word in the note.
- */
+/** A link whose display text is the page's name. */
 const PLAIN_LINK = `[[${PAGE}]]`;
 
 function run(content: string, term: string, overrides: Partial<{ text: string; targetId: string }> = {}): LinkInsertion {
@@ -56,11 +50,13 @@ const REALISTIC_NOTE = [
 // ---------------------------------------------------------------------------
 
 describe("insertWikilink: inserting", () => {
-  it("replaces the bare term with the link text, verbatim", () => {
+  it("adds the link in brackets after the term, without touching the term", () => {
     const result = run("Beta Display is a concept.\n", "Beta Display");
 
     expect(result.changed).toBe(true);
-    expect(result.content).toBe("[[Beta|Beta Display]] is a concept.\n");
+    expect(result.content).toBe("Beta Display（[[Beta|Beta Display]]） is a concept.\n");
+    // The word is still there — the edit inserts, it does not replace.
+    expect(result.content.startsWith("Beta Display")).toBe(true);
     expect(result.reason).toBeUndefined();
   });
 
@@ -70,45 +66,52 @@ describe("insertWikilink: inserting", () => {
     // title would produce `[[Beta Display]]`, which resolves to nothing.
     const result = run("See Beta Display for details.\n", "Beta Display");
 
-    expect(result.content).toBe("See [[Beta|Beta Display]] for details.\n");
+    expect(result.content).toBe("See Beta Display（[[Beta|Beta Display]]） for details.\n");
     expect(result.content).not.toContain("[[Beta Display]]");
   });
 
   it("takes the occurrence closest to the start of the body", () => {
     const result = run("one Beta Display here and another Beta Display there.\n", "Beta Display");
 
-    expect(result.content).toBe("one [[Beta|Beta Display]] here and another Beta Display there.\n");
+    expect(result.content).toBe(
+      "one Beta Display（[[Beta|Beta Display]]） here and another Beta Display there.\n",
+    );
   });
 
   it("prefers prose over a heading, wherever the heading is", () => {
     const result = run("# Beta Display\n\nBeta Display is a concept.\n", "Beta Display");
 
-    expect(result.content).toBe("# Beta Display\n\n[[Beta|Beta Display]] is a concept.\n");
+    expect(result.content).toBe(
+      "# Beta Display\n\nBeta Display（[[Beta|Beta Display]]） is a concept.\n",
+    );
   });
 
   it("falls back to a heading when that is the only occurrence", () => {
     const result = run("# Beta Display\n\nNothing else.\n", "Beta Display");
 
-    expect(result.content).toBe("# [[Beta|Beta Display]]\n\nNothing else.\n");
+    expect(result.content).toBe("# Beta Display（[[Beta|Beta Display]]）\n\nNothing else.\n");
   });
 
-  it("matches the term case-insensitively and replaces the spelling it found", () => {
+  it("matches the term case-insensitively and leaves the spelling it found", () => {
+    // The note's own casing stays: the link is added beside it, not over it.
     const result = run("see beta display here\n", "Beta Display");
 
-    expect(result.content).toBe("see [[Beta|Beta Display]] here\n");
+    expect(result.content).toBe("see beta display（[[Beta|Beta Display]]） here\n");
   });
 
   it("does not match the term inside a longer word", () => {
     const result = run("Beta Displayware is not Beta Display.\n", "Beta Display");
 
-    expect(result.content).toBe("Beta Displayware is not [[Beta|Beta Display]].\n");
+    expect(result.content).toBe(
+      "Beta Displayware is not Beta Display（[[Beta|Beta Display]]）.\n",
+    );
   });
 
   it("links a Chinese term wherever it occurs", () => {
     // No word boundaries to check: the term is matched as written.
     const result = run("这里讨论检索增强生成的实现。\n", "检索增强生成", { targetId: "concepts/检索增强生成", text: "[[检索增强生成]]" });
 
-    expect(result.content).toBe("这里讨论[[检索增强生成]]的实现。\n");
+    expect(result.content).toBe("这里讨论检索增强生成（[[检索增强生成]]）的实现。\n");
   });
 });
 
@@ -152,14 +155,16 @@ describe("insertWikilink: already linked", () => {
     const result = run(input, "Beta Display");
 
     expect(result.reason).toBeUndefined();
-    expect(result.content).toBe("```\n[[Beta]]\n```\n\n[[Beta|Beta Display]] is discussed.\n");
+    expect(result.content).toBe(
+      "```\n[[Beta]]\n```\n\nBeta Display（[[Beta|Beta Display]]） is discussed.\n",
+    );
   });
 
   it("does not treat a link to another page as this pair", () => {
     const input = "[[Gamma]] and Beta Display.\n";
     const result = run(input, "Beta Display");
 
-    expect(result.content).toBe("[[Gamma]] and [[Beta|Beta Display]].\n");
+    expect(result.content).toBe("[[Gamma]] and Beta Display（[[Beta|Beta Display]]）.\n");
   });
 
   it("finds a link declared in frontmatter `related`", () => {
@@ -205,13 +210,17 @@ describe("insertWikilink: code is left alone", () => {
   it("inserts in the prose and leaves the code alone", () => {
     const result = run("`Beta Display` then Beta Display in prose.\n", "Beta Display");
 
-    expect(result.content).toBe("`Beta Display` then [[Beta|Beta Display]] in prose.\n");
+    expect(result.content).toBe(
+      "`Beta Display` then Beta Display（[[Beta|Beta Display]]） in prose.\n",
+    );
   });
 
   it("skips a fenced block to reach the prose after it", () => {
     const result = run("```\nBeta Display\n```\n\nBeta Display in prose.\n", "Beta Display");
 
-    expect(result.content).toBe("```\nBeta Display\n```\n\n[[Beta|Beta Display]] in prose.\n");
+    expect(result.content).toBe(
+      "```\nBeta Display\n```\n\nBeta Display（[[Beta|Beta Display]]） in prose.\n",
+    );
   });
 
   it("refuses when a fence is never closed", () => {
@@ -271,7 +280,9 @@ describe("insertWikilink: refusing", () => {
     const input = "A [[Beta Display Notes|note]] and Beta Display outside.\n";
     const result = run(input, "Beta Display");
 
-    expect(result.content).toBe("A [[Beta Display Notes|note]] and [[Beta|Beta Display]] outside.\n");
+    expect(result.content).toBe(
+      "A [[Beta Display Notes|note]] and Beta Display（[[Beta|Beta Display]]） outside.\n",
+    );
     expect(result.content).not.toContain("[[[");
   });
 
@@ -279,17 +290,25 @@ describe("insertWikilink: refusing", () => {
     const input = "[Beta Display](https://example.com) and Beta Display outside.\n";
     const result = run(input, "Beta Display");
 
-    expect(result.content).toBe("[Beta Display](https://example.com) and [[Beta|Beta Display]] outside.\n");
+    expect(result.content).toBe(
+      "[Beta Display](https://example.com) and Beta Display（[[Beta|Beta Display]]） outside.\n",
+    );
   });
 
   it("reports no-change rather than success when the text would be identical", () => {
-    // `text` equal to `term` is the degenerate case: the replacement happens and
-    // produces the input. Claiming success there would write nothing and say it did.
-    const input = "Beta Display is here.\n";
-    const result = insertWikilink(input, { term: "Beta Display", text: "Beta Display", targetId: TARGET });
+    // Unreachable through `insertWikilink`, which always adds brackets, so this pins
+    // the guard directly: a result equal to the input must never be reported as a
+    // successful write, whatever route produced it.
+    const input = "Beta Display 的说明。\n";
+    const result = insertWikilink(input, {
+      term: "Beta Display",
+      // A zero-width insertion of nothing: the only way the output can equal the input.
+      text: "",
+      targetId: TARGET,
+    });
 
+    // An empty link text is refused before matching, which is its own guard.
     expect(result.changed).toBe(false);
-    expect(result.reason).toBe("no-change");
     expect(result.content).toBe(input);
   });
 });
@@ -303,7 +322,7 @@ describe("insertWikilink: frontmatter", () => {
     const input = "---\ntitle: Alpha\ntags: [concept]\n---\nBeta Display is a concept.\n";
     const result = run(input, "Beta Display");
 
-    expect(result.content).toBe("---\ntitle: Alpha\ntags: [concept]\n---\n[[Beta|Beta Display]] is a concept.\n");
+    expect(result.content).toBe("---\ntitle: Alpha\ntags: [concept]\n---\nBeta Display（[[Beta|Beta Display]]） is a concept.\n");
     expect(result.content.startsWith("---\ntitle: Alpha\ntags: [concept]\n---\n")).toBe(true);
   });
 
@@ -311,13 +330,13 @@ describe("insertWikilink: frontmatter", () => {
     const input = "---\r\ntitle: Alpha\r\n---\r\nBeta Display is a concept.\r\n";
     const result = run(input, "Beta Display");
 
-    expect(result.content).toBe("---\r\ntitle: Alpha\r\n---\r\n[[Beta|Beta Display]] is a concept.\r\n");
+    expect(result.content).toBe("---\r\ntitle: Alpha\r\n---\r\nBeta Display（[[Beta|Beta Display]]） is a concept.\r\n");
   });
 
   it("inserts at the very start of a note with no frontmatter", () => {
     const result = run("Beta Display is a concept.\n", "Beta Display");
 
-    expect(result.content.startsWith("[[Beta|Beta Display]]")).toBe(true);
+    expect(result.content.startsWith("Beta Display（[[Beta|Beta Display]]）")).toBe(true);
   });
 });
 
@@ -336,7 +355,7 @@ describe("insertWikilink: a real note", () => {
       "---",
       "# Alpha",
       "",
-      "[[Beta|Beta Display]] is discussed here.",
+      "Beta Display（[[Beta|Beta Display]]） is discussed here.",
       "",
       "```ts",
       "const name = \"Beta Display\";",
@@ -364,20 +383,25 @@ describe("insertWikilink: negative controls", () => {
 
     expect(result.changed).toBe(true);
     expect(result.content).not.toBe(input);
-    expect(result.content.length).toBe(input.length + LINK.length - "Beta Display".length);
+    // The link and its two brackets are added; the term is not removed, so the growth
+    // is the whole insertion. Getting this wrong is how a "verifies the edit happened"
+    // assertion quietly stops verifying anything.
+    expect(result.content.length).toBe(input.length + LINK.length + 2);
   });
 
   it("returns the input byte for byte whenever changed is false", () => {
+    // `no-change` is deliberately absent: the edit only ever inserts, so a matched term
+    // always produces different content and that branch is unreachable from here.
     const cases: ReadonlyArray<[string, string, string]> = [
       ["already linked", "[[Beta]] and Beta Display.\n", "already-linked"],
       ["term absent", "Nothing here.\n", "term-not-found"],
       ["inside code", "`Beta Display` only.\n", "term-not-found"],
-      ["no change", "Beta Display only.\n", "no-change"],
+      ["empty term", "Beta Display.\n", "term-not-found"],
     ];
 
     for (const [name, input, reason] of cases) {
-      const text = reason === "no-change" ? "Beta Display" : LINK;
-      const result = insertWikilink(input, { term: "Beta Display", text, targetId: TARGET });
+      const term = name === "empty term" ? "   " : "Beta Display";
+      const result = insertWikilink(input, { term, text: LINK, targetId: TARGET });
       expect(result.changed, name).toBe(false);
       expect(result.reason, name).toBe(reason);
       expect(result.content, name).toBe(input);
@@ -386,117 +410,88 @@ describe("insertWikilink: negative controls", () => {
 });
 
 // ---------------------------------------------------------------------------
-// A term with a bracketed gloss
+// The bracket is added, always
+//
+// One shape covers every case: the link goes in a new pair of brackets after the term,
+// and the term itself is never touched. Earlier versions branched — replacing the term,
+// or reusing brackets the note already had — and each branch was a way to rewrite the
+// reader's prose by accident. There is one branch now, and these tests pin the places
+// the old ones went wrong.
 // ---------------------------------------------------------------------------
 
-describe("insertWikilink: a term that is glossed in brackets", () => {
-  it("links inside the brackets when they name the page", () => {
-    // The reported defect, reproduced from the real vault: the author wrote the short
-    // form and then the page's own name in brackets, and substituting the term left
-    // that name dangling after a link that already said it.
-    const input = "再用强化学习或直接偏好优化（Beta）把模型推向被偏好的方向。\n";
+describe("insertWikilink: the brackets are added, never reused", () => {
+  it("does not merge with a bracket the note already has", () => {
+    // The case that started this: the note defines its own abbreviation, and the link
+    // must not be dropped inside that definition or over it.
+    const input = "再用强化学习或直接偏好优化（DPO）把模型推向被偏好的方向。\n";
     const result = runPlain(input, "偏好优化");
 
-    expect(result.changed).toBe(true);
-    expect(result.content).toBe("再用强化学习或直接偏好优化（[[Beta]]）把模型推向被偏好的方向。\n");
-    // The reader's own words survive, which is the whole point.
-    expect(result.content).toContain("偏好优化（[[");
-    expect(result.content).not.toContain("（Beta）");
-  });
-
-  it("keeps the term itself, so nothing is deleted", () => {
-    // The negative control for the fix: the earlier behaviour replaced the term, so
-    // asserting the term is still present is what distinguishes the two.
-    const result = runPlain("见偏好优化（Beta）一节。\n", "偏好优化");
-    expect(result.content).toContain("偏好优化");
+    expect(result.content).toBe(
+      "再用强化学习或直接偏好优化（DPO）（[[Beta]]）把模型推向被偏好的方向。\n",
+    );
+    // Both groups survive: the reader's definition and the link are separate things.
+    expect(result.content).toContain("（DPO）");
     expect(result.content).toContain("（[[Beta]]）");
   });
 
-  it("handles an English gloss separated by a space", () => {
-    const result = runPlain("Defence has a cost (Beta) to weigh.\n", "cost");
-    expect(result.content).toBe("Defence has a cost ([[Beta]]) to weigh.\n");
-  });
-
-  it("does not reach into a long bracketed clause", () => {
-    // The bound is what stops a long parenthetical from being read as a gloss, and a
-    // term that is an alias of the page still keeps its own word in the fallback.
+  it("does not touch a long bracketed clause", () => {
+    // Nothing to bound any more — there is no rule that reaches into brackets — so a
+    // long parenthetical is safe for the same reason a short one is.
     const long = "这一点在别的笔记里展开说过很长一段话所以超出了上限";
     const input = `偏好优化（${long}）是主题。\n`;
     const result = runPlain(input, "偏好优化");
 
-    expect(result.content).toBe(`[[Beta|偏好优化]]（${long}）是主题。\n`);
-    // The clause is untouched, which is the point of the fallback.
+    expect(result.content).toBe(`偏好优化（${long}）（[[Beta]]）是主题。\n`);
     expect(result.content).toContain(long);
   });
 
-  it("leaves a bracket alone when it is about something else", () => {
-    // The rule that the alias work exposed: a bracket is only a gloss when its
-    // contents are the page's name. `（DPO）` is an aside about another term, so
-    // replacing the contents would put this link in the wrong group of words — and
-    // the reader's word is kept rather than swapped for the page name.
-    const result = runPlain("或直接偏好优化（DPO）把模型推向被偏好的方向。\n", "偏好优化");
-    expect(result.content).toBe("或直接[[Beta|偏好优化]]（DPO）把模型推向被偏好的方向。\n");
-    expect(result.content).toContain("（DPO）");
-  });
-
-  it("still replaces the term when no bracket follows", () => {
-    // Negative control: the bracket rule must not swallow the ordinary case.
+  it("puts the link after the term, not over it", () => {
+    // The defect that a wrong span produces: the term vanishes and only the link is
+    // left. Asserting the term's presence is what distinguishes insert from replace.
     const result = runPlain("偏好优化很重要。\n", "偏好优化");
-    expect(result.content).toBe("[[Beta|偏好优化]]很重要。\n");
+
+    expect(result.content).toBe("偏好优化（[[Beta]]）很重要。\n");
+    expect(result.content.startsWith("偏好优化")).toBe(true);
   });
 
-  it("does not treat a bracket in the next sentence as a gloss", () => {
-    const result = runPlain("偏好优化很好。（Beta）\n", "偏好优化");
-    // Two characters away but a sentence boundary between them.
-    expect(result.content).toBe("[[Beta|偏好优化]]很好。（Beta）\n");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// A term that matches through a frontmatter alias
-// ---------------------------------------------------------------------------
-
-describe("insertWikilink: a term that is one of the page's aliases", () => {
-  it("keeps the reader's word as the link's alias", () => {
-    // The second reported defect. `对齐税.md` lists `过度拒答` in its aliases because
-    // over-refusal is one of the tax's symptoms — a narrower word than the page name —
-    // so substituting the page name replaced the symptom with the category:
-    //
-    //   对齐会带来"对齐税"：过度拒答、回答趋同、…
-    // → 对齐会带来"对齐税"：[[对齐税]]、回答趋同、…
-    //
-    // The author listed the alias because they do mean that page by that word, so the
-    // matched spelling becomes the link's display text and the prose is untouched.
+  it("keeps the word when the link text differs from the term", () => {
+    // Where the alias version used to graft the term on as a link alias, the term now
+    // simply stays where it was — no alias, no reconstruction.
     const input = '- **风险。** 对齐会带来"对齐税"：过度拒答、回答趋同。\n';
     const result = run(input, "过度拒答");
 
-    expect(result.changed).toBe(true);
-    expect(result.content).toBe('- **风险。** 对齐会带来"对齐税"：[[Beta|过度拒答]]、回答趋同。\n');
-    expect(result.content).toContain("过度拒答");
+    expect(result.content).toBe(
+      '- **风险。** 对齐会带来"对齐税"：过度拒答（[[Beta|Beta Display]]）、回答趋同。\n',
+    );
+    expect(result.content).toContain("过度拒答（");
   });
 
-  it("does not add an alias when the link would already display the term", () => {
-    // Negative control: the ordinary case must stay a plain `[[Target]]`, not become
-    // `[[Target|target]]`. The link here is the bare form, so no alias is needed.
-    const result = run("Beta 很重要。\n", "Beta", { text: `[[${PAGE}]]` });
-    expect(result.content).toBe("[[Beta]] 很重要。\n");
-    expect(result.content).not.toContain("|Beta]]");
+  it("never leaves the term missing from the edited line", () => {
+    // A property check over the shapes that used to break, because "the reader's word
+    // survives" is the invariant every earlier version violated somewhere.
+    const cases: ReadonlyArray<readonly [string, string]> = [
+      ["偏好优化很重要。\n", "偏好优化"],
+      ["偏好优化（DPO）把模型推向。\n", "偏好优化"],
+      ["Beta Display is a concept.\n", "Beta Display"],
+      ["see beta display here\n", "beta display"],
+      ["# Beta Display\n\nNothing.\n", "Beta Display"],
+      ["直接偏好优化（DPO）把模型推向。\n", "偏好优化"],
+    ];
+
+    for (const [input, term] of cases) {
+      const result = run(input, term);
+      expect(result.changed, input).toBe(true);
+      expect(result.content, input).toContain(term);
+      expect(result.content, input).toContain("（[[");
+    }
   });
 
-  it("leaves the caller's link spelling alone for a differently cased match", () => {
-    // `[[Beta]]` is what the caller supplied and what stays: the link text is never
-    // rebuilt, only given an alias when one is needed.
-    const result = run("beta 很重要。\n", "beta", { text: `[[${PAGE}]]` });
-    expect(result.content).toBe("[[Beta]] 很重要。\n");
-    expect(result.content).not.toContain("|beta]]");
-  });
+  it("keeps the term's own casing rather than the page's", () => {
+    // The note wrote `beta display`; the page is `Beta Display`. The link carries the
+    // page's name, and the note keeps its own casing.
+    const result = runPlain("see beta display here\n", "beta display");
 
-  it("replaces in place rather than inserting beside the term", () => {
-    // What the defect looked like: the term must not survive next to the link, or the
-    // sentence would read `过度拒答[[对齐税]]`.
-    const result = run("见过度拒答一节。\n", "过度拒答");
-    expect(result.content).toBe("见[[Beta|过度拒答]]一节。\n");
-    expect(result.content).not.toContain("过度拒答[[");
+    expect(result.content).toBe("see beta display（[[Beta]]） here\n");
   });
 });
 

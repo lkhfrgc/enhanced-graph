@@ -61,8 +61,12 @@ describe("content analyser: unlinked mentions", () => {
     // written into the note. A note whose `title` differs from its file name is the
     // case that catches this: `[[Beta Display]]` reads correctly and resolves to
     // nothing, so the link is built from the basename with the title as an alias.
+    //
+    // The prose names the *title*, not an alias, because aliases are no longer scanned
+    // — a mention of `Beta` would no longer find this page, which is the point of that
+    // change and is covered in `content-index.test.ts`.
     const graph = await graphFor({
-      "concepts/Alpha.md": "---\ntitle: Alpha\n---\n这里讨论了 Beta 的应用。\n",
+      "concepts/Alpha.md": "---\ntitle: Alpha\n---\n这里讨论了 Beta Display 的应用。\n",
       "concepts/Beta.md": '---\ntitle: Beta Display\naliases: ["Beta"]\n---\n内容。\n',
     });
 
