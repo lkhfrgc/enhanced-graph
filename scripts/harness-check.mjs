@@ -674,6 +674,45 @@ async function main() {
         .map(([vp, px]) => `${vp}→${px}px`)
         .join(", ")}`,
     );
+    // The panel's own width is one contract; the *cards'* width is another, and it was
+    // the one that actually moved. A group whose content overflows loses the scrollbar's
+    // width to it, so its cards draw narrower than a short group's — while the panel
+    // measures 320px throughout, which is why measuring the panel found nothing.
+    //
+    // Measured by forcing the two states on one group: with the panel scrolled to fit
+    // and with the panel overflowing. `scrollbar-gutter: stable` is what makes them
+    // agree, and without it this check reports the difference in pixels.
+    const cardWidth = async () =>
+      page.evaluate(() => {
+        const card = document.querySelector(".enhanced-graph-panel .enhanced-graph-card");
+        return card ? Math.round(card.getBoundingClientRect().width) : 0;
+      });
+    const panelOverflow = async (overflow) =>
+      page.evaluate((shouldOverflow) => {
+        const panel = document.querySelector(".enhanced-graph-panel");
+        if (!panel) return 0;
+        // A spacer taller (or shorter) than the panel decides whether it scrolls.
+        let spacer = panel.querySelector(".harness-overflow-spacer");
+        if (!spacer) {
+          spacer = document.createElement("div");
+          spacer.className = "harness-overflow-spacer";
+          panel.appendChild(spacer);
+        }
+        spacer.style.height = shouldOverflow ? `${panel.clientHeight + 400}px` : "0px";
+        return Math.round(panel.getBoundingClientRect().width - panel.clientWidth);
+      }, overflow);
+    await selectPanelTab(page, "建议新增");
+    const gutterWhenScrolling = await panelOverflow(true);
+    const cardWidthScrolling = await cardWidth();
+    const gutterWhenFitting = await panelOverflow(false);
+    const cardWidthFitting = await cardWidth();
+    check(
+      "a card is the same width whether or not the panel is scrolling",
+      cardWidthScrolling === cardWidthFitting && cardWidthFitting > 0,
+      `scrolling: card ${cardWidthScrolling}px (gutter ${gutterWhenScrolling}px), ` +
+        `fitting: card ${cardWidthFitting}px (gutter ${gutterWhenFitting}px)`,
+    );
+
     await selectPanelTab(page, "建议新增");
     check(
       "insights panel switches between its groups by tab, including existing links",

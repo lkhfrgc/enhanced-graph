@@ -427,6 +427,16 @@
   border-left: 1px solid var(--background-modifier-border);
   background: var(--background-secondary);
   overflow-y: auto;
+  /* Always reserve the scrollbar's width, whether or not there is a scrollbar.
+   *
+   * This is what made the *cards* different widths between groups: a group whose content
+   * overflowed lost the scrollbar's width to it and drew narrower cards, while a short
+   * group drew full-width ones. The panel's own box was 320px in both cases, which is
+   * why measuring the panel found nothing — the number that moved was one level down.
+   *
+   * `stable` is the whole fix: the gutter is reserved unconditionally, so the content
+   * box is the same width on every tab and switching groups cannot reflow the cards. */
+  scrollbar-gutter: stable;
   padding: 8px;
   display: flex;
   flex-direction: column;
