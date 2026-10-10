@@ -33,6 +33,7 @@ import {
   collectTypes,
   filterNodes,
   nodeTypeKey,
+  nodeTypeLabel,
   type TagFilterMode,
   type VisibilityFilters,
 } from "../view/visibility";
@@ -1157,7 +1158,7 @@ export class OfficialGraphEnhancer {
       menu.addItem((item) =>
         item
           .setSection("action")
-          .setTitle(`${t("menu.hideType")}：${t(`type.${node.type}` as never)}`)
+          .setTitle(`${t("menu.hideType")}：${nodeTypeLabel(node)}`)
           .setIcon(hidden ? "lucide-eye" : "lucide-eye-off")
           .onClick(async () => {
             await this.deps.onToggleType(node.type);

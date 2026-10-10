@@ -1160,13 +1160,43 @@ describe("built-in graph context menu", () => {
     expect(menu.items).toHaveLength(0);
   });
 
-  it("offers focus and hide-type for a graph node", () => {
+  it("names the declared type in the hover card, untranslated", () => {
+    // The reported ask: hovering a node showed the interface's word for its type. It shows
+    // the type now — `实验记录` for a note that says so.
+    const h = setup(
+      [{ id: "a.md" }],
+      [makeNode({ id: "a", rawType: "实验记录", type: "other" as PageType })],
+    );
+    h.enhancer.start();
+    h.renderer.onNodeHover?.(new MouseEvent("mousemove"), "a.md", "");
+    const meta = h.renderer.containerEl.querySelector<HTMLElement>(
+      ".enhanced-graph-official-tooltip-meta",
+    );
+    expect(meta?.textContent).toContain("实验记录");
+    expect(meta?.textContent).not.toContain("其他");
+  });
+
+  it("offers focus and hide-type for a graph node, naming the type the note declares", () => {
+    // The fixture's node declares `concept` (rawType), so the menu says `concept` — not the
+    // interface's word for it. A type is a value in someone's notes, not UI text.
     const h = setup([{ id: "concepts/a.md" }], [makeNode({ id: "concepts/a" })]);
     h.enhancer.start();
     const menu = makeMenu();
     h.enhancer.handleFileMenu(menu as never, file, GRAPH_MENU_SOURCE, undefined);
     expect(menu.items).toHaveLength(2);
-    expect(menu.items[1].title).toContain("概念");
+    expect(menu.items[1].title).toContain("concept");
+    expect(menu.items[1].title).not.toContain("概念");
+  });
+
+  it("names a custom type as the note wrote it", () => {
+    const h = setup(
+      [{ id: "concepts/a.md" }],
+      [makeNode({ id: "concepts/a", rawType: "实验记录", type: "other" as PageType })],
+    );
+    h.enhancer.start();
+    const menu = makeMenu();
+    h.enhancer.handleFileMenu(menu as never, file, GRAPH_MENU_SOURCE, undefined);
+    expect(menu.items[1].title).toContain("实验记录");
   });
 
   it("toggling the type reports the node's page type", () => {

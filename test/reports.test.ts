@@ -73,6 +73,15 @@ describe("buildRelevanceReport", () => {
     expect(buildRelevanceReport(beta, graph, DEFAULT_RELEVANCE_WEIGHTS)).toContain("- 原始资料: （无）");
   });
 
+  it("prints the type the note declares, not the plugin's word for it", () => {
+    // The report describes someone's vault, so it says what their frontmatter says.
+    const note = makeNode("delta", { rawType: "实验记录", type: "other" as PageType });
+    const withNote = makeGraph([alpha, note], [makeEdge("alpha", "delta", 5)]);
+    expect(buildRelevanceReport(note, withNote, DEFAULT_RELEVANCE_WEIGHTS)).toContain(
+      "- 类型: 实验记录",
+    );
+  });
+
   it("emits a table with one row per related page, strongest first", () => {
     const report = buildRelevanceReport(alpha, graph, DEFAULT_RELEVANCE_WEIGHTS);
     const rows = report.split("\n").filter((line) => line.startsWith("| [["));

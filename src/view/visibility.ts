@@ -12,7 +12,7 @@
  * {@link isNodeVisible}.
  */
 
-import { pageTypeKey } from "../core/parse";
+import { declaredTypeLabel, pageTypeKey } from "../core/parse";
 import type { GraphEdge, GraphNode, PageType } from "../types";
 
 /**
@@ -102,7 +102,7 @@ export function collectTypes(nodes: readonly GraphNode[]): TypeCount[] {
     if (existing) {
       byKey.set(key, { ...existing, count: existing.count + 1 });
     } else {
-      byKey.set(key, { key, label: declared || node.type, count: 1 });
+      byKey.set(key, { key, label: nodeTypeLabel(node), count: 1 });
     }
   }
   return [...byKey.values()].sort(
@@ -113,6 +113,17 @@ export function collectTypes(nodes: readonly GraphNode[]): TypeCount[] {
 /** The type a node is filtered, coloured and listed by. */
 export function nodeTypeKey(node: Pick<GraphNode, "rawType" | "type">): string {
   return pageTypeKey(node.rawType, node.type);
+}
+
+/**
+ * The type, written the way the note declares it.
+ *
+ * What every surface shows — a legend row, a hover card, a status line, the report. Defined
+ * in `core/parse` so the report can use it without importing from the view layer; this
+ * wrapper takes a node so the render paths do not have to spell out two fields.
+ */
+export function nodeTypeLabel(node: Pick<GraphNode, "rawType" | "type">): string {
+  return declaredTypeLabel(node.rawType, node.type);
 }
 
 /** True when the page is not excluded by any rule. */

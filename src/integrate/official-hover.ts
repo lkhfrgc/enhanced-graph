@@ -14,6 +14,7 @@
 
 import type { WikiGraph } from "../types";
 import { t } from "../i18n";
+import { nodeTypeLabel } from "../view/visibility";
 import type { NodeResolver } from "./official-internals";
 
 /** Related pages listed under the hovered node. */
@@ -74,7 +75,7 @@ export class OfficialHoverTooltip {
         tooltip.createDiv({
           cls: "enhanced-graph-official-tooltip-meta",
           text:
-            `${t("type." + node.type as never)} · ${t("status.edges")} ${node.linkCount} · ` +
+            `${nodeTypeLabel(node)} · ${t("status.edges")} ${node.linkCount} · ` +
             `${t("legend.communities")} ${node.community}`,
         });
 

@@ -68,6 +68,7 @@ import {
   filterEdges,
   filterNodes,
   nodeTypeKey,
+  nodeTypeLabel,
   type VisibilityFilters,
 } from "./visibility";
 import { assignTypeColors, nodeColorForMode } from "./palette";
@@ -1426,7 +1427,7 @@ export class EnhancedGraphView extends ItemView {
     head.createDiv({ cls: "enhanced-graph-menu-title", text: node.label });
     head.createDiv({
       cls: "enhanced-graph-menu-meta",
-      text: `${t("status.edges")}: ${node.linkCount} · ${t("type." + node.type as never)}`,
+      text: `${t("status.edges")}: ${node.linkCount} · ${nodeTypeLabel(node)}`,
     });
 
     this.menuItem(menu, "file-text", t("menu.openNote"), () => void this.openNode(nodeId));

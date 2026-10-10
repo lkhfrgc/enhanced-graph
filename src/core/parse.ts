@@ -93,6 +93,18 @@ export function pageTypeKey(rawType: string, fallback: string): string {
 }
 
 /**
+ * The type, written the way the note declares it.
+ *
+ * What every surface shows — a legend row, a hover card, a status line, the report. A note
+ * that says `type: 实验记录` is described as `实验记录`: not the plugin's internal idea of
+ * what that means, and not translated. A type is a value in someone's notes, not a piece of
+ * interface text. Only a note with no type at all falls back to the inferred id.
+ */
+export function declaredTypeLabel(rawType: string, fallback: string): string {
+  return (rawType ?? "").trim() || fallback;
+}
+
+/**
  * Ids that are navigational scaffolding rather than knowledge.
  *
  * The Chinese entries include every word the visibility switch names — 索引, 概览,

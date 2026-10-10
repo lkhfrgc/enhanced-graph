@@ -10,6 +10,7 @@
 
 import type { GraphInsights } from "./core/insights";
 import { createRelevanceContext, rankRelated } from "./core/relevance";
+import { declaredTypeLabel } from "./core/parse";
 import type { GraphNode, RelevanceWeights, WikiGraph } from "./types";
 
 /** How many related pages the per-note report lists. */
@@ -40,7 +41,7 @@ export function buildRelevanceReport(
   const lines: string[] = [
     `# ${node.label}`,
     "",
-    `- 类型: ${node.type}`,
+    `- 类型: ${declaredTypeLabel(node.rawType, node.type)}`,
     `- 链接数: ${node.linkCount}`,
     `- 社区: ${node.community}`,
     `- 原始资料: ${node.sources.length > 0 ? node.sources.join("、") : "（无）"}`,
