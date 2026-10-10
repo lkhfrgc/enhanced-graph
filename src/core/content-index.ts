@@ -46,7 +46,6 @@ export const MAX_TERM_DOCUMENT_RATIO = 0.5;
 
 /** Characters of surrounding prose a mention keeps, for the card to show. */
 export const PREVIEW_RADIUS = 40;
-
 /** One page's content signals. */
 export interface ContentEntry {
   readonly nodeId: string;
@@ -164,9 +163,10 @@ export function buildContentIndex(
   for (const note of notes) {
     const terms = termsOf(note.title, note.aliases);
     if (terms.length === 0) continue;
-    // Code is not prose: a title inside a fenced block is documentation about the
-    // term, not a mention of the page.
-    const body = stripCode(note.body);
+    // Emphasised away and unwrapped before scanning, so a terminator inside
+    // `**bold**` or at a line break is not mistaken for a sentence boundary and the
+    // preview quotes the whole sentence.
+    const body = scanText(note.body);
     entries.set(note.id, {
       nodeId: note.id,
       title: note.title,
@@ -387,12 +387,74 @@ export function mergeCandidatesOf(index: ContentIndex, nodes: readonly GraphNode
 /** Alias kept for the name used by the analyser. */
 export const mergesInGraph = mergeCandidatesOf;
 
-/** Whitespace-collapsed prose around one match, for the card to show. */
-export function previewAround(padded: string, at: number, length: number): string {
-  const from = Math.max(0, at - PREVIEW_RADIUS);
-  const to = Math.min(padded.length, at + length + PREVIEW_RADIUS);
-  return padded.slice(from, to).replace(/\s+/g, " ").trim();
+/**
+ * Characters that end a sentence.
+ *
+ * Emphasis markers are stripped from the scanned text first, because a terminator
+ * inside emphasis is not a boundary: `**评测方法。** 报告详细说明了…` is one
+ * sentence, and splitting at the `。` produced a two-word preview.
+ */
+const SENTENCE_TERMINATORS = new Set(["。", "！", "？", "；", ".", "!", "?", ";", "\n"]);
+
+/** Emphasis and inline-code markers, removed before a body is scanned. */
+function stripEmphasis(text: string): string {
+  return text.replace(/(\*\*|__|`)/g, "").replace(/(^|\s)[*_](\S)/g, "$1$2");
 }
+
+/**
+ * A body as the scanner wants it: no code, no emphasis, no raw line breaks.
+ *
+ * The line breaks matter. Prose in a note is wrapped and bulleted, so a raw `\n`
+ * sits in the middle of sentences — treating it as a terminator made every wrapped
+ * line its own sentence, and a preview came out as `评测方法。` for a bullet whose
+ * text continued on the same line after the emphasis. Normalising to spaces lets
+ * the real punctuation decide where a sentence ends.
+ */
+function scanText(body: string): string {
+  return stripEmphasis(stripCode(body)).replace(/\s*\n+\s*/g, " ");
+}
+
+/**
+ * The sentence a match sits in, whitespace-collapsed.
+ *
+ * A fixed-width window was the first attempt and it read badly: it started
+ * mid-word, so a rating-sheet row began `ansformer 架构]] 在大规模下的实用改良`
+ * and the reader had to reconstruct the sentence around the match. Sentence
+ * boundaries cost nothing extra and give the reader the unit they actually judge —
+ * "should this link be here?" is a question about a sentence.
+ *
+ * Falls back to the whole text when no terminator is found, and caps the length so
+ * one unpunctuated run cannot fill the card.
+ */
+export function previewAround(text: string, at: number, length: number): string {
+  const isBoundary = (position: number): boolean => {
+    const character = text[position];
+    if (character === undefined) return false;
+    if (!SENTENCE_TERMINATORS.has(character)) return false;
+    // A dot directly after a digit is an ordered-list marker, not a full stop:
+    // `4. **评测方法。** 报告…` is one sentence, and treating the marker as a
+    // boundary produced a preview of `评测方法。` — the correct sentence by the
+    // letter of the rule, and useless to read.
+    if (character === "." && position > 0 && /\d/.test(text[position - 1] ?? "")) return false;
+    return true;
+  };
+
+  let start = at;
+  while (start > 0 && !isBoundary(start - 1)) start -= 1;
+  let end = at + length;
+  while (end < text.length && !isBoundary(end)) end += 1;
+  if (end < text.length) end += 1;
+
+  let sentence = text.slice(start, end).replace(/\s+/g, " ").trim();
+  // A bullet marker or a stray bracket can still lead, which reads as a truncated
+  // sentence rather than a quote.
+  sentence = sentence.replace(/^[>\-*+\d.\s）)]+/, "").trim();
+  if (sentence.length > MAX_PREVIEW) sentence = `${sentence.slice(0, MAX_PREVIEW)}…`;
+  return sentence;
+}
+
+/** Longest a preview may be, so an unpunctuated run cannot fill the card. */
+const MAX_PREVIEW = 160;
 
 // ---------------------------------------------------------------------------
 // Graph attachment
