@@ -73,7 +73,7 @@ import {
   type VisibilityFilters,
 } from "./visibility";
 import { nodeColorForMode, resolveTypeColors, sameColorMap } from "./palette";
-import { listenForWidthProbe, reportPanelGeometryOnce } from "./width-probe";
+import { exposeWidthProbe } from "./width-probe";
 
 /**
  * ForceAtlas2 steps taken per gravity-drag event.
@@ -291,9 +291,13 @@ export class EnhancedGraphView extends ItemView {
       onFit: () => this.renderer?.fit(),
     });
     this.panelEl = body.createDiv({ cls: "enhanced-graph-panel" });
-    // Answers the console probe that reports this panel's real width; see the module for
-    // why a host-only layout needs to be asked rather than modelled.
-    this.detachWidthProbe = listenForWidthProbe();
+    // Publishes the width probe on `window` and answers its event, so a layout question
+    // that only reproduces inside the app can be asked rather than guessed at. The report
+    // is shown as a Notice: the submission guidelines forbid logging to the console, and
+    // a Notice is also where a reader who never opens developer tools will see it.
+    this.detachWidthProbe = exposeWidthProbe((report) => {
+      new Notice(report, 30000);
+    });
 
     this.canvasWrapEl.addEventListener("mousemove", (event) => {
       this.renderer?.trackPointer(event.clientX, event.clientY);
@@ -997,9 +1001,6 @@ export class EnhancedGraphView extends ItemView {
       return;
     }
     el.removeClass("is-hidden");
-    // Print the panel's geometry once, unprompted; see the module for why this is not
-    // left to a console command.
-    if (this.panelMode === "insights") reportPanelGeometryOnce(() => this.panelEl);
 
     const titles: Record<Exclude<PanelMode, "none">, string> = {
       insights: t("insights.title"),

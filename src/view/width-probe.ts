@@ -14,12 +14,21 @@
  * because a flex item cannot be wider than the space its parent gives it however loudly
  * its own rule insists.
  *
- * A custom event rather than a command, so it costs no UI: paste one line into the
- * developer console, and the answer comes back as a string to copy.
+ * **The report does not go to the console.** The submission guidelines say not to log
+ * unnecessarily, and the reviewer's `obsidianmd/rule-custom-message` enforces it — the
+ * rule cannot be silenced either, since `eslint-comments/no-restricted-disable` blocks
+ * the disable comment and `require-description` blocks the bare form. An earlier version
+ * of this module shipped a `console.log` and was rejected. The function is published on
+ * `window` instead, so it is one call away in the console, is discoverable by typing
+ * `enhancedGraph`, and `useWidthProbe` additionally shows the report as a Notice for a
+ * reader who would rather not open developer tools at all.
  */
 
-/** The event a console one-liner dispatches to ask the panel for its numbers. */
+/** The event an external caller — a probe script over CDP — dispatches to ask. */
 export const WIDTH_PROBE_EVENT = "enhanced-graph:width-probe";
+
+/** The globals this module publishes, so a caller can be written without guessing. */
+export const WIDTH_PROBE_GLOBAL = "enhancedGraphWidthProbe";
 
 /**
  * Every panel currently in the DOM, not just the first.
@@ -42,37 +51,41 @@ export function reportAllPanels(): string {
 }
 
 /**
- * Log the panel's geometry once, unprompted, after the first layout.
+ * Publish the report on `window`, and answer the probe event.
  *
- * A self-report rather than something the reader has to know to ask for. The defect this
- * exists for could not be reproduced outside Obsidian: three successive fixes measured
- * correct in the browser harness and none of them held in the app, and every round trip
- * spent the reader's patience on a request I could have answered myself. So the numbers
- * are printed on the first render, in the console they already know how to open, and the
- * answer arrives without a question.
+ * Two access routes on purpose. The global is what a person types — `enhancedGraphWidthProbe()`
+ * autocompletes in the console, and its name is the documentation. The event is what a
+ * script attaches to, which is how this repository's own `obsidian-probe.mjs` measures a
+ * running app over the DevTools protocol without needing a window handle.
  *
- * Once per session on purpose: a panel that logs on every rebuild would bury the reader's
- * own console output, and the first layout is the one that answers the question.
+ * Returns a detach function, so a closed view leaves nothing behind.
  */
-let reported = false;
-
-export function reportPanelGeometryOnce(getPanel: () => HTMLElement | null): void {
-  if (reported) return;
-  reported = true;
-  const run = (): void => {
-    const panel = getPanel();
-    if (!panel || panel.getBoundingClientRect().width === 0) {
-      // Laid out as nothing yet — put it back and try after the next frame, or the
-      // report would be a page of zeroes that looks like a layout failure.
-      reported = false;
-      return;
-    }
-    // eslint-disable-next-line no-console
-    console.log(reportPanelWidth(panel));
+export function exposeWidthProbe(
+  onReport: (report: string) => void = () => undefined,
+): () => void {
+  const target = window as unknown as Record<string, unknown>;
+  const previous = target[WIDTH_PROBE_GLOBAL];
+  const report = (): string => {
+    const text = reportAllPanels();
+    onReport(text);
+    return text;
   };
-  // Two frames: one for the DOM the caller just built, one for layout to settle.
-  requestAnimationFrame(() => requestAnimationFrame(run));
+  target[WIDTH_PROBE_GLOBAL] = report;
+
+  const handler = (): void => {
+    onReport(reportAllPanels());
+  };
+  document.addEventListener(WIDTH_PROBE_EVENT, handler);
+
+  return () => {
+    document.removeEventListener(WIDTH_PROBE_EVENT, handler);
+    // Restore whatever was there rather than deleting: another view may still be open,
+    // and it published the same function.
+    if (previous === undefined) delete target[WIDTH_PROBE_GLOBAL];
+    else target[WIDTH_PROBE_GLOBAL] = previous;
+  };
 }
+
 /** What the probe learned, as a line of text for the console. */
 export function reportPanelWidth(panel: HTMLElement | null): string {
   if (!panel) return "enhanced-graph: the insight panel is not in the DOM (is the view open?)";
@@ -175,21 +188,4 @@ export function reportPanelWidth(panel: HTMLElement | null): string {
   if (firstNarrower !== "") parts.push(`FIRST NARROWER ANCESTOR: ${firstNarrower}`);
 
   return `enhanced-graph width probe\n  ${parts.join("\n  ")}`;
-}
-
-/**
- * Answer the probe event, and return a detach function.
- *
- * Listening on `document` means the console does not need a reference to the view, which
- * is the whole point — the person running it should not have to find the instance first.
- */
-export function listenForWidthProbe(): () => void {
-  const handler = (): void => {
-    // Every panel, not just the view's own: a probe that reports one of two is how a
-    // measurement can be right while the reader is still looking at the wrong thing.
-    // eslint-disable-next-line no-console
-    console.log(reportAllPanels());
-  };
-  document.addEventListener(WIDTH_PROBE_EVENT, handler);
-  return () => document.removeEventListener(WIDTH_PROBE_EVENT, handler);
 }

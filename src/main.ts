@@ -440,8 +440,12 @@ export default class EnhancedGraphPlugin extends Plugin implements PluginHost, S
   }
 
   /** Diagnostics for `command.probeOfficialGraph`: which seams still exist. */
-  private reportOfficialGraphCompatibility(): void {    const probes = probeOfficialGraph(this.app);
-    console.info("[enhanced-graph] built-in graph compatibility probe", probes);
+  private reportOfficialGraphCompatibility(): void {
+    const probes = probeOfficialGraph(this.app);
+    // No console mirror of this: the report below is shown as a Notice, which is where a
+    // reader can actually see it, and the submission guidelines ask plugins not to log
+    // what they already show. The previous `console.info` here is what the reviewer's
+    // console rule flagged.
     const report = probes
       .map((probe) => {
         const state = !probe.leafFound
