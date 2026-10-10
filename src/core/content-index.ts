@@ -297,12 +297,17 @@ export function buildContentIndex(
             if (entry.adjacent.has(targetId)) continue;
             const current = byTarget.get(targetId);
             if (current) current.occurrences += 1;
-            // The note's own spelling, so a card reads `Beta` rather than `beta`.
             else {
+              // The spelling **as this note wrote it**, taken from the match itself
+              // rather than from the page. `termSpelling` holds the page's own term,
+              // so a note writing `prompt` reported `Prompt`, and the editor then
+              // inserted the page's casing over the reader's — a small change to their
+              // prose that they never asked for.
+              const spelling = padded.slice(index, index + term.length);
               byTarget.set(targetId, {
                 occurrences: 1,
                 first: index,
-                term: termSpelling.get(term) ?? term,
+                term: spelling,
                 termKey: term,
               });
             }

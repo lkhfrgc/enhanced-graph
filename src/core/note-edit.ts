@@ -156,7 +156,8 @@ export function insertWikilink(content: string, options: InsertWikilinkOptions):
   const chosen = prose ?? heading;
   if (chosen === null) return { changed: false, content, reason: "term-not-found" };
 
-  const next = applyLink(body, chosen, text);
+  const replacement = applyLink(body, chosen, text, parseLink(text).display);
+  const next = `${body.slice(0, replacement.span.start)}${replacement.text}${body.slice(replacement.span.end)}`;
   const result = `${content.slice(0, bodyOffset)}${next}`;
   // `changed` means "the file is different", not "a term was found": a term that
   // already is the link text would otherwise be reported as a successful write of
@@ -186,47 +187,116 @@ const CLOSE_FOR: Readonly<Record<string, string>> = { "（": "）", "(": ")" };
 const MAX_GLOSS = 24;
 
 /**
+ * A wikilink's parts: `[[target|alias]]` and `[[target]]` both parse.
+ *
+ * Display text is the alias when there is one, and the target's file name otherwise —
+ * which is what Obsidian shows, and what decides whether an edit changes the prose.
+ */
+function parseLink(text: string): { target: string; alias: string; display: string } {
+  const inner = text.replace(/^\[\[/, "").replace(/\]\]$/, "");
+  const bar = inner.indexOf("|");
+  const target = (bar >= 0 ? inner.slice(0, bar) : inner).trim();
+  const alias = bar >= 0 ? inner.slice(bar + 1).trim() : "";
+  const display = alias || (target.split("#")[0].split("/").pop() ?? target).replace(/\.md$/i, "");
+  return { target, alias, display };
+}
+
+/**
+ * Keep the reader's word by making it the link's alias.
+ *
+ * A mention matches a page through its frontmatter aliases, and an alias is often a
+ * *narrower* term than the page name. `对齐税.md` lists `过度拒答` because over-refusal
+ * is one of the tax's symptoms — so replacing `过度拒答` with `[[对齐税]]` states the
+ * category where the sentence said the symptom:
+ *
+ *    对齐会带来"对齐税"：过度拒答、回答趋同、…
+ * →  对齐会带来"对齐税"：[[对齐税]]、回答趋同、…      ← the sentence got worse
+ *
+ * The author listed the alias because they do mean that page by that word, so the
+ * matched spelling becomes the link's display text and the prose is untouched:
+ *
+ *    对齐会带来"对齐税"：[[对齐税|过度拒答]]、回答趋同、…
+ *
+ * No alias is added when the matched term *is* the page's name (case-insensitively),
+ * so the ordinary case stays a plain `[[Target]]` rather than `[[Target|target]]`.
+ * Where the note writes the name in different case, the note's own spelling wins:
+ * it is the text the reader is looking at, and the link resolves either way.
+ */
+function withTermAsAlias(text: string, term: string): string {
+  const { target, alias, display } = parseLink(text);
+  if (!target) return text;
+  if (alias === term) return text;
+  if (display.toLowerCase() === term.toLowerCase()) return text;
+  return `[[${target}|${term}]]`;
+}
+
+/**
+ * Where an insertion goes and what it replaces: a span, and the text for it.
+ *
+ * Everything except the plain "replace the matched term" case is expressed as a span
+ * whose text is different, so there is exactly one place that rebuilds the body.
+ */
+interface Replacement {
+  readonly span: Span;
+  readonly text: string;
+}
+
+/**
  * Put the link where it does not delete the reader's words.
  *
  * The edit is nominally "replace the matched term with the link text", and that is
- * wrong in one very common shape. A note that writes a short form and glosses it —
- * `直接偏好优化（DPO）` — matches the short form, and substituting the page's *name*
- * for it produces `直接[[RLHF 与 DPO]]（DPO）`: the gloss is left dangling behind a
- * link that already says what it was explaining. The reader's text was not wrong; the
- * edit was.
+ * wrong in two common shapes — both found by reading a real preview rather than by
+ * reasoning about the rules.
  *
- * So when a term is followed by a bracketed gloss, the link goes inside the brackets
- * and nothing is deleted:
+ * **A term glossed in brackets.** A note writes a short form and then names the page —
+ * `偏好优化（RLHF 与 DPO）` — and substituting the term left that name dangling after a
+ * link that already said it. When the brackets hold the page's own name, the link
+ * replaces their contents and the sentence is otherwise untouched:
  *
- *    直接偏好优化（DPO）  →  直接偏好优化（[[RLHF 与 DPO]]）
+ *    再用…或直接偏好优化（RLHF 与 DPO）把模型推向…
+ * →  再用…或直接偏好优化（[[RLHF 与 DPO]]）把模型推向…
  *
- * This is the smaller edit — it adds and deletes nothing — which is also why it is the
- * safer default: a reader who dislikes the placement has an insertion to move, not a
- * word to restore from memory.
+ * A bracket is only a gloss when its contents *are* the page name. `偏好优化（DPO）` is
+ * an aside about a different term, and putting this link there would place it in the
+ * wrong group of words.
  *
- * A space may separate the term from its bracket, as English prose does; the CJK case
- * has none. Exactly one optional space is absorbed, so an unrelated parenthesis
- * further along the sentence is not mistaken for a gloss.
+ * **A term that is an alias of the page.** The page's aliases are narrower words —
+ * `对齐税.md` lists `过度拒答` — so the page name cannot stand in for the term. The
+ * matched spelling becomes the link's display text, which keeps the sentence and still
+ * resolves to the page ({@link withTermAsAlias}).
+ *
+ * The two cases take different text on purpose: the bracket case uses the caller's
+ * `text` because the replaced word *is* the page's name, and the general case derives
+ * an alias because the replaced word is the reader's, not the page's.
+ *
+ * The bracket case is decided first. An earlier version wrapped the term as an alias
+ * before looking at the bracket, which meant the bracket could never match and the
+ * gloss case silently stopped working — while every test still passed, because the
+ * alias form was a reasonable-looking result.
  */
-function applyLink(body: string, span: Span, text: string): string {
+function applyLink(body: string, span: Span, text: string, pageName: string): Replacement {
   let bracket = span.end;
   if (body[bracket] === " " && OPEN_GLOSS.has(body[bracket + 1] ?? "")) bracket += 1;
 
   const open = body[bracket] ?? "";
   const close = CLOSE_FOR[open];
-  if (close !== undefined) {
+  if (close !== undefined && pageName !== "") {
     const limit = Math.min(body.length, bracket + 1 + MAX_GLOSS);
     const at = body.indexOf(close, bracket + 1);
-    // The existing brackets already delimit the gloss, so the link goes between them
-    // rather than inside the abbreviation they were explaining.
-    if (at > 0 && at <= limit) {
-      return `${body.slice(0, bracket + 1)}${text}${body.slice(at)}`;
+    if (
+      at > 0 &&
+      at <= limit &&
+      body.slice(bracket + 1, at).trim().toLowerCase() === pageName.toLowerCase()
+    ) {
+      // The brackets already display the page's name, so the caller's plain text is
+      // exactly right and the sentence is left as it was.
+      return { span: { start: bracket + 1, end: at }, text };
     }
-    // An opening bracket with no nearby close is a clause, not a gloss: inserting
-    // here would put the link outside the group of words it belongs to.
   }
 
-  return `${body.slice(0, span.start)}${text}${body.slice(span.end)}`;
+  // The matched spelling, not the trimmed term: a note may write `beta` where the page
+  // says `Beta`, and the reader's own casing is what the link should display.
+  return { span, text: withTermAsAlias(text, body.slice(span.start, span.end)) };
 }
 
 /**

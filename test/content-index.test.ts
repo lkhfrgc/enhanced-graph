@@ -234,6 +234,32 @@ describe("unlinked mentions: matching", () => {
     expect(index.mentions[0]?.term).toBe("Transformer");
     expect(index.mentions[0]?.targetId).toBe("b");
   });
+
+  it("reports the spelling the note used, not the page's", () => {
+    // The term travels to the editor, which searches the note for it. Reporting the
+    // page's casing instead meant a note writing `prompt` was searched for `Prompt`,
+    // and on a case-insensitive hit the editor then inserted the page's casing over
+    // the reader's — a small change to their prose that they never asked for.
+    const index = indexOf(
+      vaultOf([
+        { id: "a", title: "Alpha", body: "把 token 全部塞进 prompt 里。" },
+        { id: "b", title: "提示工程", body: "", aliases: ["Prompt"] },
+      ]),
+    );
+
+    expect(index.mentions[0]?.term).toBe("prompt");
+  });
+
+  it("reports the note's casing for a differently cased title match too", () => {
+    const index = indexOf(
+      vaultOf([
+        { id: "a", title: "Alpha", body: "关于 transformer 的讨论。" },
+        { id: "b", title: "Transformer", body: "" },
+      ]),
+    );
+
+    expect(index.mentions[0]?.term).toBe("transformer");
+  });
 });
 
 // ---------------------------------------------------------------------------
