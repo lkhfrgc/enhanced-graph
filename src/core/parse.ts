@@ -27,6 +27,17 @@ export interface ParsedNote {
   /** Raw wikilink targets plus frontmatter `related[]` entries. */
   readonly links: readonly string[];
   readonly isStructural: boolean;
+  /**
+   * The note's text with the frontmatter block removed.
+   *
+   * Carried because "does this note already mention that page in prose?" cannot be
+   * answered from the graph: the graph knows what was *linked*, and an unlinked
+   * mention is precisely a mention that produced no link. Every consumer of this
+   * field derives a bounded signal from it and then drops the string — the content
+   * index keeps term lists, not bodies — so holding it this long does not mean
+   * holding a vault's text in memory for the session.
+   */
+  readonly body: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -278,6 +289,7 @@ export function parseNote(path: string, content: string): ParsedNote {
     aliases,
     links,
     isStructural,
+    body,
   };
 }
 

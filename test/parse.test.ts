@@ -315,7 +315,35 @@ describe("parseNote", () => {
         "Vaswani",
       ],
       isStructural: false,
+      // Asserted as a value rather than reconstructed from the fixture: the
+      // contract is "the text after the frontmatter", and rebuilding it in the
+      // test would re-implement the parser instead of checking it.
+      body: [
+        "# Heading",
+        "",
+        "Body links [[Self-Attention]] and [[Multi-Head Attention|heads]].",
+        "",
+        "```ts",
+        "// [[Not A Link]]",
+        "```",
+        "",
+        "Inline `[[Also Not A Link]]` stays.",
+        "",
+        "![[Figure 1.png]]",
+        "",
+      ].join("\n"),
     });
+  });
+
+  it("keeps the body out of the frontmatter", () => {
+    // The distinction matters: a `sources: [...]` entry is a citation, and the
+    // unlinked-mention scan must not read one as prose. Scanning frontmatter made a
+    // probe report the same title six times from a single note's citation list.
+    const note = parseNote("a.md", ["---", "title: A", "sources: [B, C]", "---", "prose only", ""].join("\n"));
+
+    expect(note.body).toBe("prose only\n");
+    expect(note.body).not.toContain("---");
+    expect(note.body).not.toContain("sources");
   });
 
   it("lower-cases the id but keeps rawId, basename and path in their original case", () => {

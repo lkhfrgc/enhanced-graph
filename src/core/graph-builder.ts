@@ -34,6 +34,7 @@ import { computeRelevance, createRelevanceContext } from "./relevance";
 import type { RawLink, RelevanceContext } from "./relevance";
 import { normalizeVaultPath } from "./vault";
 import type { VaultAdapter } from "./vault";
+import { attachContentIndex, buildContentIndex } from "./content-index";
 
 // ---------------------------------------------------------------------------
 // Public option / result types
@@ -711,7 +712,7 @@ export async function buildWikiGraph(options: BuildGraphOptions): Promise<WikiGr
     if (!nodeIndex.has(note.rawId)) nodeIndex.set(note.rawId, node);
   });
 
-  return Object.freeze({
+  const graph: WikiGraph = Object.freeze({
     nodes: Object.freeze(sortedNodes),
     edges: Object.freeze(sortedEdges),
     communities: Object.freeze(communities),
@@ -719,4 +720,32 @@ export async function buildWikiGraph(options: BuildGraphOptions): Promise<WikiGr
     folders: Object.freeze(folders),
     builtAt: Date.now(),
   });
+
+  // Undirected adjacency, for the one question the content index has to answer
+  // before it can report a mention: are these two pages already connected? Built
+  // here because the directed link list is, and because "connected" is symmetric
+  // even though the links are not.
+  const adjacency = new Map<string, Set<string>>();
+  for (const node of nodes) adjacency.set(node.id, new Set());
+  for (const link of directedLinks) {
+    adjacency.get(link.source)?.add(link.target);
+    adjacency.get(link.target)?.add(link.source);
+  }
+
+  // The content index is derived HERE, while the parsed bodies are still in
+  // memory, and attached to the graph rather than put inside it: `WikiGraph` is
+  // rendered verbatim, frozen and serialised into the browser fixture, so widening
+  // it for a signal only the insight engine reads would change three things at
+  // once. Attaching also lets the analysers stay synchronous and pure — they read
+  // a prepared index instead of touching the vault, which is what keeps the
+  // graph/insights cache split working.
+  attachContentIndex(
+    graph,
+    buildContentIndex(notes, (noteId) => adjacency.get(noteId) ?? EMPTY_ADJACENCY),
+  );
+
+  return graph;
 }
+
+/** Shared empty set, so an isolated page does not allocate one per lookup. */
+const EMPTY_ADJACENCY: ReadonlySet<string> = new Set();

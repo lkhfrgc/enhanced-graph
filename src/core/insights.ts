@@ -67,6 +67,16 @@ import {
   GAPS_ANALYSER_ID,
 } from "./insights/analysers";
 import {
+  contentAnalyser,
+  contentFindings,
+  registerContentAnalyser,
+  toMentionFinding,
+  toMergeFinding,
+  CONTENT_ANALYSER_ID,
+  MENTION_LIMIT,
+  MERGE_LIMIT,
+} from "./insights/content";
+import {
   capsFrom,
   compareFindings,
   effortRank,
@@ -147,12 +157,15 @@ export interface GraphInsights {
 export function analyzeGraph(graph: WikiGraph, options: AnalyzeOptions = {}): GraphInsights {
   const input: InsightInput = { graph, ...(options.previous ? { previous: options.previous } : {}) };
   const ctx = createContext(input);
-  const analysers = [connectionsAnalyser(options), gapsAnalyser(options)];
+  const analysers = [connectionsAnalyser(options), gapsAnalyser(options), contentAnalyser()];
 
   // The legacy arrays are produced by the same calls the analysers make, so a
   // migration cannot report one thing in `connections` and another on a card.
   const connections = rankUnexpectedLinks(graph, options);
   const gaps = findCoverageGaps(graph, options);
+  // Content findings come from the context's index, which the builder attached to
+  // the graph while the parsed bodies were in memory.
+  const content = contentFindings(ctx, ctx.content);
 
   const findings: Finding[] = [
     ...connections.map((connection) =>
@@ -163,6 +176,7 @@ export function analyzeGraph(graph: WikiGraph, options: AnalyzeOptions = {}): Gr
       ),
     ),
     ...toGapFindings(gaps),
+    ...content,
   ];
 
   const { ranked, droppedByCap } = rankFindings(findings, capsFrom(analysers), {
@@ -192,6 +206,7 @@ export {
   BRIDGE_LIMIT,
   BRIDGE_SUGGESTION,
   CONNECTIONS_ANALYSER_ID,
+  CONTENT_ANALYSER_ID,
   CONTRIBUTION,
   DEFAULT_CONNECTION_LIMIT,
   DEFAULT_GAP_LIMIT,
@@ -201,11 +216,15 @@ export {
   GAPS_ANALYSER_ID,
   ISOLATED_SUGGESTION,
   LABEL_PREVIEW,
+  MENTION_LIMIT,
+  MERGE_LIMIT,
   MIN_BRIDGE_CLUSTERS,
   SPARSE_SUGGESTION,
   buildBundle,
   compareFindings,
   connectionKey,
+  contentAnalyser,
+  contentFindings,
   countUndismissed,
   effortRank,
   findBridgeNodes,
@@ -216,9 +235,12 @@ export {
   rankFindings,
   rankUnexpectedLinks,
   registerAnalyser,
+  registerContentAnalyser,
   registerDefaultAnalysers,
   scoreRangesFrom,
   sectionOf,
+  toMentionFinding,
+  toMergeFinding,
   typePair,
   visibleFindings,
   visibleSections,

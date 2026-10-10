@@ -13,6 +13,7 @@
  */
 
 import type { GraphNode, WikiGraph } from "../../types";
+import { contentIndexOf, type ContentIndex } from "../content-index";
 import type { Confidence, Finding, InsightBundle } from "./model";
 
 // ---------------------------------------------------------------------------
@@ -65,6 +66,14 @@ export interface AnalysisContext {
   /** Undirected adjacency, out-links union in-links. */
   readonly neighbours: ReadonlyMap<string, ReadonlySet<string>>;
   readonly augmentations: GraphAugmentations;
+  /**
+   * Content signals for this graph, or `null` when the build had none.
+   *
+   * Resolved once here rather than inside each analyser, so "does this graph have
+   * content?" has one answer for the whole pass — and so an analyser cannot
+   * silently disagree with another about it.
+   */
+  readonly content: ContentIndex | null;
   /** Milliseconds; `Date.now()` unless the input pinned it. */
   readonly now: number;
 }
@@ -116,6 +125,7 @@ export function createContext(input: InsightInput): AnalysisContext {
     nodeById: resolveNodes(input.graph),
     neighbours,
     augmentations: input.augmentations ?? {},
+    content: contentIndexOf(input.graph),
     now: input.augmentations?.now ?? Date.now(),
   };
 }
