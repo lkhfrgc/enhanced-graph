@@ -606,6 +606,46 @@ async function main() {
       titles: [],
       sections: insightTabs,
     };
+
+    // The panel's width is a layout contract, not a preference: a panel that resizes
+    // as cards come and go makes the graph beside it look like it moved.
+    //
+    // Asserted against the *declared* width rather than only across tabs, because the
+    // cross-tab check alone is not enough to be meaningful: it passed while the panel
+    // was 337px instead of 320, since every tab was wrong by the same amount. What it
+    // must catch is the declared number and the rendered box disagreeing — which is what
+    // `box-sizing` decides, and why the harness can check the contract even though it
+    // does not reproduce the content that made the panel shrink in the real vault.
+    const panelWidth = async () =>
+      page.evaluate(() => {
+        const el = document.querySelector(".enhanced-graph-panel");
+        if (!el) return null;
+        const style = getComputedStyle(el);
+        const declared = parseFloat(style.width) || 0;
+        const rendered = el.getBoundingClientRect().width;
+        return {
+          declared: Math.round(declared),
+          rendered: Math.round(rendered),
+        };
+      });
+    const widths = new Map();
+    for (const label of ["建议新增", "惊奇连接", "结构风险", "知识空白"]) {
+      await selectPanelTab(page, label);
+      widths.set(label, await panelWidth());
+    }
+    const rendered = new Set([...widths.values()].map((entry) => (entry ? entry.rendered : 0)));
+    const declared = new Set([...widths.values()].map((entry) => (entry ? entry.declared : 0)));
+    const sample = [...widths.entries()][0]?.[1];
+    check(
+      "the insights panel keeps one fixed width, and its declared width is the box drawn",
+      rendered.size === 1 &&
+        declared.size === 1 &&
+        (sample?.rendered ?? 0) === (sample?.declared ?? -1) &&
+        (sample?.rendered ?? 0) >= 200,
+      `declared ${sample?.declared}px, rendered ${[...rendered].join("/")}px across ` +
+        `${widths.size} groups`,
+    );
+    await selectPanelTab(page, "建议新增");
     check(
       "insights panel switches between its groups by tab, including existing links",
       insightTabs.length >= 3 &&

@@ -399,8 +399,21 @@
    -------------------------------------------------------------------------- */
 
 .enhanced-graph-panel {
-  flex: 0 0 320px;
+  /* The width is a contract, so the horizontal basis is fixed and it does not grow.
+   *
+   * Shrink is left at 1, and the canvas beside it is what gives way first: the row's
+   * other child is `flex: 1 1 auto` with `min-width: 0`, so it absorbs the pressure and
+   * the panel holds its width. A rigid `0 0` here would instead keep 320px in a narrow
+   * pane and squeeze the graph to nothing, which is a worse failure than a panel that
+   * eventually narrows with the window.
+   *
+   * The width that *used* to wobble came from the content, not the window: with the
+   * default `box-sizing` the declared 320px drew as 337px once the padding and the left
+   * rule were added, and cards were free to set the floor the panel shrank to. Both are
+   * fixed below rather than by tightening this axis. */
+  flex: 0 1 320px;
   width: 320px;
+  box-sizing: border-box;
   border-left: 1px solid var(--background-modifier-border);
   background: var(--background-secondary);
   overflow-y: auto;
@@ -408,6 +421,25 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+/* Content fills the panel and may not set its width. A long unbroken string — a file
+   path in a title, a URL, a hash — would otherwise widen a card past the panel, and the
+   card is what the reader sees overflowing. `anywhere` breaks the string instead. */
+.enhanced-graph-panel .enhanced-graph-card,
+.enhanced-graph-panel .enhanced-graph-section,
+.enhanced-graph-panel .enhanced-graph-panel-tabs {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.enhanced-graph-panel .enhanced-graph-card-title,
+.enhanced-graph-panel .enhanced-graph-card-meta,
+.enhanced-graph-panel .enhanced-graph-card-suggestion,
+.enhanced-graph-panel .enhanced-graph-section-new,
+.enhanced-graph-panel .enhanced-graph-empty {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .enhanced-graph-panel.is-hidden {
@@ -1275,17 +1307,25 @@
 
 .enhanced-graph-official-panel {
   width: 300px;
-  /* `min-height: 0` lets it scroll inside the column instead of pushing the
-     overlay past the view. */
+  /* `width` counts the content box by default, so 300px would become 320px with the
+     padding and the border. The panel is a fixed panel; the declared number should be
+     the box the reader sees. */
+  box-sizing: border-box;
+  /* The horizontal size is fixed and the vertical one is not, so the two axes are set
+     separately rather than with the `flex` shorthand.
+     Horizontally: `0 0` makes the declared width final. The panel is a flex item in a
+     column whose `align-items: flex-start` sizes children to their content, so with
+     shrink allowed a wide card pulled the panel *below* 300px and the panel changed
+     width as the cards did.
+     Vertically: `min-height: 0` lets it scroll inside the column instead of pushing the
+     overlay past the view, and `flex-shrink: 1` with it lets a long tab stop at the
+     ceiling the overlay reserves above the legend and scroll inside it. Setting the
+     shorthand would overwrite the first axis. */
+  flex: 0 0 auto;
+  flex-shrink: 1;
   min-height: 0;
-  /* As long as its content, and never longer than the space the overlay leaves
-     above the legend — the same ceiling for every tab, which is the point.
-     `flex-grow: 0` so a short tab stays short rather than padding the panel out
-     to full height; `flex-shrink: 1` with `min-height: 0` so a long one stops at
-     that ceiling and scrolls inside it. `max-height: none` because the reserved
-     strip is what holds the ceiling; a percentage here measured from the wrong
-     origin. */
-  flex: 0 1 auto;
+  /* `max-height: none` because the reserved strip above the legend is what holds the
+     ceiling; a percentage here measured from the wrong origin. */
   max-height: none;
   display: flex;
   flex-direction: column;
@@ -1297,6 +1337,22 @@
   background: var(--background-primary);
   box-shadow: var(--shadow-s);
   font-size: var(--font-ui-smaller, 12px);
+}
+
+/* Cards fill the panel and may not set its width. A long, unbroken string — a file
+   path in a title, a URL — would otherwise widen the card and, with it, the floor
+   the panel used to shrink to. `min-width: 0` is what lets the flex item shrink
+   below its content, and `anywhere` breaks the string instead of overflowing. */
+.enhanced-graph-official-panel .enhanced-graph-card {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.enhanced-graph-official-panel .enhanced-graph-card-title,
+.enhanced-graph-official-panel .enhanced-graph-card-meta,
+.enhanced-graph-official-panel .enhanced-graph-official-panel-summary {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .enhanced-graph-official-panel.is-hidden {
