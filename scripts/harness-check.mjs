@@ -706,7 +706,7 @@ async function main() {
       const sigma = window.__HARNESS__.view.renderer.instance;
       const before = sigma.getGraph().order;
       const checkbox = [...document.querySelectorAll(".enhanced-graph-checkbox")]
-        .find((row) => row.textContent?.includes("概念"))
+        .find((row) => row.textContent?.includes("concept"))
         ?.querySelector("input");
       if (checkbox) {
         checkbox.checked = false;
@@ -723,14 +723,14 @@ async function main() {
     check(
       "toggling a page type rebuilds the rendered graph",
       filters.after < filters.before,
-      `${filters.before} → ${filters.after} nodes after hiding 概念`,
+      `${filters.before} → ${filters.after} nodes after hiding concept`,
     );
     await page.screenshot({ path: path.join(shotsDir, "05-filters-panel-dark.png") });
 
     // Restore so the remaining checks see the whole graph again.
     await page.evaluate(() => {
       const checkbox = [...document.querySelectorAll(".enhanced-graph-checkbox")]
-        .find((row) => row.textContent?.includes("概念"))
+        .find((row) => row.textContent?.includes("concept"))
         ?.querySelector("input");
       if (checkbox && !checkbox.checked) {
         checkbox.checked = true;
@@ -954,7 +954,7 @@ async function main() {
         candidate.querySelector(".enhanced-graph-section-title")?.textContent?.includes("节点"),
       );
       const rows = [...(nodeSection?.querySelectorAll(".enhanced-graph-colour-row") ?? [])];
-      const entityRow = rows.find((row) => row.textContent?.includes("实体"));
+      const entityRow = rows.find((row) => row.querySelector(".enhanced-graph-colour-label")?.textContent === "entity" || row.textContent?.trim().startsWith("entity"));
       const picker = entityRow?.querySelector(".enhanced-graph-colour");
       if (!picker) return { error: "no entity colour row" };
       picker.value = "#123456";
@@ -2242,10 +2242,12 @@ async function main() {
       // earlier check, so the vault itself is not the baseline.
       const visibleBefore = window.__HARNESS__.visibleNodeIds().length;
 
-      // Hide the one page that declares 概念 — a type the plugin has no name for.
+      // Hide the one page that declares 概念 — a type of its own, next to the 38 that
+      // declare `concept`. Matched on the panel row's text: the row is the label followed
+      // by the count, so `概念` matches that row and not the `concept` one.
       const custom = expected.find((entry) => entry.key === "概念");
       const target = [...document.querySelectorAll(".enhanced-graph-panel .enhanced-graph-checkbox")]
-        .find((row) => row.textContent?.includes("概念 · concept"));
+        .find((row) => row.textContent?.trim().startsWith("概念"));
       const box = target?.querySelector("input[type=checkbox]");
       if (box) {
         box.checked = false;
@@ -2363,7 +2365,7 @@ async function main() {
         (node) => keyOf(node) === "concept",
       ).length;
 
-      const row = rowFor("概念");
+      const row = rowFor("concept");
       const paintedPixels = () => {
         const canvas = document.querySelector("canvas.enhanced-graph-marker-layer");
         const context = canvas?.getContext("2d");
@@ -2385,7 +2387,7 @@ async function main() {
       row?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
       await sleep(400);
       const marked = window.__HARNESS__.markedNodeIds().slice().sort();
-      const sameRow = rowFor("概念");
+      const sameRow = rowFor("concept");
       const state = {
         marked: marked.length,
         expected,
@@ -2409,12 +2411,12 @@ async function main() {
         cleared: window.__HARNESS__.markedNodeIds().length,
         paintedAfterClear: paintedPixels(),
         stillMarkedRow:
-          rowFor("概念")?.classList.contains("is-marked") ?? false,
+          rowFor("concept")?.classList.contains("is-marked") ?? false,
       };
     });
 
     console.log(
-      `\n  group mark: right-click 概念 → ${markCheck.marked} nodes dotted ` +
+      `\n  group mark: right-click concept → ${markCheck.marked} nodes dotted ` +
         `(expected ${markCheck.expected}); drawn ${markCheck.visibleBefore} → ${markCheck.visibleAfter}; ` +
         `row marked ${markCheck.markedRow}; ink ${markCheck.paintedBefore} → ${markCheck.paintedAfter} → ` +
         `${markCheck.paintedAfterClear} px; second right-click → ${markCheck.cleared} dotted\n`,
@@ -3419,9 +3421,9 @@ async function main() {
     await selectPanelTab(page, "页面类型");
     const unreachable = await page.evaluate(async () => {
       const checkbox = [...document.querySelectorAll(".enhanced-graph-checkbox")]
-        .find((row) => row.textContent?.includes("方法论"))
+        .find((row) => row.textContent?.trim().startsWith("methodology"))
         ?.querySelector("input");
-      if (!checkbox) return { skipped: "no 方法论 filter row" };
+      if (!checkbox) return { skipped: "no methodology filter row" };
       if (checkbox.checked) {
         checkbox.checked = false;
         checkbox.dispatchEvent(new Event("change", { bubbles: true }));
@@ -3559,7 +3561,7 @@ async function main() {
     // Restore the filter so the remaining checks see the whole graph.
     await page.evaluate(async () => {
       const checkbox = [...document.querySelectorAll(".enhanced-graph-checkbox")]
-        .find((row) => row.textContent?.includes("方法论"))
+        .find((row) => row.textContent?.trim().startsWith("methodology"))
         ?.querySelector("input");
       if (checkbox && !checkbox.checked) {
         checkbox.checked = true;

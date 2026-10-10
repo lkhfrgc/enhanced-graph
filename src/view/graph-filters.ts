@@ -16,7 +16,6 @@
 import { t } from "../i18n";
 import type { CommunityInfo, FolderInfo, WikiGraph } from "../types";
 import { collectTags, collectTypes, tagMatches, type TagFilterMode } from "./visibility";
-import { typeLabel } from "./labels";
 import { checkboxRow, tabRow } from "./controls";
 
 export interface FilterOptions {
@@ -138,7 +137,7 @@ export function renderFilters(container: HTMLElement, options: FilterOptions): v
         for (const type of types) {
           const row = section.createEl("label", { cls: "enhanced-graph-checkbox" });
           const input = row.createEl("input", { type: "checkbox" });
-          const label = typeLabel(type.key, type.label);
+          const label = type.label;
           input.checked = !options.hiddenTypes.has(type.key);
           input.addEventListener("change", () => options.onToggleType(type.key, input.checked));
           row.createSpan({ text: label });

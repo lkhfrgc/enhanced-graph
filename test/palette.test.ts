@@ -350,6 +350,55 @@ describe("nodeColorForMode with per-type and per-community overrides", () => {
   });
 });
 
+describe("the type ramp's order", () => {
+  // Assignment walks the ramp, so a vault with N types uses the first N entries. The
+  // property that matters is therefore the closest pair within a PREFIX — measuring the
+  // whole ramp hid this: in hue order every prefix had a ΔE 19.0 pair, always ramp[0] vs
+  // ramp[1], and a real vault showed two unrelated types as the same colour.
+  const lab = (hex: string) => {
+    const { r, g, b } = hexToRgb(hex);
+    const toLinear = (c: number) =>
+      c / 255 <= 0.04045 ? c / 255 / 12.92 : ((c / 255 + 0.055) / 1.055) ** 2.4;
+    const [lr, lg, lb] = [toLinear(r), toLinear(g), toLinear(b)];
+    const x = (lr * 0.4124 + lg * 0.3576 + lb * 0.1805) / 0.95047;
+    const y = lr * 0.2126 + lg * 0.7152 + lb * 0.0722;
+    const z = (lr * 0.0193 + lg * 0.1192 + lb * 0.9505) / 1.08883;
+    const f = (t: number) => (t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116);
+    const [fx, fy, fz] = [f(x), f(y), f(z)];
+    return { L: 116 * fy - 16, a: 500 * (fx - fy), b: 200 * (fy - fz) };
+  };
+  const deltaE = (a: string, b: string) => {
+    const x = lab(a);
+    const y = lab(b);
+    return Math.hypot(x.L - y.L, x.a - y.a, x.b - y.b);
+  };
+  const closestInPrefix = (count: number): number => {
+    let closest = Infinity;
+    for (let i = 0; i < count; i += 1) {
+      for (let j = i + 1; j < count; j += 1) {
+        closest = Math.min(closest, deltaE(TYPE_COLORS[i], TYPE_COLORS[j]));
+      }
+    }
+    return closest;
+  };
+
+  it("keeps a five-type vault's colours far apart", () => {
+    // Measured: 38.5 in this order, 19.0 in hue order — which is the reported collision
+    // between two unrelated types in the same vault.
+    expect(closestInPrefix(5)).toBeGreaterThan(35);
+  });
+
+  it("still separates the first ten, and never drops below the ramp's own floor", () => {
+    expect(closestInPrefix(10)).toBeGreaterThan(18);
+    expect(closestInPrefix(TYPE_COLORS.length)).toBeGreaterThan(18);
+  });
+
+  it("holds the whole ramp together as a set", () => {
+    expect(new Set(TYPE_COLORS).size).toBe(TYPE_COLORS.length);
+    expect(closestInPrefix(2)).toBeGreaterThan(90);
+  });
+});
+
 describe("assignTypeColors", () => {
   it("gives every declared type its own colour, custom ones included", () => {
     // The measured bug this replaces: a hash per key cannot know what else is on screen,

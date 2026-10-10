@@ -235,7 +235,70 @@ const typeRamp = (() => {
   return kept;
 })();
 
-report("page type ramp (searched)", typeRamp, FALLBACK_HEXES);
+/**
+ * Order the ramp so that a PREFIX of it is as spread out as the whole thing.
+ *
+ * Assigned in sorted-key order, a vault with N types uses the first N entries — and the
+ * search produced them in hue order, so the first five were all reds: measured, the
+ * closest pair within any prefix was ΔE 19.0, and it was always the same two entries
+ * (ramp[0] vs ramp[1]). A reader saw "connection" and "question" as the same colour.
+ *
+ * Farthest-point ordering fixes the number that actually matters without touching the
+ * colours: repeatedly take the entry furthest from everything already taken. The 22-colour
+ * minimum is unchanged (19.0) while the first five go from 19.0 to 38.5.
+ */
+const spread = (ramp) => {
+  const remaining = [...ramp];
+  const ordered = [];
+  let bestPair = [remaining[0], remaining[1]];
+  for (let i = 0; i < remaining.length; i += 1) {
+    for (let j = i + 1; j < remaining.length; j += 1) {
+      if (deltaE(remaining[i].hex, remaining[j].hex) > deltaE(bestPair[0].hex, bestPair[1].hex)) {
+        bestPair = [remaining[i], remaining[j]];
+      }
+    }
+  }
+  ordered.push(bestPair[0], bestPair[1]);
+  remaining.splice(remaining.indexOf(bestPair[0]), 1);
+  remaining.splice(remaining.indexOf(bestPair[1]), 1);
+  while (remaining.length > 0) {
+    let bestIndex = 0;
+    let bestDistance = -Infinity;
+    for (const [index, candidate] of remaining.entries()) {
+      const nearest = Math.min(...ordered.map((taken) => deltaE(candidate.hex, taken.hex)));
+      if (nearest > bestDistance) {
+        bestDistance = nearest;
+        bestIndex = index;
+      }
+    }
+    ordered.push(remaining.splice(bestIndex, 1)[0]);
+  }
+  return ordered;
+};
+
+const typeRampOrdered = spread(typeRamp);
+
+const closestInPrefix = (ramp, count) => {
+  let worst = { d: Infinity, pair: ["", ""] };
+  for (let i = 0; i < count; i += 1) {
+    for (let j = i + 1; j < count; j += 1) {
+      const d = deltaE(ramp[i].hex, ramp[j].hex);
+      if (d < worst.d) worst = { d, pair: [ramp[i].hex, ramp[j].hex] };
+    }
+  }
+  return worst;
+};
+
+report("page type ramp (searched)", typeRampOrdered, FALLBACK_HEXES);
+console.log("\n  closest pair within the first N entries — what a vault with N types sees:");
+for (const count of [2, 3, 5, 8, 10, 13, 22]) {
+  const before = closestInPrefix(typeRamp, count);
+  const after = closestInPrefix(typeRampOrdered, count);
+  console.log(
+    `    first ${String(count).padStart(2)}: ΔE ${after.d.toFixed(1).padStart(5)}  ` +
+      `(hue order was ${before.d.toFixed(1)})`,
+  );
+}
 report("community colours (12)", communities, OLD.communities);
 
 console.log("\n=== TS source ===\n");
@@ -261,7 +324,7 @@ const edges = [
 console.log("");
 console.log("// Searched ramp every declared page type draws from; see `palette.ts`.");
 console.log("export const TYPE_COLORS: readonly string[] = [");
-for (const colour of typeRamp) console.log(`  "${colour.hex}",`);
+for (const colour of typeRampOrdered) console.log(`  "${colour.hex}",`);
 console.log("];");
 console.log("export const EDGE_STRONG_PRESETS = [");
 for (const edge of edges) console.log(`  { id: "${edge.id}", color: "${edge.hex}" },`);

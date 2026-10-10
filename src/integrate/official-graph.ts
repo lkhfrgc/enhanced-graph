@@ -47,7 +47,6 @@ import {
   themePalette,
   typeColor,
 } from "../view/palette";
-import { typeLabel } from "../view/labels";
 import { OfficialHoverTooltip, type HoverTooltipOptions } from "./official-hover";
 import { OfficialLegend } from "./official-legend";
 import { OfficialMarkerLayer, type MarkerLine, type MarkerPoint } from "./official-markers";
@@ -676,7 +675,7 @@ export class OfficialGraphEnhancer {
     // be folded into `other` and could not be coloured apart from it.
     return collectTypes(graph.nodes).map(({ key, label }) => ({
       key,
-      label: typeLabel(key, label),
+      label,
       color: overrides[key] ?? this.typeColorAssignment().get(key) ?? typeColor(key),
       isOverride: overrides[key] !== undefined,
     }));

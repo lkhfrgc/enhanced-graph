@@ -40,30 +40,37 @@ export const MAX_NODE_SIZE = 28;
  * A vault's types are simply the strings it declares. `assignTypeColors` hands each one its
  * own entry from this ramp — 22 colours, worst pair ΔE 19.0, every one clearing 3:1 on both
  * the dark and the light canvas.
+ *
+ * The ORDER matters as much as the colours. Assignment walks the ramp, so a vault with N
+ * types uses the first N entries — and in hue order those were all reds. A reader saw two
+ * unrelated types as the same colour while the pairwise minimum read a reassuring 19.0,
+ * which is the wrong number: what matters is the closest pair within a PREFIX. The order is
+ * now farthest-point (see `npm run palette`), so the first five entries sit ΔE 38.5 apart
+ * instead of 19.0, and the whole-ramp minimum is unchanged.
  */
 export const TYPE_COLORS: readonly string[] = [
-  "#c8547e",
-  "#ba7187",
-  "#e26c74",
-  "#ae6a5d",
-  "#c06141",
-  "#b47a43",
   "#937a1e",
-  "#a19058",
-  "#8b9839",
-  "#6b844f",
-  "#4d8a3c",
-  "#2ea46b",
-  "#41896a",
-  "#00a49b",
-  "#0090a6",
-  "#008cc3",
   "#1a7fd2",
-  "#667bb1",
-  "#8489e1",
+  "#c8547e",
+  "#00a49b",
+  "#4d8a3c",
+  "#c06141",
   "#9a67b9",
-  "#a684b9",
+  "#0090a6",
+  "#8b9839",
+  "#a19058",
+  "#e26c74",
+  "#2ea46b",
   "#cd71b5",
+  "#008cc3",
+  "#a684b9",
+  "#8489e1",
+  "#667bb1",
+  "#b47a43",
+  "#ae6a5d",
+  "#6b844f",
+  "#41896a",
+  "#ba7187",
 ];
 
 /** Used where a page genuinely has no type to colour by. */

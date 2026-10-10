@@ -23,7 +23,6 @@ import { t } from "../i18n";
 import type { ColorMode, WikiGraph } from "../types";
 import { communityColor, nodeColorForMode } from "./palette";
 import { collectTypes } from "./visibility";
-import { typeLabel } from "./labels";
 
 /** The colour a row's dot takes while its subject is excluded. */
 const HIDDEN_DOT = "#94a3b8";
@@ -152,7 +151,7 @@ function renderTypeRows(body: HTMLElement, options: LegendOptions): void {
         });
     row.createSpan({
       cls: "enhanced-graph-legend-label",
-      text: typeLabel(key, label),
+      text: label,
     });
     row.createSpan({ cls: "enhanced-graph-legend-count", text: String(count) });
     if (!drawn) row.title = t("legend.typeEmpty", { count: String(count) });

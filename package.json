@@ -9,6 +9,7 @@
   "scripts": {
     "architecture": "node scripts/architecture-report.mjs",
     "archive:terms": "node scripts/archive-terms.mjs",
+    "audit:colors": "node node_modules/esbuild/bin/esbuild scripts/type-colour-audit.ts --bundle --platform=node --format=cjs --outfile=scripts/type-colour-audit.cjs --log-level=warning && node scripts/type-colour-audit.cjs",
     "audit:policy": "node scripts/policy-audit.mjs",
     "audit:submission": "node scripts/pre-submission-audit.mjs",
     "build": "node esbuild.config.mjs production",

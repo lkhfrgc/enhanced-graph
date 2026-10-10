@@ -527,7 +527,7 @@ describe("OfficialGraphEnhancer colouring", () => {
         return (calls[calls.length - 1]?.[0] ?? []) as Array<{ x: number; y: number; radius: number }>;
       };
 
-      const concept = rowFor(t("type.concept"));
+      const concept = rowFor("concept");
       concept.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 
@@ -542,11 +542,11 @@ describe("OfficialGraphEnhancer colouring", () => {
       // The row says it is the one being pointed at, and nothing was filtered: this is
       // not the left-click gesture. Re-queried, because marking re-renders the legend
       // and the element captured before the click is detached.
-      expect(rowFor(t("type.concept")).classList.contains("is-marked")).toBe(true);
+      expect(rowFor("concept").classList.contains("is-marked")).toBe(true);
       expect(h.hiddenTypes).toEqual([]);
 
       // Right-clicking the same row takes the dots away again.
-      rowFor(t("type.concept")).dispatchEvent(
+      rowFor("concept").dispatchEvent(
         new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
       );
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
@@ -573,8 +573,8 @@ describe("OfficialGraphEnhancer colouring", () => {
         (row) => row.textContent?.includes(label),
       )!;
 
-    rowFor(t("type.concept")).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
-    rowFor(t("type.concept")).dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    rowFor("concept").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    rowFor("concept").dispatchEvent(new MouseEvent("click", { bubbles: true }));
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     // Both gestures did their own thing: the type is excluded AND was marked.
@@ -1799,7 +1799,7 @@ describe("the built-in graph's toolbar", () => {
 
     // Unticking a page type writes the SAME setting the standalone view reads, so
     // the two cannot drift apart.
-    const conceptRow = rows.find((row) => row.textContent?.includes(t("type.concept")));
+    const conceptRow = rows.find((row) => row.textContent?.includes("concept"));
     const input = conceptRow?.querySelector<HTMLInputElement>("input[type=checkbox]");
     expect(input?.checked).toBe(true);
     input!.checked = false;
@@ -2847,7 +2847,7 @@ describe("the built-in graph's legend", () => {
   it("explains the colours the mode is actually using", () => {
     const h = setup([{ id: "a.md" }], [makeNode({ id: "a", type: "concept" })], "type");
     h.enhancer.start();
-    expect(legendOf(h).textContent).toContain(t("type.concept"));
+    expect(legendOf(h).textContent).toContain("concept");
   });
 
   it("lists clusters instead once colouring is by community", async () => {
@@ -2856,7 +2856,7 @@ describe("the built-in graph's legend", () => {
     pressToolbar(h, t("toolbar.colorByCommunity"));
     await Promise.resolve();
     // Legend and graph stay in step: no type rows while colouring by community.
-    expect(legendOf(h).textContent).not.toContain(t("type.concept"));
+    expect(legendOf(h).textContent).not.toContain("concept");
   });
 
   it("is gone when colouring is off", () => {
@@ -2990,8 +2990,8 @@ describe("the built-in graph's legend", () => {
     const dotColor = (row: HTMLElement): string =>
       (row.querySelector<HTMLElement>(".enhanced-graph-legend-dot")!.style.backgroundColor ?? "");
 
-    const overview = rowFor(t("type.overview"));
-    const note = rowFor(t("type.concept"));
+    const overview = rowFor("overview");
+    const note = rowFor("concept");
     expect(overview.classList.contains("is-hidden-type")).toBe(true);
     expect(note.classList.contains("is-hidden-type")).toBe(false);
     // Greyed means grey: the swatch is not the type colour, and the row says why.
@@ -3004,7 +3004,7 @@ describe("the built-in graph's legend", () => {
     // Turning the structural switch off brings the row back to full colour.
     h.hideStructural = false;
     h.enhancer.refresh();
-    expect(rowFor(t("type.overview")).classList.contains("is-hidden-type")).toBe(false);
+    expect(rowFor("overview").classList.contains("is-hidden-type")).toBe(false);
   });
 
   it("excludes and restores a page type by clicking its card in the built-in graph", async () => {
@@ -3019,11 +3019,11 @@ describe("the built-in graph's legend", () => {
         (row) => row.textContent?.includes(label),
       )!;
 
-    rowFor(t("type.concept")).dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    rowFor("concept").dispatchEvent(new MouseEvent("click", { bubbles: true }));
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(types.hiddenTypes).toEqual(["concept"]);
 
-    rowFor(t("type.concept")).dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    rowFor("concept").dispatchEvent(new MouseEvent("click", { bubbles: true }));
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(types.hiddenTypes).toEqual([]);
   });

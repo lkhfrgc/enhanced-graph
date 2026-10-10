@@ -25,7 +25,6 @@ import {
 } from "./palette";
 import { checkboxRow, colourRow, sliderRow } from "./controls";
 import { collectTypes } from "./visibility";
-import { typeLabel } from "./labels";
 import type { ColorMode, WikiGraph } from "../types";
 
 /** Range of the 节点大小 slider. */
@@ -209,7 +208,7 @@ function renderTypeColors(section: HTMLElement, options: AppearanceOptions): voi
     const effective = override || options.typeColors?.get(key) || typeColor(key);
     colourRow(
       section,
-      typeLabel(key, label),
+      label,
       effective,
       (color) => options.onTypeColor(key, color),
       { allowTheme: true, onTheme: () => options.onTypeColor(key, null), isTheme: !override },
