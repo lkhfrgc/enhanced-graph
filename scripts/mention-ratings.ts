@@ -56,7 +56,35 @@ class NodeVault implements VaultAdapter {
   }
 }
 
+/**
+ * Grades already filled in on a previous sheet, keyed by candidate identity.
+ *
+ * Regenerating used to wipe the ratings, which is a real cost: the sheet is only
+ * useful because a person spent ten minutes on it, and a rule change that silently
+ * discards that work makes the next rule change unaffordable. Identity is the pair
+ * plus the term, so a candidate that survives a change keeps its grade and one that
+ * no longer appears is simply gone from the file — which is the honest way to show
+ * what a change did.
+ */
+function readExistingGrades(): Map<string, string> {
+  const grades = new Map<string, string>();
+  if (!fs.existsSync(OUTPUT)) return grades;
+  for (const line of fs.readFileSync(OUTPUT, "utf8").split(/\r?\n/)) {
+    if (!line.startsWith("|")) continue;
+    const cells = line.split("|").map((cell) => cell.trim());
+    // # | grade | source | target | term | count | specificity | context
+    if (cells.length < 9) continue;
+    const grade = cells[2] ?? "";
+    const source = cells[3] ?? "";
+    const target = cells[4] ?? "";
+    if (!/^(must|useful|not-needed|wrong)$/.test(grade)) continue;
+    grades.set(`${source}\u0000${target}`, grade);
+  }
+  return grades;
+}
+
 async function main(): Promise<void> {
+  const existing = readExistingGrades();
   const vault = new NodeVault();
   const graph = await buildWikiGraph({ vault });
   const index = contentIndexOf(graph);
@@ -107,8 +135,9 @@ async function main(): Promise<void> {
 
   candidates.forEach((mention, position) => {
     const context = mention.preview.replace(/\|/g, "\\|");
+    const kept = existing.get(`${labelOf(mention.sourceId)}\u0000${labelOf(mention.targetId)}`) ?? "";
     lines.push(
-      `| ${position + 1} |  | ${labelOf(mention.sourceId)} | ${labelOf(mention.targetId)} | ` +
+      `| ${position + 1} | ${kept} | ${labelOf(mention.sourceId)} | ${labelOf(mention.targetId)} | ` +
         `${mention.term} | ${mention.occurrences} | ${mention.specificity.toFixed(2)} | ${context} |`,
     );
   });

@@ -18,5 +18,11 @@ Thumbs.db
 # Bundled on demand by `npm run eval:weights`.
 scripts/weight-eval.cjs
 
+# Same, for the eval scripts added with the insight work: each is built from its
+# `scripts/*.ts` on every run, so a committed copy could only ever be a stale copy.
+# (`scripts/stability-eval.cjs` is tracked — it predates this and is left alone.)
+scripts/insight-eval.cjs
+scripts/mention-ratings.cjs
+
 # Built by `npm run build:ci`; the release workflow attaches it.
 /main.js

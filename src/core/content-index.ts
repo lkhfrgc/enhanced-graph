@@ -44,6 +44,28 @@ export const MIN_TERM_LENGTH = 4;
  */
 export const MAX_TERM_DOCUMENT_RATIO = 0.5;
 
+/**
+ * How specific a term must be to count as a mention *inside a heading*.
+ *
+ * From the rating: a heading whose text is a page name is a real mention, and one
+ * whose text is a section label is not. Specificity separates those two on the
+ * measured data — every heading match rated was generic and rejected, while the
+ * specific ones fell in prose — so the bar is set where a term carried by more than
+ * one page fails it.
+ */
+export const HEADING_MIN_SPECIFICITY = 0.9;
+
+/**
+ * How specific a term must be to count as a mention when it is a standalone label.
+ *
+ * Superseded: labels are now rejected whatever their specificity, because the
+ * rating showed a category word can be maximally "specific" (carried by one note)
+ * while still being a label rather than a reference. Kept because the distinction it
+ * aimed at — a term's frequency is not its informativeness — is the reason the
+ * specificity signal cannot carry a whole rule on its own.
+ */
+export const LABEL_MIN_SPECIFICITY = 0.6;
+
 /** Characters of surrounding prose a mention keeps, for the card to show. */
 export const PREVIEW_RADIUS = 40;
 /** One page's content signals. */
@@ -55,6 +77,11 @@ export interface ContentEntry {
   readonly terms: readonly string[];
   /** Body with code blocks removed, which is what matching runs against. */
   readonly body: string;
+  /**
+   * One flag per character of {@link body}: `true` where the character came from a
+   * heading. See {@link scanText} for why headings are masked rather than deleted.
+   */
+  readonly heading: readonly boolean[];
   /**
    * Pages already connected to this one, in **either** direction.
    *
@@ -163,15 +190,14 @@ export function buildContentIndex(
   for (const note of notes) {
     const terms = termsOf(note.title, note.aliases);
     if (terms.length === 0) continue;
-    // Emphasised away and unwrapped before scanning, so a terminator inside
-    // `**bold**` or at a line break is not mistaken for a sentence boundary and the
-    // preview quotes the whole sentence.
-    const body = scanText(note.body);
+    // Emphasised away, tables dropped and headings masked before scanning.
+    const scanned = scanText(note.body);
     entries.set(note.id, {
       nodeId: note.id,
       title: note.title,
       terms,
-      body,
+      body: scanned.text,
+      heading: scanned.heading,
       adjacent: adjacencyOf(note.id),
     });
     for (const term of terms) {
@@ -219,11 +245,11 @@ export function buildContentIndex(
   const namedBy = new Map<string, number>();
 
   for (const entry of entries.values()) {
-    const body = entry.body;
-    if (body.length === 0) continue;
-    // Space-padded so a term at either edge has a boundary to check, which is what
-    // makes the Latin boundary rule work on the first and last words.
-    const padded = ` ${body} `;
+    // Scanned unpadded, so `index` is also an index into `entry.heading`. The
+    // trailing pad a boundary check wants is already there — `scanText` ends every
+    // body with a space — and a leading pad would shift every mask lookup by one.
+    const padded = entry.body;
+    if (padded.trim().length === 0) continue;
     const lowerPadded = padded.toLowerCase();
     const claimed: Array<{ start: number; end: number }> = [];
     const byTarget = new Map<string, { occurrences: number; first: number; term: string; termKey: string }>();
@@ -234,6 +260,34 @@ export function buildContentIndex(
         const end = index + term.length;
         const overlaps = claimed.some((span) => index < span.end && end > span.start);
         if (!overlaps && boundaryOk(padded, index, term.length)) {
+          // A heading is the section's name, not a sentence. A generic name there is
+          // a label and linking it adds nothing — every rated candidate of that shape
+          // was rejected — while a *specific* name there is a real mention, so the
+          // specificity signal decides rather than a blanket skip.
+          const inHeading =
+            entry.heading[index - 1] === true || entry.heading[index] === true;
+          const specificity = 1 - (termTargets.get(term)?.length ?? 1) / entries.size;
+          // A heading is the section's name, not a sentence. A generic name there is
+          // a label and linking it adds nothing — every rated candidate of that shape
+          // was rejected — while a *specific* name there is a real mention, so the
+          // specificity signal decides rather than a blanket skip.
+          if (inHeading && specificity < HEADING_MIN_SPECIFICITY) {
+            index = lowerPadded.indexOf(term, index + term.length);
+            continue;
+          }
+          // A standalone label: the sentence starts with the term and ends right
+          // after it, so the term is heading the item rather than naming the page.
+          //
+          // Not gated on specificity. The first attempt gated it, and the rating
+          // showed why that fails: `评测方法` is carried by exactly ONE note, so it
+          // scores 0.99 specific while being a category word used as a bullet label.
+          // Frequency measures how many pages share a name, not how much the name
+          // says — and a label is a poor card however rare it is, because the
+          // sentence it quotes is the label itself.
+          if (isStandaloneLabel(padded, index, end)) {
+            index = lowerPadded.indexOf(term, index + term.length);
+            continue;
+          }
           claimed.push({ start: index, end });
           namedBy.set(term, (namedBy.get(term) ?? 0) + 1);
           for (const targetId of termTargets.get(term) ?? []) {
@@ -402,16 +456,87 @@ function stripEmphasis(text: string): string {
 }
 
 /**
- * A body as the scanner wants it: no code, no emphasis, no raw line breaks.
+ * Whether a match is a standalone label rather than a reference.
  *
- * The line breaks matter. Prose in a note is wrapped and bulleted, so a raw `\n`
- * sits in the middle of sentences — treating it as a terminator made every wrapped
- * line its own sentence, and a preview came out as `评测方法。` for a bullet whose
- * text continued on the same line after the emphasis. Normalising to spaces lets
- * the real punctuation decide where a sentence ends.
+ * True when the match begins a sentence and the same sentence ends immediately
+ * after it — `技术选型。` on its own, or `4. 评测方法。 报告…` where the item's text
+ * follows. That is the shape a bolded category heading takes, and linking it would
+ * point at a page the sentence is not about.
  */
-function scanText(body: string): string {
-  return stripEmphasis(stripCode(body)).replace(/\s*\n+\s*/g, " ");
+export function isStandaloneLabel(text: string, start: number, end: number): boolean {
+  // Whitespace has to be skipped before asking whether a sentence starts here: the
+  // scanner joins lines with a space, so a bolded label on its own line is preceded
+  // by one, and requiring the terminator to be the immediately preceding character
+  // made the check miss every case it exists for.
+  let before = start - 1;
+  while (before >= 0 && /\s/.test(text[before]!)) before -= 1;
+  const starts = before < 0 || SENTENCE_TERMINATORS.has(text[before]!);
+  const ends = SENTENCE_TERMINATORS.has(text[end] ?? "");
+  return starts && ends;
+}
+
+/** A markdown table row: it starts with a pipe once trimmed. */
+const TABLE_ROW = /^\s*\|/;
+
+/** A markdown ATX heading, captured so the marker can be measured and removed. */
+const HEADING = /^(\s*)(#{1,6})(\s+)(.*)$/;
+
+/** A body prepared for scanning, with the parts that are not prose marked. */
+export interface ScannableBody {
+  /** Prose only: no code, no emphasis, no table rows, line breaks unwrapped. */
+  readonly text: string;
+  /**
+   * One flag per character of {@link text}: `true` where the character came from a
+   * heading.
+   *
+   * Measured need. Of 37 rated candidates on the real vault, every one that matched
+   * inside a heading or a table cell was rejected, and none of the three `wrong`
+   * verdicts came from prose. A section label is the section's name and a table cell
+   * is a field value; neither is a sentence a link belongs in.
+   *
+   * Headings are masked rather than deleted because a heading that *is* a page name
+   * is a legitimate mention, and the analyser decides that using the term's
+   * specificity — the mask keeps the decision in one place.
+   */
+  readonly heading: readonly boolean[];
+}
+
+/**
+ * Prepare a body for scanning.
+ *
+ * Table rows are dropped outright, headings are kept but masked. The line breaks
+ * matter too: prose is wrapped and bulleted, so a raw `\n` sits inside sentences,
+ * and treating it as a sentence boundary made every wrapped line its own sentence
+ * and produced previews like `评测方法。` for a bullet whose text continued on the
+ * same line.
+ */
+export function scanText(body: string): ScannableBody {
+  const cleaned = stripEmphasis(stripCode(body));
+  const chunks: string[] = [];
+  const heading: boolean[] = [];
+
+  for (const line of cleaned.split(/\r?\n/)) {
+    // A table is structure, not prose: no part of a row is a sentence.
+    if (TABLE_ROW.test(line)) continue;
+    const match = line.match(HEADING);
+    if (match) {
+      const content = match[4] ?? "";
+      const span = (match[1]?.length ?? 0) + (match[2]?.length ?? 0) + (match[3]?.length ?? 0);
+      chunks.push(" ".repeat(span));
+      for (let index = 0; index < span; index += 1) heading.push(true);
+      chunks.push(content);
+      for (let index = 0; index < content.length; index += 1) heading.push(true);
+    } else {
+      chunks.push(line);
+      for (let index = 0; index < line.length; index += 1) heading.push(false);
+    }
+    // The break becomes a space, which keeps offsets aligned with the mask.
+    chunks.push(" ");
+    heading.push(false);
+  }
+
+  const text = chunks.join("");
+  return { text, heading };
 }
 
 /**

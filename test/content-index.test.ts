@@ -237,6 +237,81 @@ describe("unlinked mentions: matching", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Structure that is not prose
+// ---------------------------------------------------------------------------
+
+describe("unlinked mentions: structure that is not prose", () => {
+  it("does not report a term inside a markdown table row", () => {
+    // A table cell is a field value, not a sentence. Every rated candidate of this
+    // shape was rejected, and one of them quoted a table header as its context.
+    const index = indexOf(
+      vaultOf([
+        {
+          id: "a",
+          title: "Alpha",
+          body: "| 维度 | 关键词检索 | [[Beta]]（稠密） |\n| --- | --- | --- |\n| 匹配依据 | 词项重合 | Beta 空间距离 |\n",
+        },
+        { id: "b", title: "Beta", body: "" },
+      ]),
+    );
+
+    expect(index.mentions).toEqual([]);
+  });
+
+  it("does not report a generic term used as a standalone label", () => {
+    // `4. **评测方法。** 报告…` is the shape that produced a `wrong` verdict: the
+    // term heads the bullet rather than naming the page, and the sentence it quotes
+    // is the label itself.
+    const index = indexOf(
+      vaultOf([
+        { id: "a", title: "Alpha", body: "4. **评测方法。** 报告详细说明了如何交叉验证。" },
+        { id: "b", title: "评测方法", body: "" },
+      ]),
+    );
+
+    expect(index.mentions).toEqual([]);
+  });
+
+  it("does not report a label that is maximally specific", () => {
+    // The first attempt gated the label rule on specificity and let this through:
+    // only one page carries the name, so it scored 0.99 specific while being a
+    // category word. Frequency is not informativeness.
+    const index = indexOf(
+      vaultOf([
+        { id: "a", title: "Alpha", body: "**独有类目词。** 后面还有说明。" },
+        { id: "b", title: "独有类目词", body: "" },
+      ]),
+    );
+
+    expect(index.mentions).toEqual([]);
+  });
+
+  it("still reports the same term when it is part of a real sentence", () => {
+    // The guard must not swallow the term everywhere: only the label shape goes.
+    const index = indexOf(
+      vaultOf([
+        { id: "a", title: "Alpha", body: "这意味着现有的评测方法需要大幅改造才能覆盖非文本输出。" },
+        { id: "b", title: "评测方法", body: "" },
+      ]),
+    );
+
+    expect(index.mentions).toHaveLength(1);
+    expect(index.mentions[0]?.targetId).toBe("b");
+  });
+
+  it("does not report a section label that names a page", () => {
+    const index = indexOf(
+      vaultOf([
+        { id: "a", title: "Alpha", body: "# 独有章节名\n\n正文在这里。" },
+        { id: "b", title: "独有章节名", body: "" },
+      ]),
+    );
+
+    expect(index.mentions).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Already connected
 // ---------------------------------------------------------------------------
 
