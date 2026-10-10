@@ -43,7 +43,7 @@ import { renderAppearance } from "./graph-appearance";
 import { renderLegend } from "./graph-legend";
 import { renderToolbar, renderZoomControls, type PanelMode } from "./graph-toolbar";
 import { countUndismissed, renderInsightsPanel, type InsightSectionId } from "./insights-panel";
-import { EMPTY_BUNDLE } from "../core/insights/model";
+import { EMPTY_BUNDLE, type InsightAction } from "../core/insights/model";
 import type { EdgeScoreSummary } from "./renderer";
 import {
   GraphRenderer,
@@ -1310,6 +1310,9 @@ export class EnhancedGraphView extends ItemView {
       },
       // `toggleDismissed` mutates the plugin settings, so it stays on the view.
       onDismiss: (key, ids) => void this.toggleDismissed(key, new Set(ids)),
+      // The action itself belongs to the plugin — it is the half that may write to
+      // the vault — and the Notice belongs here, where the button was.
+      onAction: (action) => void this.performAction(action),
       onToggleShowDismissed: () => {
         this.showDismissed = !this.showDismissed;
         this.renderPanel();
@@ -1331,6 +1334,25 @@ export class EnhancedGraphView extends ItemView {
     if (index < 0 && sameSet(this.highlightNodes, ids)) this.clearHighlight();
     this.renderToolbar();
     this.renderPanel();
+  }
+
+  /**
+   * Run a card's action and report the outcome.
+   *
+   * The plugin performs the action and answers with the message the user should
+   * see, or null when there is nothing to add — the preview was cancelled, or the
+   * action reports its own result. Fetching the key here rather than inside the
+   * plugin keeps "who shows the message" with the UI, and keeps the two panel
+   * hosts on one code path.
+   */
+  private async performAction(action: InsightAction): Promise<void> {
+    try {
+      const key = await this.plugin.performInsightAction(action);
+      if (key) new Notice(t(key));
+    } catch (error) {
+      console.error("[enhanced-graph] the insight action failed:", error);
+      new Notice(t("notice.actionFailed"));
+    }
   }
 
   // -------------------------------------------------------------------------

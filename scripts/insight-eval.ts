@@ -724,8 +724,12 @@ async function main(): Promise<void> {
   // -------------------------------------------------------------------------
   console.log("=== stability ===\n");
 
-  const topKeys = (graph: WikiGraph, limit: number): string[] => {
-    const bundle = analyzeGraph(graph).bundle;
+  const topKeys = (graph: WikiGraph, limit: number, previous?: WikiGraph): string[] => {
+    // `previous` is the same graph, re-analysed with the first build's keys: stickiness
+    // is a property of successive builds, so measuring it needs two.
+    const bundle = previous
+      ? analyzeGraph(graph, { previous: analyzeGraph(previous).bundle }).bundle
+      : analyzeGraph(graph).bundle;
     if (!bundle) return [];
     return visibleFindings(bundle, new Set()).slice(0, limit).map((finding) => finding.key);
   };
@@ -753,7 +757,7 @@ async function main(): Promise<void> {
       ...graph,
       edges: Object.freeze(graph.edges.filter((edge) => keptEdges.has(pairKey(edge.source, edge.target)))),
     };
-    const after = topKeys(perturbed, STABILITY_K);
+    const after = topKeys(perturbed, STABILITY_K, graph);
     churn.push(jaccard(baseline, after));
     const afterSet = new Set(after);
     kept.push(baseline.filter((key) => afterSet.has(key)).length);

@@ -24,7 +24,7 @@
 
 import { App, Menu, Notice, TFile, WorkspaceLeaf } from "obsidian";
 import type { GraphInsights } from "../core/insights";
-import { EMPTY_BUNDLE } from "../core/insights/model";
+import { EMPTY_BUNDLE, type InsightAction } from "../core/insights/model";
 import { edgeKey, edgeKeyEndpoints } from "../core/graph-keys";
 import { findConnectingPaths } from "../core/paths";
 import { type FilterSection, renderFilters } from "../view/graph-filters";
@@ -40,7 +40,7 @@ import {
 } from "../view/visibility";
 import { isInWorkspace } from "../core/workspace";
 import type { GraphNode, OfficialGraphMode, RelevanceWeights, WikiGraph } from "../types";
-import { t } from "../i18n";
+import { t, type MessageKey } from "../i18n";
 import { countUndismissed } from "../view/insights-panel";
 import {
   communityColor,
@@ -162,6 +162,13 @@ export interface OfficialGraphDeps {
   readonly getMode: () => OfficialGraphMode;
   readonly getDismissed: () => readonly string[];
   readonly onDismiss: (key: string, nodeIds: readonly string[]) => Promise<void> | void;
+  /**
+   * Perform an insight card's action; answers with the Notice key, or null.
+   *
+   * Optional so a host without an action layer — a test fixture, an older
+   * composition — still gets a panel, with the action buttons visibly disabled.
+   */
+  readonly onAction?: (action: InsightAction) => Promise<MessageKey | null> | MessageKey | null;
   /** Open a note by our node id (vault path without the extension). */
   readonly onOpenNode: (nodeId: string) => void;
   /**
@@ -2020,9 +2027,33 @@ export class OfficialGraphEnhancer {
         this.assertFocus(renderer);
       },
       onDismiss: (key, nodeIds) => void this.deps.onDismiss(key, nodeIds),
+      // The panel buttons stay disabled when no action layer was injected.
+      ...(this.deps.onAction
+        ? { onAction: (action: InsightAction) => void this.performAction(action) }
+        : {}),
       renderFilters: (el) => this.renderFiltersBody(el),
       renderClustering: (el) => this.renderClusteringBody(el),
     };
+  }
+
+  /**
+   * Run a card's action and report the outcome.
+   *
+   * The plugin performs the action — it is the half that may write to the vault —
+   * and answers with the key of the message to show, or null when there is nothing
+   * to add. The Notice is shown here, next to the click, which is also what the
+   * standalone view does with the same key.
+   */
+  private async performAction(action: InsightAction): Promise<void> {
+    const perform = this.deps.onAction;
+    if (!perform) return;
+    try {
+      const key = await perform(action);
+      if (key) new Notice(t(key));
+    } catch (error) {
+      console.error("[enhanced-graph] the insight action failed:", error);
+      new Notice(t("notice.actionFailed"));
+    }
   }
 
   /**

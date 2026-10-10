@@ -93,7 +93,31 @@ export interface RankOptions {
    * does not declare a range is treated as emitting 0…1.
    */
   readonly scoreRanges?: ReadonlyMap<string, number>;
+  /**
+   * Keys that were on screen in the previous build, for stickiness.
+   *
+   * Measured need, not a refinement. Dropping 2 % of a real vault's links kept only
+   * **2 of the panel's 6 cards**, because a rebuild re-ranks from scratch and the
+   * distribution has near-ties (3.6 candidates shared the K = 6 boundary score in the
+   * §3.2 measurement). Every file save rebuilds, so a user editing one note watched
+   * most of the panel change underneath them — worse than a stale list, because they
+   * cannot finish reading a card.
+   *
+   * Within {@link STICKY_BAND} of the score, a card that was already visible wins.
+   * Outside it, the score decides: a card whose evidence moved materially must be able
+   * to drop out, or the panel would fossilise.
+   */
+  readonly previousKeys?: ReadonlySet<string>;
 }
+
+/**
+ * How much a score must change before a visible card loses its place.
+ *
+ * Deliberately small. The band exists to absorb near-ties, not to pin the panel: at
+ * 0.05, two cards have to be within five percent of each other for order-of-arrival to
+ * matter, which is well inside the noise the §3.2 measurement found.
+ */
+export const STICKY_BAND = 0.05;
 
 export interface RankResult {
   readonly ranked: readonly Finding[];
@@ -106,12 +130,27 @@ export function compareFindings(
   a: Finding,
   b: Finding,
   scoreRanges?: ReadonlyMap<string, number>,
+  previousKeys?: ReadonlySet<string>,
 ): number {
   if (a.severity !== b.severity) return b.severity - a.severity;
   if (a.effort !== b.effort) return EFFORT_ORDER[a.effort] - EFFORT_ORDER[b.effort];
 
   const rangeOf = (finding: Finding): number => scoreRanges?.get(finding.analyser) ?? 1;
-  const byScore = normaliseScore(b.score, rangeOf(b)) - normaliseScore(a.score, rangeOf(a));
+  const scoreA = normaliseScore(a.score, rangeOf(a));
+  const scoreB = normaliseScore(b.score, rangeOf(b));
+
+  // Inside the band, a card that was already on screen keeps its place. Outside it,
+  // the score decides — which is what stops a card whose evidence collapsed from
+  // lingering because it happened to be visible last build.
+  if (previousKeys && previousKeys.size > 0) {
+    const stickyA = previousKeys.has(a.key);
+    const stickyB = previousKeys.has(b.key);
+    if (stickyA !== stickyB && Math.abs(scoreA - scoreB) <= STICKY_BAND) {
+      return stickyA ? -1 : 1;
+    }
+  }
+
+  const byScore = scoreB - scoreA;
   if (byScore !== 0) return byScore;
 
   return compareStrings(a.analyser, b.analyser) || compareStrings(a.key, b.key);
@@ -132,7 +171,7 @@ export function rankFindings(
     ? findings.filter((finding) => finding.confidence !== "weak")
     : [...findings];
 
-  eligible.sort((a, b) => compareFindings(a, b, options.scoreRanges));
+  eligible.sort((a, b) => compareFindings(a, b, options.scoreRanges, options.previousKeys));
 
   const usedPerAnalyser = new Map<string, number>();
   const ranked: Finding[] = [];

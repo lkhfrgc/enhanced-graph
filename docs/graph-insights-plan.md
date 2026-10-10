@@ -1472,9 +1472,60 @@ review caught (a key derived from the member list) would show here as cards reap
 **But the panel churns.** Removing 2 % of links — one note's worth of editing — keeps
 only 2 of the 6 cards. Every file save triggers a rebuild, so a user editing a note sees
 most of the panel replaced. That is worse than a stale list, and it is now a number
-rather than an impression. The cause is not yet diagnosed; the ranking has no
-hysteresis, so any change in the score distribution can reorder a set of near-ties, and
-§3.2 measured that near-ties are common (3.6 candidates share the K=6 boundary score).
-Fixing it means adding stickiness — preferring a card that was on screen last build when
-its score is within the tie band — which is a design decision that needs its own
-measurement, so it is recorded here rather than guessed at.
+rather than an impression.
+
+Two things were done about it, and neither is sufficient:
+
+1. **Stickiness** (implemented): the ranker now takes the keys that were visible last
+   build and prefers them when the two scores are within 0.05. Measured effect:
+   **2.0 → 2.5 of 6 cards kept**, Jaccard 20 % → 27 %.
+2. **The rest is not a tie-break problem.** The worst perturbation still keeps **0 of
+   6**. That means the churn is *substantive*: removing a few links changes which
+   findings exist at all, not merely their order. Each analyser caps its own output
+   before the global ranking, and degrees and shared-neighbour sets move together, so a
+   different candidate can enter an analyser's cap and push another out. Making the
+   panel hold still would mean questioning the per-analyser caps — a design change with
+   its own trade-off (a lower cap loses genuine findings), so it is recorded rather than
+   guessed at.
+
+**What would settle it.** The right measurement is not churn on a random perturbation
+but churn on a *realistic* one — the user editing one note they are actually working on.
+A perturbation that deletes 2 % of links everywhere is not what editing looks like, and
+if the churn is real under it, that may say more about the perturbation than the panel.
+Building that fixture is the next step, and it needs a captured sequence of real vault
+states rather than a synthetic edit.
+
+### Phase 6 — actions: implemented
+
+`src/core/note-edit.ts` holds the pure edit; `main.ts` routes the four action kinds and
+shows a preview before writing. The write goes through the vault adapter, so an
+insertion becomes part of Obsidian's own undo history rather than a hand-rolled one —
+which is what §5.6 asks for, and the reason there is no custom undo code.
+
+`insertWikilink` refuses rather than guesses, and each refusal is a tested rule: never
+inside code (fences, tilde fences, inline spans, and an unterminated fence), never inside
+an existing wikilink or a markdown link label, never when the pair is already linked in
+any of four spellings (bare, pathed, aliased, heading) or via frontmatter `related`,
+never when the term is absent from the body, and never frontmatter. Three mutations of
+the module were run to show the tests fail when it is weakened (9, 7 and 8 tests fail
+respectively), so the suite is not vacuous.
+
+**One design gap found and fixed while integrating.** `InsightAction` carried only the
+built `text`, so the writer had to infer which bare name to search for from the target's
+title, alias and file name. A mention matched by a *frontmatter alias* that appears
+nowhere else has no inferred candidate — the card was matched by the analyser and the
+button would have reported "no mention found" and done nothing. The action now carries
+`term`, the name the scanner actually matched, and the writer tries it first.
+
+**A real regression this phase caused, caught by the gate.** Adding a `Modal` subclass
+made the built bundle stop loading: the smoke test's `obsidian` stub had no `Modal`, so
+the bundle failed at *require* with "Class extends value undefined is not a constructor
+or null". `npm run test` passed throughout — 737 green — and only
+`npm run verify:bundle` saw it. The stub now provides `Modal`, and the episode is worth
+recording because it is the one failure mode a unit suite structurally cannot catch: the
+artifact Obsidian loads is not the artifact the tests exercise.
+
+**Not verified.** No Obsidian instance is available, so the preview modal, the actual
+file write, the two-pane open, MOC creation and the undo behaviour are **reasoned about,
+not executed**. The official panel's enabled action path is covered by `tsc` and reading
+only; its 112 tests pass no `onAction` and therefore exercise the disabled branch.

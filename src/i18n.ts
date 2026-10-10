@@ -110,6 +110,13 @@ const zh = {
   "insights.evidenceHubWarning": " ⚠ 经由枢纽（{degree} 度），可能只是索引路由",
   "insights.actionUnavailable": "尚未接入操作",
 
+  "action.previewTitle": "插入链接预览",
+  "action.previewBefore": "当前",
+  "action.previewAfter": "修改后",
+  "action.previewHint": "只会替换这一行里的一处提及；写入后可用编辑器的撤销（Ctrl/Cmd+Z）还原。",
+  "action.apply": "应用",
+  "action.cancel": "取消",
+
   "reason.cross-community": "跨越社区边界",
   "reason.cross-type": "连接不同类型",
   "reason.distant-types": "连接 {a} 与 {b} 两种相距较远的类型",
@@ -280,6 +287,13 @@ const zh = {
   "notice.layoutSynced": "已从内置图谱同步布局：{view}",
   "notice.layoutUnavailable": "没有可用的内置图谱布局，已回退到 ForceAtlas2",
   "notice.notConnected": "{a} 与 {b} 之间没有路径",
+  "notice.linkInserted": "已插入链接。",
+  "notice.linkAlreadyLinked": "这对笔记已经互相链接，未做修改。",
+  "notice.linkTermNotFound": "正文里没有可插入的提及，未做修改。",
+  "notice.linkNoChange": "替换后内容没有变化，未写入。",
+  "notice.mocCreated": "已创建索引页。",
+  "notice.mocExists": "同名笔记已存在，未创建索引页。",
+  "notice.actionFailed": "操作失败，未做任何修改。",
 } as const;
 
 export type MessageKey = keyof typeof zh;
@@ -386,6 +400,13 @@ const en: Record<MessageKey, string> = {
   "insights.evidenceOmitted": " and {count} more",
   "insights.evidenceHubWarning": " ⚠ via a hub ({degree} links) — may just be index routing",
   "insights.actionUnavailable": "No action wired up yet",
+
+  "action.previewTitle": "Insert link",
+  "action.previewBefore": "Before",
+  "action.previewAfter": "After",
+  "action.previewHint": "Only this one mention changes. The edit goes through the vault, so Ctrl/Cmd+Z undoes it.",
+  "action.apply": "Apply",
+  "action.cancel": "Cancel",
 
   "reason.cross-community": "crosses a community boundary",
   "reason.cross-type": "connects different types",
@@ -557,6 +578,13 @@ const en: Record<MessageKey, string> = {
   "notice.layoutSynced": "Layout synced from the built-in graph: {view}",
   "notice.layoutUnavailable": "No built-in layout available — fell back to ForceAtlas2",
   "notice.notConnected": "{a} and {b} are not connected",
+  "notice.linkInserted": "Link inserted.",
+  "notice.linkAlreadyLinked": "These notes are already linked — nothing was changed.",
+  "notice.linkTermNotFound": "That name is not in the note's body — nothing was changed.",
+  "notice.linkNoChange": "The note would be unchanged — nothing was written.",
+  "notice.mocCreated": "Index note created.",
+  "notice.mocExists": "A note with that name already exists — no index note was created.",
+  "notice.actionFailed": "The action failed; nothing was changed.",
 };
 
 const DICTIONARIES: Record<Language, Record<MessageKey, string>> = { zh, en };

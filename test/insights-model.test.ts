@@ -204,6 +204,35 @@ describe("ranking", () => {
     ]);
   });
 
+  it("keeps a card that was already visible when the scores are near-tied", () => {
+    // Measured need: dropping 2 % of a real vault's links kept only 2 of the panel's 6
+    // cards, because every file save re-ranks from scratch and the score distribution
+    // has near-ties. A card the reader was part-way through must not be replaced by an
+    // equally good one that happened to sort higher this time.
+    const visible = finding({ kind: "isolated", nodeId: "was-on-screen", score: 0.5 });
+    const newcomer = finding({ kind: "isolated", nodeId: "slightly-better", score: 0.52 });
+
+    const cold = rankFindings([visible, newcomer], new Map());
+    expect(cold.ranked[0]?.key).toBe(newcomer.key);
+
+    const warm = rankFindings([visible, newcomer], new Map(), {
+      previousKeys: new Set([visible.key]),
+    });
+    expect(warm.ranked[0]?.key).toBe(visible.key);
+  });
+
+  it("drops a visible card whose evidence collapsed, stickiness or not", () => {
+    // Negative control. Stickiness absorbs near-ties; it must not fossilise the panel,
+    // so a card that falls well behind loses its place.
+    const visible = finding({ kind: "isolated", nodeId: "was-on-screen", score: 0.1 });
+    const better = finding({ kind: "isolated", nodeId: "clearly-better", score: 0.9 });
+
+    const warm = rankFindings([visible, better], new Map(), {
+      previousKeys: new Set([visible.key]),
+    });
+    expect(warm.ranked[0]?.key).toBe(better.key);
+  });
+
   it("keeps the score out of the severity and effort comparison entirely", () => {
     // The property is structural, not a tuned bound: severity and effort are compared
     // before the score is ever read, so no score can cross either step. Two findings

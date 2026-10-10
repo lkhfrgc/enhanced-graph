@@ -17,7 +17,7 @@ import { isEditingWithin } from "./dom-focus";
 import { setIcon } from "obsidian";
 
 import type { GraphInsights } from "../core/insights";
-import { EMPTY_BUNDLE } from "../core/insights/model";
+import { EMPTY_BUNDLE, type Finding, type InsightAction } from "../core/insights/model";
 import type { OfficialGraphMode, WikiGraph } from "../types";
 import { t } from "../i18n";
 import { colourRow } from "../view/controls";
@@ -39,6 +39,15 @@ export interface OfficialPanelOptions {
   readonly mode: () => OfficialGraphMode;
   readonly onFocusNodes: (nodeIds: readonly string[]) => void;
   readonly onDismiss: (key: string, nodeIds: readonly string[]) => void;
+  /**
+   * Perform a card's action.
+   *
+   * Optional for the same reason as in {@link InsightsPanelOptions}: the panel does
+   * no vault I/O itself, and a host that has not wired the action up gets a
+   * disabled button rather than one that silently does nothing. The host shows the
+   * Notice — that is why this returns nothing.
+   */
+  readonly onAction?: (action: InsightAction, finding: Finding) => void;
   /** How many notes are focused; the hop control only matters for a pair. */
   readonly focusCount: () => number;
   /** Current hop budget, shared with the standalone view. */
@@ -278,6 +287,10 @@ export class OfficialSidePanel {
         this.render();
       },
       onDismiss: (key, nodeIds) => void this.options.onDismiss(key, nodeIds),
+      // Passed straight through: the standalone view renders these same cards, and
+      // a card whose button works in one panel and not the other is a bug the
+      // reader cannot even report precisely.
+      onAction: this.options.onAction,
       onToggleShowDismissed: () => this.render(),
       // Kept on the panel, not in the renderer: the renderer runs on every repaint
       // and would forget which group the user was looking at.

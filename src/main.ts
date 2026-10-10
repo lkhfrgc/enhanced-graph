@@ -7,10 +7,10 @@
  * The behaviour lives in `core/`, `view/`, `integrate/` and `reports.ts`.
  */
 
-import { getLanguage, Notice, Plugin, TFile, WorkspaceLeaf } from "obsidian";
+import { getLanguage, Modal, Notice, Plugin, TFile, WorkspaceLeaf, type App } from "obsidian";
 import { EnhancedGraphSettingTab } from "./settings";
 import { DEFAULT_SETTINGS, applyLanguage, mergeSettings, type EnhancedGraphSettings } from "./settings-model";
-import { t } from "./i18n";
+import { t, type MessageKey } from "./i18n";
 import { VIEW_TYPE_ENHANCED_GRAPH, EnhancedGraphView } from "./view/graph-view";
 import {
   EMPTY_GRAPH,
@@ -20,6 +20,9 @@ import {
 import { buildWikiGraph } from "./core/graph-builder";
 import { GraphCache } from "./core/graph-cache";
 import { analyzeGraph, type GraphInsights } from "./core/insights";
+import { wikilinkText } from "./core/insights/content";
+import type { InsightAction } from "./core/insights/model";
+import { insertWikilink } from "./core/note-edit";
 import type { VaultAdapter } from "./core/vault";
 import { GRAPH_MENU_SOURCE, OfficialGraphEnhancer, probeOfficialGraph } from "./integrate/official-graph";
 import { captureOfficialLayout } from "./integrate/official-layout";
@@ -336,6 +339,7 @@ export default class EnhancedGraphPlugin extends Plugin implements PluginHost, S
         this.officialGraph?.refresh();
         this.refreshViews();
       },
+      onAction: (action) => this.performInsightAction(action),
       onOpenNode: (nodeId) => {
         const node = this.cached.graph.nodeIndex.get(nodeId);
         if (!node) return;
@@ -557,6 +561,255 @@ export default class EnhancedGraphPlugin extends Plugin implements PluginHost, S
     const file = this.app.vault.getAbstractFileByPath(path);
     if (file instanceof TFile) await this.app.workspace.getLeaf("tab").openFile(file);
   }
+
+  // -------------------------------------------------------------------------
+  // Insight actions
+  // -------------------------------------------------------------------------
+
+  /**
+   * Turn one finding's action into something that happened.
+   *
+   * The engine produces actions as data and never touches the vault; this is the
+   * one place that turns one into a note edit, a pair of open panes or an export.
+   * Every write goes through `vaultAdapter` — the same surface the engine reads
+   * through — so the change lands in Obsidian's own undo history.
+   */
+  async performInsightAction(action: InsightAction): Promise<MessageKey | null> {
+    try {
+      switch (action.kind) {
+        case "insert-wikilink":
+          return await this.insertLinkFromAction(action);
+        case "open-notes":
+          return await this.openNotesSideBySide(action.nodeIds);
+        case "create-moc":
+          return await this.createIndexNote(action);
+        case "open-report":
+          // `exportInsights` notices its own outcome, so there is nothing to add.
+          await this.exportInsights();
+          return null;
+      }
+    } catch (error) {
+      // A throw here is a read or write that did not happen; the caller shows the
+      // Notice, and the note on disk is untouched either way.
+      console.error("[enhanced-graph] the insight action failed:", error);
+      return "notice.actionFailed";
+    }
+  }
+
+  /**
+   * The link-insertion action: preview first, then one write.
+   *
+   * The preview is not decoration. This is the only path in the plugin that
+   * rewrites a note the user wrote by hand, so the user sees the line before and
+   * after; cancelling writes nothing at all, and confirming writes once.
+   */
+  private async insertLinkFromAction(
+    action: Extract<InsightAction, { kind: "insert-wikilink" }>,
+  ): Promise<MessageKey | null> {
+    const source = this.cached.graph.nodeIndex.get(action.sourceId);
+    if (!source) return "notice.actionFailed";
+    const content = await this.vaultAdapter.read(source.path);
+
+    // The action carries the wikilink text but not the bare term the mention was
+    // found by, so the term is recovered from the target and tried in order. The
+    // link text itself is never rebuilt: it is inserted verbatim.
+    const candidates = this.termCandidates(action);
+    let insertion = insertWikilink(content, {
+      term: candidates[0] ?? "",
+      text: action.text,
+      targetId: action.targetId,
+    });
+    for (let index = 1; index < candidates.length && insertion.reason === "term-not-found"; index += 1) {
+      insertion = insertWikilink(content, {
+        term: candidates[index],
+        text: action.text,
+        targetId: action.targetId,
+      });
+    }
+    if (!insertion.changed) {
+      if (insertion.reason === "already-linked") return "notice.linkAlreadyLinked";
+      if (insertion.reason === "no-change") return "notice.linkNoChange";
+      return "notice.linkTermNotFound";
+    }
+
+    const diff = firstChangedLine(content, insertion.content);
+    if (!diff) return "notice.linkNoChange";
+    if (!(await this.confirmLinkInsertion(diff))) return null;
+    await this.vaultAdapter.write(source.path, insertion.content);
+    return "notice.linkInserted";
+  }
+
+  /**
+   * The names the source note could have used for the target, best first.
+   *
+   * `wikilinkText` puts the display title in the alias, so `[[beta|Beta Display]]`
+   * says the prose calls it "Beta Display"; a plain `[[Beta]]` leaves only the file
+   * name. The page's own label sits between them because the two agree whenever the
+   * alias is absent. An alias the content index matched but the action does not
+   * carry cannot be recovered here — that case ends as "no mention found", which
+   * writes nothing rather than guessing.
+   */
+  private termCandidates(action: Extract<InsightAction, { kind: "insert-wikilink" }>): string[] {
+    const inner = action.text.replace(/^\[\[/, "").replace(/\]\]$/, "");
+    // `split` yields fewer parts for a plain `[[Beta]]`, so the alias is read as
+    // absent rather than assumed: an undefined here would throw before the first
+    // candidate was ever tried.
+    const parts = inner.split("|");
+    const target = parts[0] ?? "";
+    const alias = parts[1] ?? "";
+    const file = target.split("#")[0].split("/").pop() ?? "";
+    const label = this.cached.graph.nodeIndex.get(action.targetId)?.label ?? "";
+    const candidates: string[] = [];
+    // The matched term comes FIRST when the analyser supplied it. It is the only
+    // candidate that is certainly the text in the note: the others are inferred from
+    // the target, and a mention matched by a frontmatter alias that appears nowhere
+    // else in the body has no inferred candidate at all — the button would report
+    // "no mention found" and do nothing, on a card the analyser had just matched.
+    for (const name of [action.term ?? "", alias, label, file.replace(/\.md$/i, "")]) {
+      const term = name.trim();
+      if (term && !candidates.some((seen) => seen.toLowerCase() === term.toLowerCase())) {
+        candidates.push(term);
+      }
+    }
+    return candidates;
+  }
+
+  /**
+   * Two notes, two panes.
+   *
+   * The comparison *is* the action, so each note gets its own split: opening both
+   * on the active leaf would replace the first with the second and leave the reader
+   * where they started. Capped at two — three panes is no longer a comparison.
+   */
+  private async openNotesSideBySide(nodeIds: readonly string[]): Promise<MessageKey | null> {
+    let opened = 0;
+    for (const id of nodeIds.slice(0, 2)) {
+      const node = this.cached.graph.nodeIndex.get(id);
+      if (!node) continue;
+      const file = this.app.vault.getAbstractFileByPath(node.path);
+      if (!(file instanceof TFile)) continue;
+      await this.app.workspace.getLeaf("split").openFile(file);
+      opened += 1;
+    }
+    return opened > 0 ? null : "notice.actionFailed";
+  }
+
+  /**
+   * A new index note for a cluster, beside the cluster's first page.
+   *
+   * An existing note of that name is never written over: the suggestion is a name
+   * for a note that does not exist yet, not a licence to replace a file.
+   */
+  private async createIndexNote(
+    action: Extract<InsightAction, { kind: "create-moc" }>,
+  ): Promise<MessageKey | null> {
+    const ids = [...action.nodeIds];
+    // A note name cannot contain a path separator; the title is a suggestion, so a
+    // stray one is flattened rather than allowed to make a folder.
+    const title = action.suggestedTitle.trim().replace(/[/\\]/g, "-");
+    if (ids.length === 0 || !title) return "notice.actionFailed";
+    const first = this.cached.graph.nodeIndex.get(ids[0]);
+    const folder = first ? first.path.replace(/\/[^/]*$/, "") : "";
+    const path = folder ? `${folder}/${title}.md` : `${title}.md`;
+    if (await this.vaultAdapter.exists(path)) return "notice.mocExists";
+
+    const links = ids.map((id) => {
+      const node = this.cached.graph.nodeIndex.get(id);
+      // The same builder the mention cards use: links by file name, with the
+      // display title as the alias, so every line resolves and still reads.
+      return `- ${wikilinkText(node?.path ?? `${id}.md`, node?.label ?? id)}`;
+    });
+    await this.vaultAdapter.write(path, [`# ${title}`, "", ...links, ""].join("\n"));
+    return "notice.mocCreated";
+  }
+
+  /**
+   * Ask before writing, and resolve false for every way of declining — Escape and
+   * a click outside the modal included, because both close it without a button.
+   */
+  private confirmLinkInsertion(diff: { readonly before: string; readonly after: string }): Promise<boolean> {
+    return new Promise<boolean>((resolve) => {
+      new LinkPreviewModal(this.app, diff, resolve).open();
+    });
+  }
+}
+
+/**
+ * The diff a link insertion will make, shown before it is written.
+ *
+ * Obsidian's own `Modal` rather than a hand-rolled dialog: it is the app's
+ * confirmation surface, it handles Escape and focus trapping, and it needs no CSS
+ * to be usable. The modal owns no undo — the write goes through the vault adapter,
+ * which is what puts the change in the editor's undo history.
+ */
+class LinkPreviewModal extends Modal {
+  /** Set once either button has been used, so closing cannot decide twice. */
+  private settled = false;
+
+  constructor(
+    app: App,
+    private readonly diff: { readonly before: string; readonly after: string },
+    private readonly decide: (apply: boolean) => void,
+  ) {
+    super(app);
+  }
+
+  onOpen(): void {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.createEl("h3", { text: t("action.previewTitle") });
+    contentEl.createEl("p", { cls: "enhanced-graph-preview-hint", text: t("action.previewHint") });
+
+    const preview = contentEl.createDiv({ cls: "enhanced-graph-preview" });
+    preview.createDiv({ cls: "enhanced-graph-preview-label", text: t("action.previewBefore") });
+    preview.createDiv({ cls: "enhanced-graph-preview-line is-before", text: this.diff.before });
+    preview.createDiv({ cls: "enhanced-graph-preview-label", text: t("action.previewAfter") });
+    preview.createDiv({ cls: "enhanced-graph-preview-line is-after", text: this.diff.after });
+
+    const buttons = contentEl.createDiv({ cls: "enhanced-graph-modal-buttons" });
+    buttons
+      .createEl("button", { cls: "mod-cta", text: t("action.apply") })
+      .addEventListener("click", () => {
+        this.settle(true);
+        this.close();
+      });
+    buttons.createEl("button", { text: t("action.cancel") }).addEventListener("click", () => {
+      this.settle(false);
+      this.close();
+    });
+  }
+
+  onClose(): void {
+    // Reached without a button whenever the modal is dismissed: a preview that was
+    // closed is a refusal, and must never be read as consent to write.
+    this.settle(false);
+    this.contentEl.empty();
+  }
+
+  private settle(apply: boolean): void {
+    if (this.settled) return;
+    this.settled = true;
+    this.decide(apply);
+  }
+}
+
+/**
+ * The first line that differs between two versions of the same note.
+ *
+ * The preview shows one line rather than the whole file because the edit replaces
+ * a mention inside a line: the pair of lines is the whole change, and a full-file
+ * diff would bury it. `null` when nothing differs, which the caller treats as
+ * "nothing to write" rather than an empty preview.
+ */
+function firstChangedLine(before: string, after: string): { before: string; after: string } | null {
+  const from = before.split("\n");
+  const to = after.split("\n");
+  for (let index = 0; index < Math.max(from.length, to.length); index += 1) {
+    if (from[index] !== to[index]) {
+      return { before: from[index] ?? "", after: to[index] ?? "" };
+    }
+  }
+  return null;
 }
 
 export { VIEW_TYPE_ENHANCED_GRAPH };

@@ -126,6 +126,9 @@ export function toMentionFinding(
         // The exact text to insert. Built here so the preview and the write cannot
         // disagree about what will appear in the note.
         text: wikilinkText(pathOf(mention.targetId), targetLabel),
+        // The name the scanner actually matched, so the writer does not have to guess
+        // it back from the target — which fails for an alias matched nowhere else.
+        term: mention.term,
       },
     },
   });

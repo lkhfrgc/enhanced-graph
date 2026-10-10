@@ -208,6 +208,17 @@ export type InsightAction =
       readonly targetId: string;
       /** Exact text to insert, so the preview and the write cannot disagree. */
       readonly text: string;
+      /**
+       * The bare name that was matched in the prose, when the analyser knows it.
+       *
+       * Carried because the writer has to find the occurrence to replace and the
+       * `text` is a wikilink, not a search key. Without it the writer has to guess
+       * candidates from the target's title, alias and file name — and a mention that
+       * matched a *frontmatter alias* appearing nowhere else then ends as "no mention
+       * found" and the button silently does nothing. The analyser matched something
+       * specific; it should say what.
+       */
+      readonly term?: string;
     }
   | {
       readonly kind: "open-notes";

@@ -237,6 +237,12 @@ export function analyzeGraph(graph: WikiGraph, options: AnalyzeOptions = {}): Gr
   const { ranked, droppedByCap } = rankFindings(findings, capsFrom(analysers), {
     ...(options.dropWeak !== undefined ? { dropWeak: options.dropWeak } : {}),
     scoreRanges: scoreRangesFrom(analysers),
+    // Stickiness: the cards the panel drew last build. Without it a rebuild re-ranks
+    // from scratch and near-ties reshuffle, which measured as only 2 of 6 cards
+    // surviving a 2 % change to a real vault's links.
+    ...(options.previous
+      ? { previousKeys: new Set(options.previous.findings.map((finding) => finding.key)) }
+      : {}),
   });
   const bundle = buildBundle(ranked, {
     ...(options.previous ? { previous: options.previous } : {}),

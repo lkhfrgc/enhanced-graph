@@ -13,6 +13,8 @@
 
 import type { App } from "obsidian";
 import type { GraphInsights } from "./core/insights";
+import type { InsightAction } from "./core/insights/model";
+import type { MessageKey } from "./i18n";
 import type { WikiGraph } from "./types";
 import type { EnhancedGraphSettings } from "./settings-model";
 import type { LayoutSource } from "./view/layout";
@@ -34,6 +36,19 @@ export interface PluginHost {
 
   /** Markdown report of the association scores around one node, to the clipboard. */
   copyRelevanceReport(nodeId: string): Promise<void>;
+
+  /**
+   * Perform a finding's action. Returns a message key for the Notice, or null.
+   *
+   * `null` means the action reported its own outcome (`open-report` exports the
+   * file and notices it) or the user cancelled the preview — in neither case is
+   * there a second message to show. A key means the caller shows it: both panel
+   * hosts render the same cards, so the message belongs where the click came from.
+   *
+   * Typed as `MessageKey` rather than `string` so `t()` can render it without a
+   * cast; the two are interchangeable to a caller, since `MessageKey extends string`.
+   */
+  performInsightAction(action: InsightAction): Promise<MessageKey | null>;
 
   /** Throw away the cached graph and rebuild. */
   requestGraphRebuild(notify?: boolean): void;

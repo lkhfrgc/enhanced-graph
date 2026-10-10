@@ -168,11 +168,30 @@ class Notice {
 class WorkspaceLeaf {}
 class TFolder {}
 
+/**
+ * `Modal`, for the link-insertion preview.
+ *
+ * Extended by a class in `main.ts`, so a stub without it fails at *load* with "Class
+ * extends value undefined" — the whole bundle stops being requirable, which is exactly
+ * what the smoke test exists to catch. The real class lives in Obsidian; here it only
+ * has to be constructible and expose the three members the preview calls.
+ */
+class Modal {
+  constructor(app) {
+    this.app = app;
+    this.contentEl = document.createElement("div");
+  }
+  open() {}
+  close() {}
+  onClose() {}
+}
+
 const obsidianStub = {
   App: class {},
   Component,
   Events,
   ItemView,
+  Modal,
   Notice,
   Plugin,
   PluginSettingTab,
