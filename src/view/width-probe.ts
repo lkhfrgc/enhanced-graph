@@ -22,6 +22,26 @@
 export const WIDTH_PROBE_EVENT = "enhanced-graph:width-probe";
 
 /**
+ * Every panel currently in the DOM, not just the first.
+ *
+ * Obsidian can hold more than one graph leaf — a split, a second window, a reopened view
+ * — and the two can be at different widths. Reporting only the first is how a probe can
+ * answer "320px, fine" while the reader is looking at a different panel that is not.
+ */
+export function allPanels(): HTMLElement[] {
+  return Array.from(document.querySelectorAll<HTMLElement>(".enhanced-graph-panel"));
+}
+
+/** Report every panel, one after another, so a mismatch between two is visible. */
+export function reportAllPanels(): string {
+  const panels = allPanels();
+  if (panels.length === 0) return "enhanced-graph: no insight panel in the DOM";
+  return panels
+    .map((panel, index) => `[panel ${index + 1} of ${panels.length}]\n${reportPanelWidth(panel)}`)
+    .join("\n\n");
+}
+
+/**
  * Log the panel's geometry once, unprompted, after the first layout.
  *
  * A self-report rather than something the reader has to know to ask for. The defect this
@@ -163,10 +183,12 @@ export function reportPanelWidth(panel: HTMLElement | null): string {
  * Listening on `document` means the console does not need a reference to the view, which
  * is the whole point — the person running it should not have to find the instance first.
  */
-export function listenForWidthProbe(getPanel: () => HTMLElement | null): () => void {
+export function listenForWidthProbe(): () => void {
   const handler = (): void => {
+    // Every panel, not just the view's own: a probe that reports one of two is how a
+    // measurement can be right while the reader is still looking at the wrong thing.
     // eslint-disable-next-line no-console
-    console.log(reportPanelWidth(getPanel()));
+    console.log(reportAllPanels());
   };
   document.addEventListener(WIDTH_PROBE_EVENT, handler);
   return () => document.removeEventListener(WIDTH_PROBE_EVENT, handler);

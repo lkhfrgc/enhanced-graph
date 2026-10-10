@@ -293,7 +293,7 @@ export class EnhancedGraphView extends ItemView {
     this.panelEl = body.createDiv({ cls: "enhanced-graph-panel" });
     // Answers the console probe that reports this panel's real width; see the module for
     // why a host-only layout needs to be asked rather than modelled.
-    this.detachWidthProbe = listenForWidthProbe(() => this.panelEl);
+    this.detachWidthProbe = listenForWidthProbe();
 
     this.canvasWrapEl.addEventListener("mousemove", (event) => {
       this.renderer?.trackPointer(event.clientX, event.clientY);
