@@ -1,352 +1,235 @@
 /**
- * 图谱洞察 (graph insights): surprising connections + knowledge gaps.
+ * 图谱洞察 (graph insights) — the public entry point.
  *
- * Everything here is pure analysis over an already-built `WikiGraph` — no I/O
- * and no Obsidian imports — so the same engine runs from the tests, from the
- * rebuild pipeline and from the view without any host setup.
+ * This module used to hold the whole engine: two bespoke detectors, their scoring
+ * constants, their dismiss-key rules and their Chinese card text. It is now the
+ * composition of a small pipeline, and it keeps the same public surface so nothing
+ * downstream had to change in the same step:
+ *
+ *   analyse → map to `Finding` → rank → group into sections → `InsightBundle`
+ *
+ * The pieces:
+ *
+ *  - `insights/connections.ts` — 惊奇连接 detection (moved, unchanged)
+ *  - `insights/gaps.ts`        — 知识空白 detection (moved, unchanged)
+ *  - `insights/model.ts`       — the one shape everything is expressed in
+ *  - `insights/input.ts`       — what an analyser receives, and the registry
+ *  - `insights/ranking.ts`     — ordering and the caps
+ *  - `insights/sections.ts`    — grouping and dismissal
+ *
+ * Everything here is pure analysis over an already-built `WikiGraph` — no I/O and
+ * no Obsidian imports — so the same engine runs from the tests, from the rebuild
+ * pipeline and from the view without any host setup.
+ *
+ * `GraphInsights` is still returned, alongside the new {@link InsightBundle}, for
+ * one migration step: `src/reports.ts`, the settings reset and the existing tests
+ * read it. New code should read the bundle.
  */
 
 import type {
   CommunityInfo,
-  ConnectionReason,
-  GapType,
-  GraphNode,
   CoverageGap,
+  GraphNode,
   UnexpectedLink,
   WikiGraph,
 } from "../types";
 import {
-  computeGraphDensity,
-  isSparseCommunity as isSparseFromMetrics,
-} from "./communities";
-import { edgeKey } from "./graph-keys";
+  CONTRIBUTION,
+  DEFAULT_CONNECTION_LIMIT,
+  DEFAULT_GAP_LIMIT,
+  DEFAULT_MIN_SCORE,
+  DISTANT_TYPE_PAIRS,
+  ISOLATED_SUGGESTION,
+  SPARSE_SUGGESTION,
+  BRIDGE_SUGGESTION,
+  LABEL_PREVIEW,
+  MIN_BRIDGE_CLUSTERS,
+  BRIDGE_LIMIT,
+  connectionKey,
+  rankUnexpectedLinks,
+  toExistingLinkFinding,
+  typePair,
+  type InsightOptions,
+} from "./insights/connections";
+import {
+  findBridgeNodes,
+  findCoverageGaps,
+  gapKey,
+  isSparseCommunity,
+  knowledgeGapKey,
+  toGapFindings,
+} from "./insights/gaps";
+import {
+  connectionsAnalyser,
+  gapsAnalyser,
+  registerDefaultAnalysers,
+  CONNECTIONS_ANALYSER_ID,
+  GAPS_ANALYSER_ID,
+} from "./insights/analysers";
+import {
+  capsFrom,
+  compareFindings,
+  effortRank,
+  rankFindings,
+  scoreRangesFrom,
+  sectionOf,
+  type RankOptions,
+} from "./insights/ranking";
+import { buildBundle, countUndismissed, visibleFindings, visibleSections } from "./insights/sections";
+import { createContext, registerAnalyser, type InsightInput } from "./insights/input";
+import { EMPTY_BUNDLE, type Finding, type InsightBundle } from "./insights/model";
 
-export interface InsightOptions {
-  /** Max surprising connections returned. Default 6. */
-  readonly connectionLimit?: number;
-  /** Max knowledge gaps returned. Default 10. */
-  readonly gapLimit?: number;
-  /** Minimum composite surprise score. Default 3. */
-  readonly minScore?: number;
+// ---------------------------------------------------------------------------
+// Public types
+// ---------------------------------------------------------------------------
+
+export type { InsightOptions } from "./insights/connections";
+export type { InsightInput } from "./insights/input";
+export type { RankOptions } from "./insights/ranking";
+
+/**
+ * Options for a full analysis: the detector knobs plus the state the bundle needs.
+ *
+ * Deliberately flat rather than nested, because the previous signature was
+ * `analyzeGraph(graph, { connectionLimit, gapLimit, minScore })` and keeping those
+ * three names at the top level means an existing caller does not have to change to
+ * keep working.
+ */
+export interface AnalyzeOptions extends InsightOptions {
+  /**
+   * Findings from the previous analysis, for the "changed" list.
+   *
+   * Dismissal is deliberately **not** an input: the bundle is cached, so splitting
+   * on a key set here would freeze that set at build time and a dismissal would not
+   * take effect until something rebuilt. The view applies `visibleSections` /
+   * `visibleFindings` against its live settings instead.
+   */
+  readonly previous?: InsightBundle;
+  /** Drop findings an analyser labelled `weak`. */
+  readonly dropWeak?: boolean;
 }
 
+/**
+ * The legacy shape, kept while the migration finishes.
+ *
+ * `connections` and `gaps` are exactly what `analyzeGraph` returned before this
+ * refactor, so `reports.ts` and the 31 existing engine tests keep working.
+ *
+ * `bundle` is what new code should read. It is **optional** on purpose: every
+ * existing fixture across the test suite builds `{ connections, gaps }` by hand,
+ * and making the field required would have forced ~40 mechanical edits to files
+ * that are asserting behaviour this refactor deliberately did not change. A caller
+ * that would rather not handle `undefined` should use {@link analyzeBundle} or
+ * {@link GraphInsights.bundle} on a value it got from `analyzeGraph`, which always
+ * sets it.
+ */
 export interface GraphInsights {
   readonly connections: readonly UnexpectedLink[];
   readonly gaps: readonly CoverageGap[];
+  /** The new model. Always present on a value returned by `analyzeGraph`. */
+  readonly bundle?: InsightBundle;
 }
-
-const DEFAULT_CONNECTION_LIMIT = 6;
-const DEFAULT_GAP_LIMIT = 10;
-const DEFAULT_MIN_SCORE = 3;
-
-/** Labels inlined in a gap description before it is summarised as "等 N 个". */
-const LABEL_PREVIEW = 5;
-/** Neighbour clusters a page must span before it counts as a bridge. */
-const MIN_BRIDGE_CLUSTERS = 3;
-/** Bridges reported per analysis; more than this is noise, not insight. */
-const BRIDGE_LIMIT = 3;
-
-/** Per-signal weights of the composite surprise score. */
-const CONTRIBUTION: Readonly<Record<ConnectionReason, number>> = {
-  "cross-community": 3,
-  "distant-types": 2,
-  "cross-type": 1,
-  "peripheral-hub": 2,
-  "weak-tie": 1,
-  "source-overlap": 2,
-};
-
-/** Unordered type pair, so lookups do not depend on edge direction. */
-function typePair(a: string, b: string): string {
-  return a < b ? `${a}|${b}` : `${b}|${a}`;
-}
-
-/** Type combinations that rarely share vocabulary — the most interesting edges. */
-const DISTANT_TYPE_PAIRS: ReadonlySet<string> = new Set([
-  typePair("source", "concept"),
-  typePair("source", "synthesis"),
-  typePair("query", "entity"),
-  typePair("source", "thesis"),
-  typePair("source", "methodology"),
-]);
-
-const ISOLATED_SUGGESTION =
-  "这些页面几乎没有关联，建议在正文中补充 [[wikilinks]] 指向相关主题，先建立连接再逐步扩充内容。";
-const SPARSE_SUGGESTION =
-  "该领域内部交叉引用不足，建议在这些页面之间补充 [[wikilinks]]，把同一主题的笔记串联起来。";
-const BRIDGE_SUGGESTION =
-  "这是跨领域的关键枢纽，建议保持内容更新与完整，并持续补充指向各个集群的 [[wikilinks]]。";
 
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
-/** Run both analyses with one shared option bag. */
-export function analyzeGraph(graph: WikiGraph, options: InsightOptions = {}): GraphInsights {
-  return {
-    connections: rankUnexpectedLinks(graph, options),
-    gaps: findCoverageGaps(graph, options),
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Surprising connections
-// ---------------------------------------------------------------------------
-
 /**
- * Score every edge by how unexpected its endpoints are together and keep the
- * strongest ones. Signals are additive so a card can explain *why* a pair was
- * surfaced via `contributions`.
- */
-export function rankUnexpectedLinks(
-  graph: WikiGraph,
-  options: InsightOptions = {},
-): UnexpectedLink[] {
-  const limit = resolveLimit(options.connectionLimit, DEFAULT_CONNECTION_LIMIT);
-  if (limit === 0 || graph.edges.length === 0) return [];
-
-  const minScore = options.minScore ?? DEFAULT_MIN_SCORE;
-  const nodeById = resolveNodes(graph);
-  let maxDegree = 1;
-  for (const node of uniqueNodes(graph)) maxDegree = Math.max(maxDegree, node.linkCount);
-
-  const seen = new Set<string>();
-  const scored: UnexpectedLink[] = [];
-
-  for (const edge of graph.edges) {
-    const source = nodeById.get(edge.source);
-    const target = nodeById.get(edge.target);
-    if (!source || !target) continue;
-    if (source.isStructural || target.isStructural) continue;
-
-    // Multi-edges and reversed duplicates describe one relationship, and a
-    // duplicate card would inflate the ranking with the same pair.
-    const key = connectionKey(source.id, target.id);
-    if (seen.has(key)) continue;
-    seen.add(key);
-
-    const reasons: ConnectionReason[] = [];
-    const contributions: Partial<Record<ConnectionReason, number>> = {};
-    const add = (reason: ConnectionReason): void => {
-      contributions[reason] = (contributions[reason] ?? 0) + CONTRIBUTION[reason];
-      reasons.push(reason);
-    };
-
-    if (source.community !== target.community) add("cross-community");
-
-    if (source.type !== target.type) {
-      // Exactly one of the two type signals fires, so the card can say either
-      // "different types" or the stronger "distant types".
-      add(DISTANT_TYPE_PAIRS.has(typePair(source.type, target.type)) ? "distant-types" : "cross-type");
-    }
-
-    const minDeg = Math.min(source.linkCount, target.linkCount);
-    const maxDeg = Math.max(source.linkCount, target.linkCount);
-    if (minDeg <= 2 && maxDeg >= maxDegree * 0.5) add("peripheral-hub");
-
-    if (edge.weight > 0 && edge.weight < 2) add("weak-tie");
-
-    // 来源重叠 is the heaviest association signal (weight 4.0); surfacing it
-    // here explains why unrelated-looking pages ended up connected.
-    if (edge.sharedSources.length >= 2) add("source-overlap");
-
-    const score = reasons.reduce((sum, reason) => sum + CONTRIBUTION[reason], 0);
-    if (reasons.length === 0 || score < minScore) continue;
-
-    scored.push({ key, source, target, score, weight: edge.weight, reasons, contributions });
-  }
-
-  scored.sort(
-    (a, b) => b.score - a.score || b.weight - a.weight || compareStrings(a.key, b.key),
-  );
-  return scored.slice(0, limit);
-}
-
-/** Stable dismiss key for a connection card; see {@link edgeKey}. */
-export function connectionKey(a: string, b: string): string {
-  return edgeKey(a, b);
-}
-
-// ---------------------------------------------------------------------------
-// Knowledge gaps
-// ---------------------------------------------------------------------------
-
-/**
- * Detect the three actionable gap types, ordered by how cheap they are to fix:
- * orphan pages, then loose clusters, then the bridges holding them together.
- */
-export function findCoverageGaps(
-  graph: WikiGraph,
-  options: InsightOptions = {},
-): CoverageGap[] {
-  const limit = resolveLimit(options.gapLimit, DEFAULT_GAP_LIMIT);
-  if (limit === 0) return [];
-
-  const nodeById = resolveNodes(graph);
-  const gaps: CoverageGap[] = [];
-
-  // Vault-wide degree, for the same reason the visibility switch uses it: a note
-  // whose links all point outside the current scope is not an isolated page, and
-  // reporting it as one would be a claim about the vault that is not true.
-  const isolated = uniqueNodes(graph)
-    .filter((node) => !node.isStructural && node.vaultLinkCount <= 1)
-    .sort(compareByLabel);
-
-  if (isolated.length > 0) {
-    const head = isolated
-      .slice(0, LABEL_PREVIEW)
-      .map((node) => node.label)
-      .join("、");
-    const hidden = isolated.length - LABEL_PREVIEW;
-    const nodeIds = isolated.map((node) => node.id);
-    const title = `${isolated.length} 个孤立页面`;
-    gaps.push({
-      key: gapKey("isolated", title, nodeIds),
-      type: "isolated",
-      title,
-      description: hidden > 0 ? `${head} 等 ${hidden} 个` : head,
-      suggestion: ISOLATED_SUGGESTION,
-      nodeIds,
-    });
-  }
-
-  // Relative to this graph's own density, exactly as the community engine decides
-  // it: an absolute threshold would flag nothing in a densely linked vault.
-  const density = computeGraphDensity(graph.nodes.length, graph.edges.length);
-  const sparse = graph.communities
-    .filter((community) => isSparseCommunity(community, density))
-    .sort((a, b) => a.cohesion - b.cohesion || a.id - b.id);
-
-  for (const community of sparse) {
-    const title = `稀疏知识领域：${community.topNodes[0] ?? `社区 ${community.id}`}`;
-    // The ratio is what the flag is decided on, so it belongs in the card — but only
-    // when there is a baseline to divide by. A vault with no links at all has none.
-    const ratio =
-      density > 0 ? `；约为仓库平均密度的 ${(community.cohesion / density).toFixed(2)} 倍` : "";
-    gaps.push({
-      key: gapKey("sparse", title, community.nodeIds),
-      type: "sparse",
-      title,
-      description:
-        `${community.nodeCount} 个页面，内聚度 ${(community.cohesion * 100).toFixed(1)}%，` +
-        `平均每页 ${community.meanIntraDegree.toFixed(1)} 条内部链接${ratio}`,
-      suggestion: SPARSE_SUGGESTION,
-      nodeIds: community.nodeIds,
-    });
-  }
-
-  for (const bridge of findBridgeNodes(nodeById, graph)) {
-    const nodeIds = [bridge.node.id];
-    const title = `关键桥接：${bridge.node.label}`;
-    gaps.push({
-      key: gapKey("bridge", title, nodeIds),
-      type: "bridge",
-      title,
-      description: `连接 ${bridge.clusterCount} 个知识集群，是维系多个领域的关键枢纽`,
-      suggestion: BRIDGE_SUGGESTION,
-      nodeIds,
-      clusterCount: bridge.clusterCount,
-    });
-  }
-
-  return gaps.slice(0, limit);
-}
-
-interface BridgeCandidate {
-  readonly node: GraphNode;
-  readonly clusterCount: number;
-}
-
-/** Pages whose neighbours live in 3+ different clusters, strongest first. */
-function findBridgeNodes(nodeById: ReadonlyMap<string, GraphNode>, graph: WikiGraph): BridgeCandidate[] {
-  const clusters = new Map<string, Set<number>>();
-
-  for (const edge of graph.edges) {
-    if (edge.source === edge.target) continue; // a self-link spans nothing
-    const source = nodeById.get(edge.source);
-    const target = nodeById.get(edge.target);
-    if (!source || !target) continue;
-    addCluster(clusters, source.id, target.community);
-    addCluster(clusters, target.id, source.community);
-  }
-
-  const candidates: BridgeCandidate[] = [];
-  for (const [id, communityIds] of clusters) {
-    const node = nodeById.get(id);
-    if (!node || node.isStructural) continue;
-    if (communityIds.size < MIN_BRIDGE_CLUSTERS) continue;
-    candidates.push({ node, clusterCount: communityIds.size });
-  }
-
-  candidates.sort(
-    (a, b) =>
-      b.clusterCount - a.clusterCount ||
-      b.node.linkCount - a.node.linkCount ||
-      compareStrings(a.node.id, b.node.id),
-  );
-  return candidates.slice(0, BRIDGE_LIMIT);
-}
-
-function addCluster(clusters: Map<string, Set<number>>, id: string, community: number): void {
-  const existing = clusters.get(id);
-  if (existing) existing.add(community);
-  else clusters.set(id, new Set([community]));
-}
-
-function isSparseCommunity(community: CommunityInfo, graphDensity: number): boolean {
-  // `isSparse` is precomputed by the community engine; recomputing from the raw
-  // metrics keeps cached or hand-built graphs working when the flag is absent.
-  return (
-    community.isSparse ||
-    isSparseFromMetrics(community.cohesion, community.nodeCount, graphDensity)
-  );
-}
-
-/** Stable dismiss key for a gap card. */
-export function knowledgeGapKey(gap: CoverageGap): string {
-  return gapKey(gap.type, gap.title, gap.nodeIds);
-}
-
-function gapKey(type: GapType, title: string, nodeIds: readonly string[]): string {
-  return `gap:${type}:${title}:${nodeIds.join(",")}`;
-}
-
-// ---------------------------------------------------------------------------
-// Shared helpers
-// ---------------------------------------------------------------------------
-
-/** Node lookup that tolerates a graph whose index covers a superset of `nodes`. */
-function resolveNodes(graph: WikiGraph): Map<string, GraphNode> {
-  const byId = new Map<string, GraphNode>();
-  for (const node of graph.nodes) byId.set(node.id, node);
-  for (const [id, node] of graph.nodeIndex) byId.set(id, node);
-  return byId;
-}
-
-/**
- * The unique nodes of a graph, in a stable order.
+ * Run the shipped analysers over a graph.
  *
- * `nodeIndex` deliberately aliases each node under both its lower-cased id and
- * its original-case `rawId`, so iterating `resolveNodes(...).values()` visits
- * mixed-case pages twice — which double-counted orphans and produced dismiss
- * keys containing the same id two times.
+ * Both the legacy arrays and the new bundle come out of this one call. The two
+ * detectors are run directly rather than through the registry because this
+ * function's signature is part of the previous public surface — it took a graph
+ * and an option bag, and it still does. The registry (`registerAnalyser`,
+ * `registerDefaultAnalysers`) is the extension seam for analysers added in later
+ * phases; a caller that wants it drives `listAnalysers()` itself.
  */
-function uniqueNodes(graph: WikiGraph): GraphNode[] {
-  const byId = new Map<string, GraphNode>();
-  for (const node of graph.nodes) byId.set(node.id, node);
-  return [...byId.values()];
+export function analyzeGraph(graph: WikiGraph, options: AnalyzeOptions = {}): GraphInsights {
+  const input: InsightInput = { graph, ...(options.previous ? { previous: options.previous } : {}) };
+  const ctx = createContext(input);
+  const analysers = [connectionsAnalyser(options), gapsAnalyser(options)];
+
+  // The legacy arrays are produced by the same calls the analysers make, so a
+  // migration cannot report one thing in `connections` and another on a card.
+  const connections = rankUnexpectedLinks(graph, options);
+  const gaps = findCoverageGaps(graph, options);
+
+  const findings: Finding[] = [
+    ...connections.map((connection) =>
+      toExistingLinkFinding(
+        connection,
+        (id) => ctx.neighbours.get(id) ?? EMPTY_NEIGHBOURS,
+        (id) => ctx.neighbours.get(id)?.size ?? 0,
+      ),
+    ),
+    ...toGapFindings(gaps),
+  ];
+
+  const { ranked, droppedByCap } = rankFindings(findings, capsFrom(analysers), {
+    ...(options.dropWeak !== undefined ? { dropWeak: options.dropWeak } : {}),
+    scoreRanges: scoreRangesFrom(analysers),
+  });
+  const bundle = buildBundle(ranked, {
+    ...(options.previous ? { previous: options.previous } : {}),
+    droppedByCap,
+  });
+
+  return Object.freeze({ connections: Object.freeze(connections), gaps: Object.freeze(gaps), bundle });
 }
 
-function resolveLimit(value: number | undefined, fallback: number): number {
-  if (value === undefined || !Number.isFinite(value)) return fallback;
-  return Math.max(0, Math.floor(value));
+/** The bundle alone, for callers that have finished migrating. */
+export function analyzeBundle(graph: WikiGraph, options: AnalyzeOptions = {}): InsightBundle {
+  // `analyzeGraph` always sets it; the fallback keeps the return type non-optional
+  // for callers rather than making every one of them handle `undefined`.
+  return analyzeGraph(graph, options).bundle ?? EMPTY_BUNDLE;
 }
 
-/** Pinned locale: dismiss keys must not depend on the machine's default locale. */
-function compareByLabel(a: GraphNode, b: GraphNode): number {
-  return a.label.localeCompare(b.label, "zh") || compareStrings(a.id, b.id);
-}
+// ---------------------------------------------------------------------------
+// Re-exports: the surface this module had before the pipeline was extracted
+// ---------------------------------------------------------------------------
 
-function compareStrings(a: string, b: string): number {
-  return a < b ? -1 : a > b ? 1 : 0;
-}
+export {
+  BRIDGE_LIMIT,
+  BRIDGE_SUGGESTION,
+  CONNECTIONS_ANALYSER_ID,
+  CONTRIBUTION,
+  DEFAULT_CONNECTION_LIMIT,
+  DEFAULT_GAP_LIMIT,
+  DEFAULT_MIN_SCORE,
+  DISTANT_TYPE_PAIRS,
+  EMPTY_BUNDLE,
+  GAPS_ANALYSER_ID,
+  ISOLATED_SUGGESTION,
+  LABEL_PREVIEW,
+  MIN_BRIDGE_CLUSTERS,
+  SPARSE_SUGGESTION,
+  buildBundle,
+  compareFindings,
+  connectionKey,
+  countUndismissed,
+  effortRank,
+  findBridgeNodes,
+  findCoverageGaps,
+  gapKey,
+  isSparseCommunity,
+  knowledgeGapKey,
+  rankFindings,
+  rankUnexpectedLinks,
+  registerAnalyser,
+  registerDefaultAnalysers,
+  scoreRangesFrom,
+  sectionOf,
+  typePair,
+  visibleFindings,
+  visibleSections,
+};
+
+export type {
+  CommunityInfo,
+  GraphNode,
+  InsightBundle,
+  Finding,
+  RankOptions as RankingOptions,
+};
+
+const EMPTY_NEIGHBOURS: ReadonlySet<string> = new Set();

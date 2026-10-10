@@ -558,6 +558,130 @@
 }
 
 /* --------------------------------------------------------------------------
+   Insight cards — the finding model
+   -------------------------------------------------------------------------- */
+
+/*
+ * Section icons. The panel emits one class per section id, so a new section gets
+ * an icon by being declared rather than by remembering to add a rule here.
+ */
+.enhanced-graph-icon-suggested,
+.enhanced-graph-icon-structure,
+.enhanced-graph-icon-gaps,
+.enhanced-graph-icon-trends {
+  display: inline-flex;
+  height: 13px;
+}
+
+.enhanced-graph-icon-suggested {
+  color: var(--color-blue, #60a5fa);
+}
+
+.enhanced-graph-icon-structure {
+  color: var(--color-purple, #c084fc);
+}
+
+.enhanced-graph-icon-gaps {
+  color: var(--color-orange, #fb923c);
+}
+
+.enhanced-graph-icon-trends {
+  color: var(--color-green, #4ade80);
+}
+
+/* "N new since last visit" — quiet enough not to compete with the cards. */
+.enhanced-graph-section-new {
+  margin-left: 6px;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-accent);
+}
+
+/*
+ * Confidence and effort badges.
+ *
+ * Both are bands, not numbers: the plan measured that a reader cannot tell 2.41
+ * from 2.37, so the card states a band and the two badges are deliberately
+ * similar in weight — confidence says how strong the evidence is, effort says how
+ * much work acting on it is, and neither should shout louder than the title.
+ */
+.enhanced-graph-card-badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.enhanced-graph-badge {
+  padding: 0 5px;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+  font-size: 10px;
+  line-height: 16px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.enhanced-graph-confidence.is-strong {
+  border-color: var(--color-green, #4ade80);
+  color: var(--color-green, #4ade80);
+}
+
+.enhanced-graph-confidence.is-weak {
+  opacity: 0.7;
+}
+
+/* Effort is a hint, never a warning: the cheapest cards are the ones to do first. */
+.enhanced-graph-effort.is-one-click {
+  color: var(--text-accent);
+}
+
+.enhanced-graph-effort.is-write {
+  opacity: 0.7;
+}
+
+/*
+ * Evidence lines.
+ *
+ * `evidence-list` is a block so the lines stack; `evidence-nodes` is inline so a
+ * resolved page name sits on the same line as the claim it supports. The hub
+ * marker is the one thing here allowed to draw the eye: the plan measured that a
+ * local-index ranking is overwhelmingly routed through index pages, so an obvious
+ * pair must not be able to read as a discovery.
+ */
+.enhanced-graph-evidence-list {
+  display: block;
+}
+
+.enhanced-graph-evidence {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.enhanced-graph-evidence-nodes {
+  color: var(--text-normal);
+}
+
+.enhanced-graph-evidence-omitted {
+  color: var(--text-faint);
+}
+
+.enhanced-graph-evidence-hub {
+  color: var(--color-orange, #fb923c);
+}
+
+/* The action button is the point of the card, so it reads as a control. */
+.enhanced-graph-card-action {
+  font-size: 11px;
+}
+
+.enhanced-graph-card-action[disabled] {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* --------------------------------------------------------------------------
    Filters
    -------------------------------------------------------------------------- */
 

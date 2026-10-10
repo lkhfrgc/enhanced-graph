@@ -576,7 +576,10 @@ async function main() {
     );
 
     // --- 8. insights panel + click-to-highlight ---------------------------
-    // One button per group, and the cards of the chosen one below it.
+    // One button per populated section, and the cards of the chosen one below it.
+    // The section ids and their labels come from the finding model
+    // (`core/insights/model.ts`): the old order was 惊奇连接 / 知识空白, and the
+    // suggested group now leads because it holds the highest-confidence cards.
     const insightTabs = await page.evaluate(() =>
       [...document.querySelectorAll(".enhanced-graph-panel-tabs button")].map((el) => el.textContent ?? ""),
     );
@@ -589,21 +592,21 @@ async function main() {
       gaps: document.querySelectorAll(".enhanced-graph-card").length,
     }));
     // Back to the first group: the checks below click a connection card.
-    await selectPanelTab(page, "惊奇连接");
+    await selectPanelTab(page, "建议连接");
     const panel = {
       count: connectionCards + gapCards.count,
       titles: [],
       sections: insightTabs,
     };
     check(
-      "insights panel switches between connection and gap cards by tab",
+      "insights panel switches between suggested and gap cards by tab",
       insightTabs.length >= 2 &&
-        insightTabs.some((text) => text.includes("惊奇连接")) &&
+        insightTabs.some((text) => text.includes("建议连接")) &&
         insightTabs.some((text) => text.includes("知识空白")) &&
         connectionCards >= 1 &&
         gapCards.count >= 1 &&
         panel.count >= 4,
-      `tabs: ${insightTabs.join(" / ")}; ${connectionCards} connection + ${gapCards.count} gap cards`,
+      `tabs: ${insightTabs.join(" / ")}; ${connectionCards} suggested + ${gapCards.count} gap cards`,
     );
 
     // Regression guard: the panel header lives in the SAME element the insight

@@ -17,6 +17,10 @@
  */
 import "./dom-polyfill";
 import type { GraphInsights } from "../src/core/insights";
+import { pairFinding, type Finding } from "../src/core/insights/model";
+import { buildBundle } from "../src/core/insights/sections";
+import { rankFindings } from "../src/core/insights/ranking";
+import { edgeKey } from "../src/core/graph-keys";
 import { OfficialGraphEnhancer } from "../src/integrate/official-graph";
 import type { FolderInfo, GraphNode, PageType, WikiGraph } from "../src/types";
 import { DEFAULT_RELEVANCE_WEIGHTS } from "../src/types";
@@ -79,24 +83,42 @@ const graph: WikiGraph = {
   ],
   builtAt: 1,
 };
-const insights: GraphInsights = {
+const insights: GraphInsights = (() => {
   // Enough cards that the insights tab is taller than the panel can be: the
-  // ceiling is only measurable when something actually reaches it.
-  connections: Array.from({ length: 6 }, (_, index) => {
-    const left = nodes[index * 2];
-    const right = nodes[index * 2 + 1];
-    return {
-      key: `${left.id}:::${right.id}`,
-      source: left,
-      target: right,
-      score: 9 - index,
-      weight: 4,
-      reasons: ["cross-community"],
-      contributions: { "cross-community": 4 },
-    };
-  }),
-  gaps: [],
-};
+  // ceiling is only measurable when something actually reaches it. Built through
+  // the real model so the panel renders exactly what the engine emits — a
+  // hand-written bundle would let this height check measure a shape nothing
+  // produces.
+  const findings: Finding[] = Array.from({ length: 6 }, (_, index) => {
+    const left = nodes[index * 2]!;
+    const right = nodes[index * 2 + 1]!;
+    return pairFinding({
+      kind: "existing-link",
+      analyser: "connections",
+      a: left.id,
+      b: right.id,
+      titleKey: "insights.finding.existing-link",
+      titleParams: { a: left.label, b: right.label },
+      init: {
+        evidence: [
+          {
+            kind: "shared-neighbour",
+            labelKey: "reason.evidence.shared-neighbour",
+            params: { count: 3, omitted: 0, maxDegree: 4 },
+            contribution: 3,
+          },
+        ],
+        anchors: { nodeIds: [left.id, right.id], edgeKeys: [edgeKey(left.id, right.id)] },
+        score: 9 - index,
+        severity: 1,
+        effort: "one-click",
+        action: { kind: "open-notes", nodeIds: [left.id, right.id] },
+      },
+    });
+  });
+  const bundle = buildBundle(rankFindings(findings, new Map()).ranked);
+  return { connections: [], gaps: [], bundle };
+})();
 
 interface FakeOfficialNode {
   id: string;

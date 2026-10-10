@@ -18,12 +18,13 @@ import {
   type WikiGraph,
 } from "./types";
 import { buildWikiGraph } from "./core/graph-builder";
+import { GraphCache } from "./core/graph-cache";
 import { analyzeGraph, type GraphInsights } from "./core/insights";
 import type { VaultAdapter } from "./core/vault";
 import { GRAPH_MENU_SOURCE, OfficialGraphEnhancer, probeOfficialGraph } from "./integrate/official-graph";
 import { captureOfficialLayout } from "./integrate/official-layout";
 import { hasOfficialGraphView } from "./integrate/official-internals";
-import type { PluginHost, SettingsHost } from "./plugin-host";
+import type { GraphSnapshot, PluginHost, SettingsHost } from "./plugin-host";
 import type { ExternalLayout, LayoutSource } from "./view/layout";
 import { ObsidianVaultAdapter } from "./vault-adapter";
 import { INSIGHTS_REPORT_PATH, buildInsightsReport, buildRelevanceReport } from "./reports";
@@ -31,13 +32,32 @@ import { INSIGHTS_REPORT_PATH, buildInsightsReport, buildRelevanceReport } from 
 /** How long to wait after the last vault edit before rebuilding. */
 const REBUILD_DEBOUNCE_MS = 1200;
 
+/**
+ * What a cold cache reads as: before the first build has finished, and between a
+ * rebuild request and the rebuild itself. Shared and frozen, because the enhancer
+ * may read this accessor many times per pass and has no business writing to it.
+ */
+const EMPTY_INSIGHTS: GraphInsights = Object.freeze({ connections: [], gaps: [] });
+
 export default class EnhancedGraphPlugin extends Plugin implements PluginHost, SettingsHost {
   settings: EnhancedGraphSettings = { ...DEFAULT_SETTINGS };
 
   private vaultAdapter!: VaultAdapter;
-  private cachedGraph: WikiGraph = EMPTY_GRAPH;
-  private cachedInsights: GraphInsights = { connections: [], gaps: [] };
-  private buildPromise: Promise<{ graph: WikiGraph; insights: GraphInsights }> | null = null;
+
+  /**
+   * The graph and its insights. Everything that needs either of them goes
+   * through this: one build is shared by every concurrent caller, reused by every
+   * later one until a rebuild is requested, and the insights can be recomputed
+   * from it without reading the vault again.
+   */
+  private readonly cache = new GraphCache<WikiGraph, GraphInsights>({
+    build: (onProgress) => this.readGraph(onProgress),
+    analyze: (graph) => analyzeGraph(graph),
+    // A request advances the generation and lands here; the debounce is
+    // deliberately NOT applied to it — an explicit rebuild is immediate.
+    onRequest: () => this.scheduleRebuild(0),
+  });
+
   private rebuildTimer: number | null = null;
   private views = new Set<EnhancedGraphView>();
   private officialGraph: OfficialGraphEnhancer | null = null;
@@ -127,7 +147,15 @@ export default class EnhancedGraphPlugin extends Plugin implements PluginHost, S
     this.addSettingTab(new EnhancedGraphSettingTab(this.app, this));
 
     // Vault changes invalidate the graph; debounce so a typing burst is cheap.
-    const schedule = () => this.scheduleRebuild();
+    // The invalidation happens here rather than in the rebuild itself, and it
+    // deliberately does not fire `onRequest`: this path owns its own debounce, so
+    // asking the cache to schedule would replace 1200 ms with one rebuild per
+    // keystroke. Without the invalidation the debounced rebuild would find a
+    // fresh cache and change nothing.
+    const schedule = () => {
+      this.cache.invalidate({ request: false });
+      this.scheduleRebuild();
+    };
     this.registerEvent(this.app.vault.on("modify", schedule));
     this.registerEvent(this.app.vault.on("create", schedule));
     this.registerEvent(this.app.vault.on("delete", schedule));
@@ -167,6 +195,8 @@ export default class EnhancedGraphPlugin extends Plugin implements PluginHost, S
     this.officialGraph?.stop();
     this.officialGraph = null;
     this.views.clear();
+    // A build still running must not repopulate a cache nobody owns any more.
+    this.cache.reset();
   }
 
   async loadSettings(): Promise<void> {
@@ -430,10 +460,7 @@ export default class EnhancedGraphPlugin extends Plugin implements PluginHost, S
   }
 
   requestGraphRebuild(notify = false): void {
-    this.cachedGraph = EMPTY_GRAPH;
-    this.cachedInsights = { connections: [], gaps: [] };
-    this.buildPromise = null;
-    this.scheduleRebuild(0);
+    this.cache.invalidate();
     if (notify) new Notice(t("status.building"));
   }
 
@@ -448,12 +475,12 @@ export default class EnhancedGraphPlugin extends Plugin implements PluginHost, S
   /**
    * Hand a finished rebuild to every open graph.
    *
-   * The build comes first, and is awaited for everything that follows. A rebuild
-   * request empties the cached graph, and the built-in graph has no view of ours to
-   * trigger a new one: refreshing it against the emptied cache gave it nothing to
-   * colour by and nothing to list in its panel — the graph filtered correctly,
-   * because that part reads payload paths, but its nodes lost their community
-   * colours and the workspace fields lost their folder suggestions.
+   * The build comes first, and is awaited for everything that follows: the
+   * built-in graph has no view of ours to trigger a new one, so it is only ever
+   * refreshed against a finished cache. Refreshing it against an emptied one gave
+   * it nothing to colour by and nothing to list in its panel — the graph filtered
+   * correctly, because that part reads payload paths, but its nodes lost their
+   * community colours and the workspace fields lost their folder suggestions.
    */
   private async applyRebuiltGraph(): Promise<void> {
     await this.getGraph();
@@ -465,42 +492,46 @@ export default class EnhancedGraphPlugin extends Plugin implements PluginHost, S
   // Graph building
   // -------------------------------------------------------------------------
 
-  /** Cached graph build. Concurrent callers share one build. */
-  async getGraph(onProgress?: (done: number, total: number) => void): Promise<{
-    graph: WikiGraph;
-    insights: GraphInsights;
-  }> {
-    if (this.buildPromise) return this.buildPromise;
-
-    const build = (async () => {
-      const graph = await buildWikiGraph({
-        vault: this.vaultAdapter,
-        workingFolder: this.settings.workingFolder,
-        excludeFolders: this.settings.excludeFolders,
-        resolution: this.settings.resolution,
-        weights: this.settings.weights,
-        // Re-using the previous community ids keeps cluster colours stable
-        // across rebuilds instead of reshuffling them on every file save.
-        previousCommunities: this.cachedGraph.communities,
-        onProgress,
-      });
-      const insights = analyzeGraph(graph);
-      this.cachedGraph = graph;
-      this.cachedInsights = insights;
-      return { graph, insights };
-    })();
-
-    this.buildPromise = build;
-    try {
-      return await build;
-    } finally {
-      // A failed build must not be cached forever.
-      this.buildPromise = null;
-    }
+  /**
+   * The graph and its insights, built on first use. Concurrent callers share one
+   * build, and callers that arrive after it get the same pair back — which is what
+   * keeps the N open views that reload behind `applyRebuiltGraph` from each
+   * costing another vault read.
+   */
+  getGraph(onProgress?: (done: number, total: number) => void): Promise<GraphSnapshot> {
+    return this.cache.getGraph(onProgress);
   }
 
-  get cached(): { graph: WikiGraph; insights: GraphInsights } {
-    return { graph: this.cachedGraph, insights: this.cachedInsights };
+  /**
+   * The vault read behind the cache.
+   *
+   * `previousCommunities` comes from the cache's last successful graph, which
+   * survives a rebuild request — that is what keeps cluster ids, and therefore
+   * colours, stable across one. An empty cache passes none at all, which is the
+   * same thing as passing the empty graph's (empty) community list: the builder
+   * skips the remap for a list of length zero.
+   */
+  private readGraph(onProgress?: (done: number, total: number) => void): Promise<WikiGraph> {
+    return buildWikiGraph({
+      vault: this.vaultAdapter,
+      workingFolder: this.settings.workingFolder,
+      excludeFolders: this.settings.excludeFolders,
+      resolution: this.settings.resolution,
+      weights: this.settings.weights,
+      previousCommunities: this.cache.cached?.graph.communities,
+      onProgress,
+    });
+  }
+
+  /**
+   * The last successful build, synchronously — the built-in graph reads this once
+   * per pass. A cold cache reads as the empty graph and no insights, exactly what
+   * this accessor returned before it was backed by one.
+   */
+  get cached(): GraphSnapshot {
+    const cached = this.cache.cached;
+    if (!cached) return { graph: EMPTY_GRAPH, insights: EMPTY_INSIGHTS };
+    return { graph: cached.graph, insights: cached.insights ?? EMPTY_INSIGHTS };
   }
 
   // -------------------------------------------------------------------------

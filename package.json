@@ -16,6 +16,7 @@
     "build:ci": "node esbuild.config.mjs production",
     "build:vault": "node esbuild.config.mjs production --vault",
     "dev": "node esbuild.config.mjs --watch --vault",
+    "eval:insights": "node node_modules/esbuild/bin/esbuild scripts/insight-eval.ts --bundle --platform=node --format=cjs --outfile=scripts/insight-eval.cjs --log-level=warning && node scripts/insight-eval.cjs",
     "eval:stability": "node node_modules/esbuild/bin/esbuild scripts/stability-eval.ts --bundle --platform=node --format=cjs --outfile=scripts/stability-eval.cjs --log-level=warning && node scripts/stability-eval.cjs",
     "eval:weights": "node node_modules/esbuild/bin/esbuild scripts/weight-eval.ts --bundle --platform=node --format=cjs --outfile=scripts/weight-eval.cjs --log-level=warning && node scripts/weight-eval.cjs",
     "harness": "node esbuild.config.mjs harness",

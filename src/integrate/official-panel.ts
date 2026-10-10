@@ -17,10 +17,11 @@ import { isEditingWithin } from "./dom-focus";
 import { setIcon } from "obsidian";
 
 import type { GraphInsights } from "../core/insights";
+import { EMPTY_BUNDLE } from "../core/insights/model";
 import type { OfficialGraphMode, WikiGraph } from "../types";
 import { t } from "../i18n";
 import { colourRow } from "../view/controls";
-import { type InsightSection, renderInsightsPanel } from "../view/insights-panel";
+import { type InsightSectionId, renderInsightsPanel } from "../view/insights-panel";
 
 /** Hop budgets offered for a focused pair; mirrors the standalone view's list. */
 const FOCUS_INTERMEDIATE_CHOICES = [0, 1, 2, 3] as const;
@@ -86,7 +87,7 @@ export class OfficialSidePanel {
   /** The node ids the insights cards should mark as active. */
   private activeNodeIds: ReadonlySet<string> = new Set();
   /** Card group the user is looking at; see `InsightSection`. */
-  private insightSection: InsightSection = "connections";
+  private insightSection: InsightSectionId = "suggested";
 
   constructor(
     private readonly container: HTMLElement,
@@ -265,7 +266,7 @@ export class OfficialSidePanel {
     const insightsEl = panel.createDiv({ cls: "enhanced-graph-official-insights" });
     renderInsightsPanel(insightsEl, {
       graph,
-      insights,
+      bundle: insights.bundle ?? EMPTY_BUNDLE,
       dismissed,
       showDismissed: false,
       activeNodeIds: this.activeNodeIds,

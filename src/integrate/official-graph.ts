@@ -24,6 +24,7 @@
 
 import { App, Menu, Notice, TFile, WorkspaceLeaf } from "obsidian";
 import type { GraphInsights } from "../core/insights";
+import { EMPTY_BUNDLE } from "../core/insights/model";
 import { edgeKey, edgeKeyEndpoints } from "../core/graph-keys";
 import { findConnectingPaths } from "../core/paths";
 import { type FilterSection, renderFilters } from "../view/graph-filters";
@@ -931,7 +932,11 @@ export class OfficialGraphEnhancer {
         return mode === "off" ? "custom" : mode;
       },
       searchQuery: () => this.searchQuery,
-      insightCount: () => countUndismissed(this.deps.getData().insights, new Set(this.deps.getDismissed())),
+      insightCount: () =>
+        countUndismissed(
+          this.deps.getData().insights.bundle ?? EMPTY_BUNDLE,
+          new Set(this.deps.getDismissed()),
+        ),
       panel: () => this.panelMode,
       onColorMode: (mode) => {
         if (mode === "custom") return;

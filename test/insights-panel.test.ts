@@ -7,6 +7,15 @@
  * DOM builder: it only ever creates children of the container it is handed and
  * never touches `document`, so nothing has to be installed on `globalThis`.
  *
+ * Fixtures are built through the real `core/insights` model and grouped with the
+ * real `buildBundle`, never as a hand-written `sections` array: the panel's whole
+ * claim is that it renders whatever the engine declares, and a fixture that
+ * pre-computed the grouping by hand would keep passing after the grouping broke.
+ *
+ * Assertions read real `t()` output. That is deliberate — a card whose key is
+ * missing renders the key itself, and only a comparison against the dictionary
+ * catches that.
+ *
  * Icons are routed through `setIconImpl`: a recorder replaces the aliased
  * Obsidian `setIcon` so every glyph can be asserted, and one test omits it to
  * prove the real default is still wired up.
@@ -16,20 +25,31 @@ import { describe, expect, it } from "vitest";
 
 import type {
   CommunityInfo,
-  ConnectionReason,
-  GapType,
   GraphEdge,
   GraphNode,
-  CoverageGap,
   PageType,
-  UnexpectedLink,
   WikiGraph,
 } from "../src/types";
-import { connectionKey, type GraphInsights } from "../src/core/insights";
 import { t } from "../src/i18n";
+import { edgeKey } from "../src/core/graph-keys";
+import { countUndismissed as countUndismissedInBundle } from "../src/core/insights/sections";
+import {
+  documentFinding,
+  pairFinding,
+  type Confidence,
+  type Effort,
+  type Evidence,
+  type Finding,
+  type FindingKind,
+  type InsightBundle,
+  type InsightAction,
+  type Severity,
+} from "../src/core/insights/model";
+import { buildBundle } from "../src/core/insights/sections";
 import {
   connectionEdgeKey,
   countUndismissed,
+  HUB_DEGREE_WARNING,
   renderInsightsPanel,
   type InsightsPanelOptions,
 } from "../src/view/insights-panel";
@@ -74,6 +94,7 @@ class FakeElement {
 
   className = "";
   title = "";
+  disabled = false;
   /** Written by the aliased Obsidian `setIcon` stub. */
   innerHTML = "";
 
@@ -173,6 +194,10 @@ class FakeElement {
   }
 
   click(): void {
+    // A disabled button dispatches no click at all. Without this the fake tree
+    // would bubble the event to the card and report a focus the browser would
+    // never perform.
+    if (this.disabled) return;
     this.dispatchEvent(new FakeEvent("click"));
   }
 }
@@ -210,15 +235,19 @@ function dismissButton(card: FakeElement): FakeElement {
   return one(one(card, "enhanced-graph-card-head"), "enhanced-graph-link");
 }
 
+/** The panel's show-dismissed / reset toggle: a direct child link button. */
+function toggleButton(container: FakeElement): FakeElement | undefined {
+  return directByClass(container, "enhanced-graph-link")[0];
+}
+
 // ---------------------------------------------------------------------------
-// Fixtures
+// Graph fixtures
 // ---------------------------------------------------------------------------
 
 interface NodeOverrides {
   readonly id: string;
   readonly label?: string;
   readonly type?: PageType;
-  readonly community?: number;
   readonly linkCount?: number;
 }
 
@@ -233,53 +262,10 @@ function makeNode(overrides: NodeOverrides): GraphNode {
     vaultLinkCount: overrides.linkCount ?? 0,
     inLinks: overrides.linkCount ?? 0,
     outLinks: 0,
-    community: overrides.community ?? 0,
+    community: 0,
     sources: [],
     tags: [],
     isStructural: false,
-  };
-}
-
-interface ConnectionOverrides {
-  readonly weight?: number;
-  readonly score?: number;
-  readonly reasons?: readonly ConnectionReason[];
-  readonly contributions?: Readonly<Partial<Record<ConnectionReason, number>>>;
-}
-
-function makeConnection(
-  source: GraphNode,
-  target: GraphNode,
-  overrides: ConnectionOverrides = {},
-): UnexpectedLink {
-  return {
-    key: connectionKey(source.id, target.id),
-    source,
-    target,
-    score: overrides.score ?? 5,
-    weight: overrides.weight ?? 4.25,
-    reasons: overrides.reasons ?? ["cross-community"],
-    contributions: overrides.contributions ?? { "cross-community": 3 },
-  };
-}
-
-interface GapOverrides {
-  readonly key?: string;
-  readonly type?: GapType;
-  readonly title?: string;
-  readonly description?: string;
-  readonly suggestion?: string;
-  readonly nodeIds?: readonly string[];
-}
-
-function makeGap(overrides: GapOverrides = {}): CoverageGap {
-  return {
-    key: overrides.key ?? "gap:isolated-node:孤立页面:alpha,beta",
-    type: overrides.type ?? "isolated",
-    title: overrides.title ?? "2 个孤立页面",
-    description: overrides.description ?? "Alpha、Beta",
-    suggestion: overrides.suggestion ?? "建议补充 [[wikilinks]]。",
-    nodeIds: overrides.nodeIds ?? ["alpha", "beta"],
   };
 }
 
@@ -301,6 +287,121 @@ const BETA = makeNode({ id: "beta", label: "Beta", type: "concept", linkCount: 4
 const GAMMA = makeNode({ id: "gamma", label: "Gamma", type: "query", linkCount: 2 });
 const GRAPH = makeGraph([ALPHA, BETA, GAMMA]);
 
+// ---------------------------------------------------------------------------
+// Finding fixtures — built through the real model
+// ---------------------------------------------------------------------------
+
+/** An evidence line, with the model's strongest-first order left to the model. */
+function evidence(init: Partial<Evidence> & { readonly contribution: number }): Evidence {
+  return {
+    kind: init.kind ?? "shared-neighbour",
+    labelKey: init.labelKey ?? "reason.evidence.shared-neighbour",
+    params: init.params ?? {},
+    contribution: init.contribution,
+    ...(init.nodeIds ? { nodeIds: init.nodeIds } : {}),
+  };
+}
+
+interface PairOverrides {
+  readonly kind?: FindingKind;
+  readonly a?: string;
+  readonly b?: string;
+  readonly labels?: readonly [string, string];
+  readonly evidence?: readonly Evidence[];
+  readonly confidence?: Confidence;
+  readonly effort?: Effort;
+  readonly severity?: Severity;
+  readonly action?: InsightAction;
+  /** Whether the anchors carry the pair's canonical edge key. */
+  readonly withEdge?: boolean;
+}
+
+/** A connection-shaped finding: two pages, and one edge key by default. */
+function makePair(overrides: PairOverrides = {}): Finding {
+  const a = overrides.a ?? ALPHA.id;
+  const b = overrides.b ?? BETA.id;
+  const [labelA, labelB] = overrides.labels ?? ["Alpha", "Beta"];
+  const withEdge = overrides.withEdge ?? true;
+  return pairFinding({
+    kind: overrides.kind ?? "existing-link",
+    analyser: "test-pairs",
+    a,
+    b,
+    titleKey: "insights.finding.existing-link",
+    titleParams: { a: labelA, b: labelB },
+    init: {
+      evidence: overrides.evidence ?? [evidence({ contribution: 3 })],
+      anchors: { nodeIds: [a, b], edgeKeys: withEdge ? [edgeKey(a, b)] : [] },
+      score: 0.8,
+      confidence: overrides.confidence ?? "strong",
+      severity: overrides.severity ?? 2,
+      effort: overrides.effort ?? "one-click",
+      ...(overrides.action ? { action: overrides.action } : {}),
+    },
+  });
+}
+
+interface NodeOverridesFinding {
+  readonly kind?: FindingKind;
+  readonly id?: string;
+  readonly name?: string;
+  readonly evidence?: readonly Evidence[];
+  readonly confidence?: Confidence;
+  readonly effort?: Effort;
+  readonly severity?: Severity;
+  readonly action?: InsightAction;
+}
+
+/** A page-shaped finding, titled through the `{name}` keys. */
+function makeNodeFinding(overrides: NodeOverridesFinding = {}): Finding {
+  const id = overrides.id ?? GAMMA.id;
+  return documentFinding({
+    kind: overrides.kind ?? "isolated",
+    analyser: "test-nodes",
+    nodeId: id,
+    titleKey: "insights.finding.isolated",
+    titleParams: { count: 1 },
+    severity: overrides.severity ?? 3,
+    effort: overrides.effort ?? "edit",
+    init: {
+      evidence: overrides.evidence ?? [evidence({ contribution: 2 })],
+      anchors: { nodeIds: [id], edgeKeys: [] },
+      score: 0.5,
+      confidence: overrides.confidence ?? "moderate",
+      ...(overrides.action ? { action: overrides.action } : {}),
+    },
+  });
+}
+
+/** The bundle the panel renders, grouped by the real `buildBundle`. */
+function makeBundle(
+  findings: readonly Finding[],
+  options: { readonly previous?: InsightBundle } = {},
+): InsightBundle {
+  return buildBundle(findings, {
+    ...(options.previous ? { previous: options.previous } : {}),
+  });
+}
+
+/**
+ * A bundle holding `findings`.
+ *
+ * Dismissal is no longer part of the bundle — it is applied by the panel against
+ * the live key set, because the bundle is cached while a dismissal only writes
+ * settings. A dismissal test therefore passes `dismissed` to `render()`, and the
+ * `dismissed` argument here exists only so existing call sites keep compiling.
+ */
+function bundleOf(
+  findings: readonly Finding[],
+  _dismissed: readonly string[] = [],
+): InsightBundle {
+  return makeBundle(findings);
+}
+
+// ---------------------------------------------------------------------------
+// Panel harness
+// ---------------------------------------------------------------------------
+
 interface FocusCall {
   readonly ids: readonly string[];
   readonly edges: readonly string[];
@@ -309,6 +410,11 @@ interface FocusCall {
 interface DismissCall {
   readonly key: string;
   readonly ids: readonly string[];
+}
+
+interface ActionCall {
+  readonly action: InsightAction;
+  readonly finding: Finding;
 }
 
 interface IconCall {
@@ -320,6 +426,7 @@ interface PanelFixture {
   readonly container: FakeElement;
   readonly focusCalls: FocusCall[];
   readonly dismissCalls: DismissCall[];
+  readonly actionCalls: ActionCall[];
   readonly icons: IconCall[];
   readonly toggleCount: number;
   /** Cards in document order. */
@@ -331,12 +438,13 @@ function render(overrides: Partial<InsightsPanelOptions> = {}): PanelFixture {
   const container = new FakeElement("div");
   const focusCalls: FocusCall[] = [];
   const dismissCalls: DismissCall[] = [];
+  const actionCalls: ActionCall[] = [];
   const icons: IconCall[] = [];
   let toggleCount = 0;
 
   const options: InsightsPanelOptions = {
     graph: GRAPH,
-    insights: { connections: [], gaps: [] },
+    bundle: bundleOf([]),
     dismissed: new Set(),
     showDismissed: false,
     activeNodeIds: new Set(),
@@ -355,6 +463,7 @@ function render(overrides: Partial<InsightsPanelOptions> = {}): PanelFixture {
     container,
     focusCalls,
     dismissCalls,
+    actionCalls,
     icons,
     get toggleCount() {
       return toggleCount;
@@ -381,7 +490,7 @@ describe("connectionEdgeKey", () => {
     expect(connectionEdgeKey("beta", "beta")).toBe("beta:::beta");
   });
 
-  it("matches the dismiss-key format built by core/insights", () => {
+  it("delegates to the one edge-key definition in core/graph-keys", () => {
     const pairs = [
       ["a", "b"],
       ["beta", "alpha"],
@@ -390,8 +499,7 @@ describe("connectionEdgeKey", () => {
     ] as const;
 
     for (const [a, b] of pairs) {
-      expect(connectionEdgeKey(a, b)).toBe(connectionKey(a, b));
-      expect(connectionEdgeKey(b, a)).toBe(connectionKey(a, b));
+      expect(connectionEdgeKey(a, b)).toBe(edgeKey(a, b));
     }
   });
 });
@@ -401,156 +509,280 @@ describe("connectionEdgeKey", () => {
 // ---------------------------------------------------------------------------
 
 describe("countUndismissed", () => {
-  it("returns 0 for empty insights", () => {
-    expect(countUndismissed({ connections: [], gaps: [] }, new Set())).toBe(0);
+  it("returns 0 for a bundle with nothing in it", () => {
+    expect(countUndismissed(bundleOf([]))).toBe(0);
   });
 
-  it("counts connections and gaps together", () => {
-    const insights: GraphInsights = {
-      connections: [
-        makeConnection(ALPHA, BETA),
-        makeConnection(ALPHA, GAMMA),
-        makeConnection(BETA, GAMMA),
-      ],
-      gaps: [makeGap(), makeGap({ key: "gap:bridge-node:x:gamma" })],
-    };
-
-    expect(countUndismissed(insights, new Set())).toBe(5);
+  it("counts the undismissed findings of every section", () => {
+    expect(countUndismissed(bundleOf([makePair(), makePair({ a: "alpha", b: "gamma" }), makeNodeFinding()]))).toBe(3);
   });
 
-  it("skips dismissed keys on both halves", () => {
-    const connection = makeConnection(ALPHA, BETA);
-    const gap = makeGap();
-    const insights: GraphInsights = { connections: [connection], gaps: [gap] };
+  it("counts a dismissed finding as gone, in whichever section it sits", () => {
+    const pair = makePair();
+    const node = makeNodeFinding();
+    const bundle = bundleOf([pair, node]);
 
-    expect(countUndismissed(insights, new Set([connection.key]))).toBe(1);
-    expect(countUndismissed(insights, new Set([gap.key]))).toBe(1);
-    expect(countUndismissed(insights, new Set([connection.key, gap.key]))).toBe(0);
+    // Dismissal is read live: the same bundle counted against different key sets.
+    expect(countUndismissed(bundle, new Set([pair.key]))).toBe(1);
+    expect(countUndismissed(bundle, new Set([node.key]))).toBe(1);
+    expect(countUndismissed(bundle, new Set([pair.key, node.key]))).toBe(0);
+  });
+
+  it("is the same number the bundle's own counter gives", () => {
+    // The panel's counter exists for its old callers; it must not become a
+    // second counting rule that drifts away from core/insights/sections.
+    const node = makeNodeFinding();
+    const bundle = bundleOf([makePair(), node, makePair({ a: "alpha", b: "gamma" })]);
+    const dismissed = new Set([node.key]);
+
+    expect(countUndismissed(bundle, dismissed)).toBe(countUndismissedInBundle(bundle, dismissed));
+    expect(countUndismissed(bundle, dismissed)).toBe(2);
   });
 
   it("ignores dismissed keys that match nothing in the analysis", () => {
-    const insights: GraphInsights = {
-      connections: [makeConnection(ALPHA, BETA)],
-      gaps: [],
-    };
-
     // Stale keys survive in settings after a rebuild; they must not be counted.
-    expect(countUndismissed(insights, new Set(["alpha:::gamma", "gap:gone:x:y"]))).toBe(1);
+    const bundle = bundleOf([makePair()]);
+    expect(countUndismissed(bundle, new Set(["alpha:::gamma", "gap:gone:x:y"]))).toBe(1);
   });
 });
 
 // ---------------------------------------------------------------------------
-// Connection cards
+// Data-driven titles, evidence, badges
 // ---------------------------------------------------------------------------
 
-describe("renderInsightsPanel / connection cards", () => {
-  const connection = makeConnection(ALPHA, BETA);
+describe("renderInsightsPanel / card content", () => {
+  it("renders the title through t(finding.titleKey, finding.titleParams)", () => {
+    const fixture = render({ bundle: bundleOf([makePair()]) });
 
-  function connectionPanel(overrides: Partial<InsightsPanelOptions> = {}): PanelFixture {
-    return render({ insights: { connections: [connection], gaps: [] }, ...overrides });
-  }
-
-  it("renders the 惊奇连接 section with the link-2 icon before the label", () => {
-    const fixture = connectionPanel();
-    const title = one(fixture.container, "enhanced-graph-section-title");
-
-    expect(title.children).toHaveLength(2);
-    expect(title.children[0]?.className).toBe("enhanced-graph-icon-connection");
-    expect(title.children[1]?.textContent).toBe(t("insights.connections"));
-    // The section glyph is mounted on the span itself, before the label span.
-    expect(fixture.icons[0]?.element).toBe(title.children[0]);
-    expect(fixture.icons[0]?.icon).toBe("link-2");
-  });
-
-  it("renders one card whose head carries A ↔ B and a dismiss button", () => {
-    const fixture = connectionPanel();
-    const cards = fixture.cards();
-
-    expect(cards).toHaveLength(1);
-    expect(one(cards[0] as FakeElement, "enhanced-graph-card-title").textContent).toBe("Alpha ↔ Beta");
-
-    const dismiss = dismissButton(cards[0] as FakeElement);
-    expect(dismiss.tagName).toBe("button");
-    expect(dismiss.title).toBe(t("insights.dismiss"));
-    expect(dismiss.getAttribute("aria-label")).toBe(t("insights.dismiss"));
-    expect(fixture.icons[1]?.element).toBe(dismiss);
-    expect(fixture.icons[1]?.icon).toBe("x");
-  });
-
-  it("shows the weight as a fixed-2 score value and the surprise badge", () => {
-    const fixture = connectionPanel({
-      insights: {
-        connections: [makeConnection(ALPHA, BETA, { weight: 4.25, score: 5 })],
-        gaps: [],
-      },
-    });
-    const card = fixture.cards()[0] as FakeElement;
-
-    expect(one(card, "enhanced-graph-card-score-value").textContent).toBe("4.25");
-    expect(one(card, "enhanced-graph-card-surprise").textContent).toBe("★ 5");
-    // The score row keeps the plain label as its first child, with the trailing
-    // space the renderer has always emitted.
-    const scoreRow = one(card, "enhanced-graph-card-score");
-    expect(scoreRow.children[0]?.textContent).toBe(`${t("edge.score")} `);
-  });
-
-  it("rounds the weight to two decimals the same way toFixed does", () => {
-    const fixture = connectionPanel({
-      insights: { connections: [makeConnection(ALPHA, BETA, { weight: 3 })], gaps: [] },
-    });
-
-    expect(one(fixture.cards()[0] as FakeElement, "enhanced-graph-card-score-value").textContent).toBe(
-      "3.00",
+    expect(one(fixture.cards()[0] as FakeElement, "enhanced-graph-card-title").textContent).toBe(
+      "Alpha ↔ Beta",
     );
   });
 
-  it("joins the reason texts with a full-width comma", () => {
-    const fixture = connectionPanel({
-      insights: {
-        connections: [makeConnection(ALPHA, BETA, { reasons: ["cross-community", "distant-types"] })],
-        gaps: [],
-      },
-    });
-    const meta = one(fixture.cards()[0] as FakeElement, "enhanced-graph-card-meta");
+  it("renders a node finding's title with no kind-specific branch", () => {
+    const fixture = render({ bundle: bundleOf([makeNodeFinding()]) });
 
-    expect(meta.textContent).toBe(
-      `${t("reason.cross-community")}，${t("reason.distant-types", { a: "source", b: "concept" })}`,
-    );
-    expect(meta.textContent).toContain("，");
-  });
-
-  it("halves the source-overlap contribution when naming the shared sources", () => {
-    const fixture = connectionPanel({
-      insights: {
-        connections: [
-          makeConnection(ALPHA, BETA, {
-            reasons: ["source-overlap"],
-            contributions: { "source-overlap": 5 },
-          }),
-        ],
-        gaps: [],
-      },
-    });
-
-    // 5 points of signal ÷ the 2-point weight, rounded → 3 shared sources.
-    expect(one(fixture.cards()[0] as FakeElement, "enhanced-graph-card-meta").textContent).toBe(
-      t("reason.source-overlap", { count: 3 }),
+    expect(one(fixture.cards()[0] as FakeElement, "enhanced-graph-card-title").textContent).toBe(
+      t("insights.finding.isolated", { count: 1 }),
     );
   });
 
-  it("falls back to the bare reason text when no contribution is recorded", () => {
-    const fixture = connectionPanel({
-      insights: {
-        connections: [
-          makeConnection(ALPHA, BETA, { reasons: ["weak-tie"], contributions: {} }),
-        ],
-        gaps: [],
-      },
+  it("renders at most three evidence lines, in the model's order", () => {
+    const finding = makePair({
+      evidence: [
+        evidence({ contribution: 9, nodeIds: ["alpha"] }),
+        evidence({ contribution: 8, nodeIds: ["beta"] }),
+        evidence({ contribution: 7, nodeIds: ["gamma"] }),
+        evidence({ contribution: 6, kind: "type", labelKey: "reason.evidence.type", params: { a: "source", b: "concept" } }),
+      ],
+    });
+    const fixture = render({ bundle: bundleOf([finding]) });
+    const lines = byClass(fixture.cards()[0] as FakeElement, "enhanced-graph-evidence");
+
+    expect(lines).toHaveLength(3);
+    expect(byClass(fixture.cards()[0] as FakeElement, "enhanced-graph-evidence")).toHaveLength(3);
+  });
+
+  it("names the pages an evidence line rests on, resolved from the graph", () => {
+    const finding = makePair({
+      evidence: [
+        evidence({
+          contribution: 4,
+          params: { count: 2 },
+          nodeIds: ["alpha", "gamma"],
+        }),
+      ],
+    });
+    const fixture = render({ bundle: bundleOf([finding]) });
+    const line = one(fixture.cards()[0] as FakeElement, "enhanced-graph-evidence");
+
+    expect(line.textContent).toBe(
+      `${t("reason.evidence.shared-neighbour", { count: 2 })}${t("insights.evidenceNodes", {
+        names: "[[Alpha]]、[[Gamma]]",
+      })}`,
+    );
+    expect(one(line, "enhanced-graph-evidence-nodes").textContent).toBe(
+      t("insights.evidenceNodes", { names: "[[Alpha]]、[[Gamma]]" }),
+    );
+  });
+
+  it("skips node ids the graph does not know", () => {
+    const finding = makePair({
+      evidence: [
+        evidence({ contribution: 4, nodeIds: ["alpha", "deleted-note", "gamma"] }),
+      ],
+    });
+    const line = one(render({ bundle: bundleOf([finding]) }).cards()[0] as FakeElement, "enhanced-graph-evidence");
+
+    expect(one(line, "enhanced-graph-evidence-nodes").textContent).toBe(
+      t("insights.evidenceNodes", { names: "[[Alpha]]、[[Gamma]]" }),
+    );
+  });
+
+  it("renders no page list when every id is missing from the graph", () => {
+    const finding = makePair({
+      evidence: [evidence({ contribution: 4, nodeIds: ["gone", "also-gone"] })],
+    });
+    const line = one(render({ bundle: bundleOf([finding]) }).cards()[0] as FakeElement, "enhanced-graph-evidence");
+
+    expect(byClass(line, "enhanced-graph-evidence-nodes")).toEqual([]);
+  });
+
+  it("shows the omitted count when the evidence reports one", () => {
+    const finding = makePair({
+      evidence: [evidence({ contribution: 4, params: { count: 5, omitted: 2 }, nodeIds: ["alpha"] })],
+    });
+    const line = one(render({ bundle: bundleOf([finding]) }).cards()[0] as FakeElement, "enhanced-graph-evidence");
+
+    expect(one(line, "enhanced-graph-evidence-omitted").textContent).toBe(
+      t("insights.evidenceOmitted", { count: 2 }),
+    );
+  });
+
+  it("shows no omitted marker when omitted is absent or zero", () => {
+    const absent = makePair({ evidence: [evidence({ contribution: 4, nodeIds: ["alpha"] })] });
+    const zero = makePair({
+      evidence: [evidence({ contribution: 4, params: { count: 5, omitted: 0 }, nodeIds: ["alpha"] })],
     });
 
-    expect(one(fixture.cards()[0] as FakeElement, "enhanced-graph-card-meta").textContent).toBe(
-      t("reason.weak-tie"),
+    expect(
+      byClass(one(render({ bundle: bundleOf([absent]) }).cards()[0] as FakeElement, "enhanced-graph-evidence"), "enhanced-graph-evidence-omitted"),
+    ).toEqual([]);
+    expect(
+      byClass(one(render({ bundle: bundleOf([zero]) }).cards()[0] as FakeElement, "enhanced-graph-evidence"), "enhanced-graph-evidence-omitted"),
+    ).toEqual([]);
+  });
+
+  it("warns when the strongest shared neighbour is a hub", () => {
+    const finding = makePair({
+      evidence: [evidence({ contribution: 6, params: { count: 3, maxDegree: HUB_DEGREE_WARNING }, nodeIds: ["alpha"] })],
+    });
+    const line = one(render({ bundle: bundleOf([finding]) }).cards()[0] as FakeElement, "enhanced-graph-evidence");
+    const marker = one(line, "enhanced-graph-evidence-hub");
+
+    expect(marker.textContent).toBe(t("insights.evidenceHubWarning", { degree: 20 }));
+    expect(line.textContent).toContain("⚠");
+  });
+
+  it("does not warn at degree 19 (negative control)", () => {
+    const finding = makePair({
+      evidence: [evidence({ contribution: 6, params: { count: 3, maxDegree: 19 }, nodeIds: ["alpha"] })],
+    });
+    const line = one(render({ bundle: bundleOf([finding]) }).cards()[0] as FakeElement, "enhanced-graph-evidence");
+
+    expect(byClass(line, "enhanced-graph-evidence-hub")).toEqual([]);
+    expect(line.textContent).not.toContain("⚠");
+    expect(HUB_DEGREE_WARNING).toBe(20);
+  });
+
+  it("does not warn when the evidence carries no maxDegree at all", () => {
+    const line = one(
+      render({ bundle: bundleOf([makePair()]) }).cards()[0] as FakeElement,
+      "enhanced-graph-evidence",
     );
+
+    expect(byClass(line, "enhanced-graph-evidence-hub")).toEqual([]);
+  });
+
+  it("renders the confidence and effort badges from the finding's own values", () => {
+    const strong = render({
+      bundle: bundleOf([makePair({ confidence: "strong", effort: "one-click" })]),
+    });
+    const strongCard = strong.cards()[0] as FakeElement;
+
+    expect(one(strongCard, "enhanced-graph-confidence").textContent).toBe(t("insights.confidence.strong"));
+    expect(one(strongCard, "enhanced-graph-effort").textContent).toBe(t("insights.effort.one-click"));
+
+    const weak = render({
+      bundle: bundleOf([makePair({ confidence: "weak", effort: "write" })]),
+    });
+    const weakCard = weak.cards()[0] as FakeElement;
+
+    expect(one(weakCard, "enhanced-graph-confidence").textContent).toBe(t("insights.confidence.weak"));
+    expect(one(weakCard, "enhanced-graph-effort").textContent).toBe(t("insights.effort.write"));
+  });
+
+  it("marks the badge with the state so the stylesheet can tell them apart", () => {
+    const card = render({
+      bundle: bundleOf([makePair({ confidence: "moderate", effort: "edit" })]),
+    }).cards()[0] as FakeElement;
+
+    expect(one(card, "enhanced-graph-confidence").hasClass("is-moderate")).toBe(true);
+    expect(one(card, "enhanced-graph-effort").hasClass("is-edit")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Actions
+// ---------------------------------------------------------------------------
+
+describe("renderInsightsPanel / actions", () => {
+  const insertLink: InsightAction = {
+    kind: "insert-wikilink",
+    sourceId: "alpha",
+    targetId: "beta",
+    text: "[[Beta]]",
+  };
+
+  it("labels the button by action kind and reports the click to onAction", () => {
+    const finding = makePair({ action: insertLink });
+    const fixture = render({ bundle: bundleOf([finding]), onAction: (action, subject) => fixture.actionCalls.push({ action, finding: subject }) });
+    const button = one(fixture.cards()[0] as FakeElement, "enhanced-graph-card-action");
+
+    expect(button.tagName).toBe("button");
+    expect(button.textContent).toBe(t("insights.action.insert-link"));
+    button.click();
+
+    expect(fixture.actionCalls).toEqual([{ action: insertLink, finding }]);
+  });
+
+  it("does not focus the card when the action is clicked", () => {
+    const fixture = render({
+      bundle: bundleOf([makePair({ action: insertLink })]),
+      onAction: (action, finding) => fixture.actionCalls.push({ action, finding }),
+    });
+    one(fixture.cards()[0] as FakeElement, "enhanced-graph-card-action").click();
+
+    expect(fixture.focusCalls).toEqual([]);
+    expect(fixture.actionCalls).toHaveLength(1);
+  });
+
+  it("renders the button disabled when the host wired no onAction", () => {
+    const fixture = render({ bundle: bundleOf([makePair({ action: insertLink })]) });
+    const button = one(fixture.cards()[0] as FakeElement, "enhanced-graph-card-action");
+
+    expect(button.disabled).toBe(true);
+    expect(button.title).toBe(t("insights.actionUnavailable"));
+    button.click();
+    expect(fixture.actionCalls).toEqual([]);
+    expect(fixture.focusCalls).toEqual([]);
+  });
+
+  it("renders no action button for a finding without an action", () => {
+    const fixture = render({ bundle: bundleOf([makePair()]) });
+
+    expect(byClass(fixture.cards()[0] as FakeElement, "enhanced-graph-card-action")).toEqual([]);
+  });
+
+  it("labels each action kind from the dictionary", () => {
+    const kinds: readonly InsightAction[] = [
+      { kind: "open-notes", nodeIds: ["alpha", "beta"] },
+      { kind: "create-moc", nodeIds: ["alpha"], suggestedTitle: "Index" },
+      { kind: "open-report" },
+    ];
+    const expected = [
+      t("insights.action.open-notes"),
+      t("insights.action.create-moc"),
+      t("insights.action.copy"),
+    ];
+
+    for (const [index, action] of kinds.entries()) {
+      const finding = makePair({ action });
+      const fixture = render({ bundle: bundleOf([finding]), onAction: () => {} });
+      expect(one(fixture.cards()[0] as FakeElement, "enhanced-graph-card-action").textContent).toBe(
+        expected[index],
+      );
+    }
   });
 });
 
@@ -559,17 +791,12 @@ describe("renderInsightsPanel / connection cards", () => {
 // ---------------------------------------------------------------------------
 
 describe("renderInsightsPanel / active card detection", () => {
-  const connection = makeConnection(ALPHA, BETA);
-
   function cardWithActive(activeNodeIds: readonly string[]): FakeElement {
-    const fixture = render({
-      insights: { connections: [connection], gaps: [] },
-      activeNodeIds: new Set(activeNodeIds),
-    });
-    return fixture.cards()[0] as FakeElement;
+    return render({ bundle: bundleOf([makePair()]), activeNodeIds: new Set(activeNodeIds) })
+      .cards()[0] as FakeElement;
   }
 
-  it("marks the card active only when the ids match exactly", () => {
+  it("marks a pair card active only when the ids match exactly", () => {
     expect(cardWithActive(["alpha", "beta"]).hasClass("is-active-connection")).toBe(true);
     // Order of the highlight set must not matter.
     expect(cardWithActive(["beta", "alpha"]).hasClass("is-active-connection")).toBe(true);
@@ -589,9 +816,20 @@ describe("renderInsightsPanel / active card detection", () => {
     expect(cardWithActive(["alpha", "gamma"]).hasClass("is-active-connection")).toBe(false);
   });
 
+  it("marks a node finding with the gap class, not the connection class", () => {
+    const fixture = render({
+      bundle: bundleOf([makeNodeFinding({ id: "gamma" })]),
+      activeNodeIds: new Set(["gamma"]),
+    });
+    const card = fixture.cards()[0] as FakeElement;
+
+    expect(card.hasClass("is-active-gap")).toBe(true);
+    expect(card.hasClass("is-active-connection")).toBe(false);
+  });
+
   it("toggles focus off when the active card is clicked", () => {
     const fixture = render({
-      insights: { connections: [connection], gaps: [] },
+      bundle: bundleOf([makePair()]),
       activeNodeIds: new Set(["alpha", "beta"]),
     });
     (fixture.cards()[0] as FakeElement).click();
@@ -599,89 +837,244 @@ describe("renderInsightsPanel / active card detection", () => {
     expect(fixture.focusCalls).toEqual([{ ids: [], edges: [] }]);
   });
 
-  it("focuses both nodes and exactly one edge key when an inactive card is clicked", () => {
-    const fixture = render({ insights: { connections: [connection], gaps: [] } });
+  it("focuses both nodes and exactly one edge key when an inactive pair card is clicked", () => {
+    const fixture = render({ bundle: bundleOf([makePair()]) });
     (fixture.cards()[0] as FakeElement).click();
 
     expect(fixture.focusCalls).toEqual([{ ids: ["alpha", "beta"], edges: ["alpha:::beta"] }]);
   });
 
-  it("dismisses with the card's key and leaves the focus alone", () => {
-    const fixture = render({ insights: { connections: [connection], gaps: [] } });
-    const dismiss = one(fixture.cards()[0] as FakeElement, "enhanced-graph-link");
-    dismiss.click();
+  it("focuses nodes only for a node finding", () => {
+    const fixture = render({ bundle: bundleOf([makeNodeFinding({ id: "gamma" })]) });
+    (fixture.cards()[0] as FakeElement).click();
+
+    expect(fixture.focusCalls).toEqual([{ ids: ["gamma"], edges: [] }]);
+  });
+
+  it("offers no edge key for a pair finding whose anchors carry none", () => {
+    // The panel decides "connection-shaped" from the anchors, so a kind that
+    // names two pages but no edge must not invent one.
+    const fixture = render({ bundle: bundleOf([makePair({ withEdge: false })]) });
+    (fixture.cards()[0] as FakeElement).click();
+
+    expect(fixture.focusCalls).toEqual([{ ids: ["alpha", "beta"], edges: [] }]);
+  });
+
+  it("dismisses with the card's key and its node ids, without focusing", () => {
+    const finding = makePair();
+    const fixture = render({ bundle: bundleOf([finding]) });
+    dismissButton(fixture.cards()[0] as FakeElement).click();
 
     expect(fixture.focusCalls).toEqual([]);
-    expect(fixture.dismissCalls).toEqual([{ key: "alpha:::beta", ids: ["alpha", "beta"] }]);
+    expect(fixture.dismissCalls).toEqual([{ key: finding.key, ids: ["alpha", "beta"] }]);
+  });
+
+  it("marks a card both active and dismissed at once", () => {
+    const finding = makePair();
+    const fixture = render({
+      bundle: bundleOf([finding]),
+      dismissed: new Set([finding.key]),
+      showDismissed: true,
+      activeNodeIds: new Set(["alpha", "beta"]),
+    });
+
+    expect(fixture.cards()[0]?.className).toBe(
+      "enhanced-graph-card is-active-connection is-dismissed",
+    );
   });
 });
 
 // ---------------------------------------------------------------------------
-// Gap cards
+// Sections and tabs
 // ---------------------------------------------------------------------------
 
-describe("renderInsightsPanel / gap cards", () => {
-  const gap = makeGap();
+describe("renderInsightsPanel / sections", () => {
+  const pair = makePair();
+  const node = makeNodeFinding();
 
-  function gapPanel(overrides: Partial<InsightsPanelOptions> = {}): PanelFixture {
-    return render({ insights: { connections: [], gaps: [gap] }, ...overrides });
-  }
+  it("offers one tab per populated section, with its undismissed count", () => {
+    const chosen: string[] = [];
+    const fixture = render({
+      bundle: bundleOf([pair, node]),
+      onSelectSection: (section) => chosen.push(section),
+    });
+    const tabs = byClass(fixture.container, "enhanced-graph-button");
 
-  it("renders the 知识空白 section with the alert-triangle icon", () => {
-    const fixture = gapPanel();
-    const title = one(fixture.container, "enhanced-graph-section-title");
+    expect(tabs.map((tab) => tab.textContent)).toEqual([
+      `${t("insights.section.suggested")} (1)`,
+      `${t("insights.section.gaps")} (1)`,
+    ]);
+    expect(tabs[0]?.hasClass("is-active")).toBe(true);
+    expect(tabs[1]?.hasClass("is-active")).toBe(false);
 
-    expect(title.children[0]?.className).toBe("enhanced-graph-icon-gap");
-    expect(title.children[1]?.textContent).toBe(t("insights.gaps"));
-    expect(fixture.icons[0]?.icon).toBe("alert-triangle");
+    tabs[0]?.click();
+    tabs[1]?.click();
+    expect(chosen).toEqual(["suggested", "gaps"]);
   });
 
-  it("renders the title, description and suggestion", () => {
-    const card = gapPanel().cards()[0] as FakeElement;
+  it("offers no tab for a section the bundle leaves out", () => {
+    const fixture = render({
+      bundle: bundleOf([node]),
+      activeSection: "suggested",
+      onSelectSection: () => {},
+    });
+    const tabs = byClass(fixture.container, "enhanced-graph-button");
 
-    expect(one(card, "enhanced-graph-card-title").textContent).toBe("2 个孤立页面");
-    expect(one(card, "enhanced-graph-card-meta").textContent).toBe("Alpha、Beta");
-    expect(one(card, "enhanced-graph-card-suggestion").textContent).toBe("建议补充 [[wikilinks]]。");
-    // A gap card has no score row.
-    expect(byClass(card, "enhanced-graph-card-score")).toEqual([]);
+    // A button that opens an empty list is worse than no button, and a stale
+    // choice for that section falls back to the one that has cards.
+    expect(tabs.map((tab) => tab.textContent)).toEqual([`${t("insights.section.gaps")} (1)`]);
+    expect(tabs[0]?.hasClass("is-active")).toBe(true);
+    expect(fixture.cards()).toHaveLength(1);
   });
 
-  it("marks the gap active only when its node ids match exactly", () => {
+  it("falls back to the first populated section when the active one is stale", () => {
+    const fixture = render({
+      bundle: bundleOf([node]),
+      activeSection: "trends",
+      onSelectSection: () => {},
+    });
+    const tabs = byClass(fixture.container, "enhanced-graph-button");
+
+    expect(tabs[0]?.hasClass("is-active")).toBe(true);
+    expect(one(fixture.container, "enhanced-graph-section").getAttribute("data-section")).toBe("gaps");
+  });
+
+  it("draws only the chosen section's cards", () => {
+    const fixture = render({
+      bundle: bundleOf([pair, node]),
+      activeSection: "gaps",
+      onSelectSection: () => {},
+    });
+
+    expect(fixture.cards()).toHaveLength(1);
+    expect(fixture.cards()[0]?.textContent).toContain(t("insights.finding.isolated", { count: 1 }));
+  });
+
+  it("draws every section under its own heading with the section's own icon when no switcher is given", () => {
+    const fixture = render({ bundle: bundleOf([pair, node]) });
+    const headings = byClass(fixture.container, "enhanced-graph-section-title");
+
+    expect(byClass(fixture.container, "enhanced-graph-button")).toEqual([]);
+    // The heading carries the label and, below it, the "new since" note.
+    expect(headings[0]?.children[1]?.textContent).toBe(t("insights.section.suggested"));
+    expect(headings[1]?.children[1]?.textContent).toBe(t("insights.section.gaps"));
+    // Icon span first, then the label — the shape the panel has always emitted.
+    expect(headings[0]?.children[0]?.className).toBe("enhanced-graph-icon-suggested");
+    expect(headings[1]?.children[0]?.className).toBe("enhanced-graph-icon-gaps");
+    // Heading icon, card dismiss glyph, heading icon, card dismiss glyph.
+    expect(fixture.icons.map((call) => call.icon)).toEqual([
+      "link-2",
+      "x",
+      "alert-triangle",
+      "x",
+    ]);
+    expect(fixture.icons[0]?.element).toBe(headings[0]?.children[0]);
+    expect(fixture.cards()).toHaveLength(2);
+  });
+
+  it("renders the empty state only when the whole bundle has no findings", () => {
+    const fixture = render({ bundle: bundleOf([]) });
+
+    expect(one(fixture.container, "enhanced-graph-empty").textContent).toBe(t("insights.empty"));
+    expect(fixture.cards()).toEqual([]);
+  });
+
+  it("renders no empty state while a card is visible", () => {
+    expect(byClass(render({ bundle: bundleOf([pair]) }).container, "enhanced-graph-empty")).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// New since last visit
+// ---------------------------------------------------------------------------
+
+describe("renderInsightsPanel / new since last visit", () => {
+  it("puts the count in the heading when there is no switcher", () => {
+    const fixture = render({ bundle: bundleOf([makePair(), makeNodeFinding()]) });
+    const headings = byClass(fixture.container, "enhanced-graph-section-title");
+
+    expect(one(headings[0] as FakeElement, "enhanced-graph-section-new").textContent).toBe(
+      t("insights.newSince", { count: 1 }),
+    );
+    expect(one(headings[1] as FakeElement, "enhanced-graph-section-new").textContent).toBe(
+      t("insights.newSince", { count: 1 }),
+    );
+  });
+
+  it("counts only the findings this build changed, not every card in the section — negative control", () => {
+    // `suggested` holds two visible findings. One is identical in the previous
+    // build, so it is *not* changed; the other is new. A panel that counted the
+    // section's cards, or the whole bundle, would print 2 or 4 here.
+    const stable = makePair();
+    const fresh = makePair({ b: GAMMA.id, labels: ["Alpha", "Gamma"] });
+    const bundle = makeBundle([stable, fresh], { previous: makeBundle([stable]) });
+    const headings = byClass(render({ bundle }).container, "enhanced-graph-section-title");
+
+    expect(bundle.changed.map((finding) => finding.key)).toEqual([fresh.key]);
+    expect(one(headings[0] as FakeElement, "enhanced-graph-section-new").textContent).toBe(
+      t("insights.newSince", { count: 1 }),
+    );
+  });
+
+  it("counts only the findings in its own section — negative control", () => {
+    // Three findings in `suggested` (one of them dismissed) and one in `gaps`.
+    // A panel that counted the whole bundle would print 4 and 4; a panel that
+    // counted every card in the section, dismissed included, would print 3.
+    const finding = makePair();
+    const fixture = render({
+      bundle: bundleOf([
+        finding,
+        makePair({ a: "alpha", b: "gamma" }),
+        makePair({ a: "beta", b: "gamma" }),
+        makeNodeFinding(),
+      ]),
+      dismissed: new Set([finding.key]),
+    });
+    const headings = byClass(fixture.container, "enhanced-graph-section-title");
+
+    expect(one(headings[0] as FakeElement, "enhanced-graph-section-new").textContent).toBe(
+      t("insights.newSince", { count: 2 }),
+    );
+    expect(one(headings[1] as FakeElement, "enhanced-graph-section-new").textContent).toBe(
+      t("insights.newSince", { count: 1 }),
+    );
+  });
+
+  it("omits the note for a finding that is not in bundle.changed — negative control", () => {
+    // Two builds of the same finding: same key, same content, so the second
+    // bundle reports nothing as changed. Without `previous` everything is new,
+    // which is why the assertion is written against a pair of bundles.
+    const stable = makePair();
+    const previous = makeBundle([stable]);
+    const unchanged = makeBundle([stable], { previous });
+
+    expect(unchanged.changed).toEqual([]);
+    expect(byClass(render({ bundle: unchanged }).container, "enhanced-graph-section-new")).toEqual([]);
+  });
+
+  it("counts a finding whose evidence moved as new", () => {
+    const before = makePair({ evidence: [evidence({ contribution: 1, nodeIds: ["alpha"] })] });
+    const after = makePair({ evidence: [evidence({ contribution: 4, nodeIds: ["alpha", "gamma"] })] });
+    const bundle = makeBundle([after], { previous: makeBundle([before]) });
+
+    expect(bundle.changed.map((finding) => finding.key)).toEqual([after.key]);
     expect(
-      (gapPanel({ activeNodeIds: new Set(["alpha", "beta"]) }).cards()[0] as FakeElement).hasClass(
-        "is-active-gap",
-      ),
-    ).toBe(true);
-    expect(
-      (gapPanel({ activeNodeIds: new Set(["alpha", "beta", "gamma"]) }).cards()[0] as FakeElement).hasClass(
-        "is-active-gap",
-      ),
-    ).toBe(false);
-    expect(
-      (gapPanel({ activeNodeIds: new Set(["beta"]) }).cards()[0] as FakeElement).hasClass("is-active-gap"),
-    ).toBe(false);
+      one(render({ bundle }).container, "enhanced-graph-section-new").textContent,
+    ).toBe(t("insights.newSince", { count: 1 }));
   });
 
-  it("focuses the gap nodes with no edge keys, and clears when already active", () => {
-    const inactive = gapPanel();
+  it("renders the note once above the active section's cards when tabs are used", () => {
+    const fixture = render({
+      bundle: bundleOf([makePair(), makeNodeFinding()]),
+      activeSection: "gaps",
+      onSelectSection: () => {},
+    });
+    const notes = byClass(fixture.container, "enhanced-graph-section-new");
 
-    (inactive.cards()[0] as FakeElement).click();
-    expect(inactive.focusCalls).toEqual([{ ids: ["alpha", "beta"], edges: [] }]);
-
-    const active = gapPanel({ activeNodeIds: new Set(["alpha", "beta"]) });
-    (active.cards()[0] as FakeElement).click();
-    expect(active.focusCalls).toEqual([{ ids: [], edges: [] }]);
-  });
-
-  it("dismisses with the gap key and its node ids, without focusing", () => {
-    const fixture = gapPanel();
-    const dismiss = dismissButton(fixture.cards()[0] as FakeElement);
-
-    dismiss.click();
-
-    expect(fixture.dismissCalls).toEqual([{ key: gap.key, ids: ["alpha", "beta"] }]);
-    expect(fixture.focusCalls).toEqual([]);
-    expect(fixture.icons[1]?.icon).toBe("x");
+    expect(notes).toHaveLength(1);
+    expect(notes[0]?.textContent).toBe(t("insights.newSince", { count: 1 }));
+    // The tab is above the note, and the note above the cards.
+    expect(byClass(fixture.container, "enhanced-graph-section-title")).toEqual([]);
   });
 });
 
@@ -690,21 +1083,24 @@ describe("renderInsightsPanel / gap cards", () => {
 // ---------------------------------------------------------------------------
 
 describe("renderInsightsPanel / dismissal", () => {
-  const connection = makeConnection(ALPHA, BETA);
-  const gap = makeGap();
-  const insights: GraphInsights = { connections: [connection], gaps: [gap] };
+  const pair = makePair();
+  const node = makeNodeFinding();
+  /** The live key set the panel filters by; a dismissal is a settings write. */
+  const dismissed = new Set([pair.key]);
 
-  it("hides dismissed cards by default", () => {
-    const fixture = render({ insights, dismissed: new Set([connection.key]) });
+  it("hides a dismissed card by default", () => {
+    const fixture = render({ bundle: bundleOf([pair, node]), dismissed });
 
     expect(fixture.cards()).toHaveLength(1);
-    expect(one(fixture.container, "enhanced-graph-card-title").textContent).toBe(gap.title);
+    expect(one(fixture.container, "enhanced-graph-card-title").textContent).toBe(
+      t("insights.finding.isolated", { count: 1 }),
+    );
   });
 
-  it("shows dismissed cards dimmed when showDismissed is on", () => {
+  it("shows a dismissed card dimmed, with a restore glyph, when showDismissed is on", () => {
     const fixture = render({
-      insights,
-      dismissed: new Set([connection.key]),
+      bundle: bundleOf([pair, node]),
+      dismissed,
       showDismissed: true,
     });
     const cards = fixture.cards();
@@ -712,7 +1108,9 @@ describe("renderInsightsPanel / dismissal", () => {
     expect(cards).toHaveLength(2);
     expect(cards[0]?.hasClass("is-dismissed")).toBe(true);
     expect(cards[1]?.hasClass("is-dismissed")).toBe(false);
-    // A dismissed connection offers "restore" instead of "dismiss".
+    // A dismissed card offers "restore" instead of "dismiss"; the section heading
+    // icons come first, then the two cards' buttons in document order.
+    expect(dismissButton(cards[0] as FakeElement).title).toBe(t("insights.dismiss"));
     expect(fixture.icons.map((call) => call.icon)).toEqual([
       "link-2",
       "rotate-ccw",
@@ -721,93 +1119,85 @@ describe("renderInsightsPanel / dismissal", () => {
     ]);
   });
 
-  it("marks a connection card both active and dismissed at once", () => {
-    const fixture = render({
-      insights,
-      dismissed: new Set([connection.key]),
-      showDismissed: true,
-      activeNodeIds: new Set(["alpha", "beta"]),
-    });
-
-    expect(fixture.cards()[0]?.className).toBe("enhanced-graph-card is-active-connection is-dismissed");
-  });
-
-  it("renders the empty state once every card is dismissed", () => {
-    const fixture = render({ insights, dismissed: new Set([connection.key, gap.key]) });
-
-    expect(fixture.cards()).toEqual([]);
-    expect(one(fixture.container, "enhanced-graph-empty").textContent).toBe(t("insights.empty"));
-  });
-
-  it("renders no empty state while a card is visible", () => {
-    expect(byClass(render({ insights }).container, "enhanced-graph-empty")).toEqual([]);
-  });
-
   it("offers the show-dismissed toggle only while something is hidden", () => {
-    expect(directByClass(render({ insights }).container, "enhanced-graph-link")).toEqual([]);
+    expect(toggleButton(render({ bundle: bundleOf([pair, node]) }).container)).toBeUndefined();
 
-    const hidden = render({ insights, dismissed: new Set([connection.key]) });
-    const toggles = directByClass(hidden.container, "enhanced-graph-link");
-    expect(toggles).toHaveLength(1);
-    // Only the hidden card is counted, even though a gap is still visible.
-    expect(toggles[0]?.textContent).toBe(t("insights.showDismissed", { count: 1 }));
+    const hidden = render({ bundle: bundleOf([pair, node]), dismissed });
+    const toggle = toggleButton(hidden.container);
+
+    expect(toggle?.textContent).toBe(t("insights.showDismissed", { count: 1 }));
   });
 
-  it("switches the toggle to a reset once dismissed cards are shown", () => {
+  it("switches the toggle to a reset once the dismissed cards are shown", () => {
     const fixture = render({
-      insights,
-      dismissed: new Set([connection.key, gap.key]),
+      bundle: bundleOf([pair, node]),
+      dismissed: new Set([pair.key, node.key]),
       showDismissed: true,
     });
-    const toggles = directByClass(fixture.container, "enhanced-graph-link");
 
     // Everything is visible again, so the toggle survives only as the way back.
-    expect(toggles).toHaveLength(1);
-    expect(toggles[0]?.textContent).toBe(t("toolbar.reset"));
+    expect(toggleButton(fixture.container)?.textContent).toBe(t("toolbar.reset"));
     expect(fixture.cards()).toHaveLength(2);
   });
 
-  it("reports a toggle click to the caller", () => {
-    const fixture = render({ insights, dismissed: new Set([connection.key, gap.key]) });
-    const toggle = directByClass(fixture.container, "enhanced-graph-link")[0] as FakeElement;
+  it("keeps the reset reachable when every key has been restored", () => {
+    // No hidden cards, `showDismissed` still on: without the button the user
+    // could never leave "show dismissed" mode.
+    const fixture = render({ bundle: bundleOf([pair, node]), showDismissed: true });
 
-    toggle.click();
+    expect(toggleButton(fixture.container)?.textContent).toBe(t("toolbar.reset"));
+  });
+
+  it("reports a toggle click to the caller without touching the focus", () => {
+    const fixture = render({
+      bundle: bundleOf([pair, node]),
+      dismissed: new Set([pair.key, node.key]),
+    });
+
+    toggleButton(fixture.container)?.click();
 
     expect(fixture.toggleCount).toBe(1);
     // The panel is stateless: the caller re-renders with the new mode.
     expect(fixture.focusCalls).toEqual([]);
   });
+
+  it("offers the section again when every card in it is dismissed and showDismissed is on", () => {
+    const fixture = render({
+      bundle: bundleOf([node]),
+      dismissed: new Set([node.key]),
+      showDismissed: true,
+      onSelectSection: () => {},
+    });
+    const tabs = byClass(fixture.container, "enhanced-graph-button");
+
+    // The count is what is actually drawn, which with showDismissed on is the one
+    // dismissed card — a tab must not promise fewer cards than it shows either.
+    expect(tabs.map((tab) => tab.textContent)).toEqual([`${t("insights.section.gaps")} (1)`]);
+    expect(fixture.cards()).toHaveLength(1);
+    expect(fixture.cards()[0]?.hasClass("is-dismissed")).toBe(true);
+  });
+
+  it("offers no section at all when every card in it is dismissed and showDismissed is off", () => {
+    // A section whose cards are all dismissed is not empty — the toggle is the
+    // affordance, and the empty state must not claim there is nothing to see.
+    const fixture = render({
+      bundle: bundleOf([node]),
+      dismissed: new Set([node.key]),
+      onSelectSection: () => {},
+    });
+
+    expect(byClass(fixture.container, "enhanced-graph-button")).toEqual([]);
+    expect(fixture.cards()).toEqual([]);
+    expect(byClass(fixture.container, "enhanced-graph-empty")).toEqual([]);
+    expect(toggleButton(fixture.container)?.textContent).toBe(t("insights.showDismissed", { count: 1 }));
+  });
 });
 
 // ---------------------------------------------------------------------------
-// Clear highlight, ordering and container handling
+// Container handling and icon plumbing
 // ---------------------------------------------------------------------------
 
-describe("renderInsightsPanel / structure", () => {
-  const connection = makeConnection(ALPHA, BETA);
-  const gap = makeGap();
-
-  it("offers the clear-highlight button only while nodes are emphasised", () => {
-    expect(byClass(render({}).container, "enhanced-graph-button")).toEqual([]);
-
-    const fixture = render({ insights: { connections: [connection], gaps: [] }, activeNodeIds: new Set(["alpha"]) });
-    const clear = one(fixture.container, "enhanced-graph-button");
-
-    expect(clear.textContent).toBe(t("insights.clearHighlight"));
-    clear.click();
-    expect(fixture.focusCalls).toEqual([{ ids: [], edges: [] }]);
-  });
-
-  it("renders connections before gaps", () => {
-    const fixture = render({ insights: { connections: [connection], gaps: [gap] } });
-    const sectionTitles = byClass(fixture.container, "enhanced-graph-section-title");
-
-    expect(sectionTitles).toHaveLength(2);
-    expect(sectionTitles[0]?.textContent).toBe(t("insights.connections"));
-    expect(sectionTitles[1]?.textContent).toBe(t("insights.gaps"));
-    expect(fixture.cards()).toHaveLength(2);
-  });
-
+describe("renderInsightsPanel / container handling", () => {
   it("appends after the caller's own children instead of clearing them", () => {
     // Regression: the view renders the panel header (title + close button) into
     // the same element it hands over, so emptying the container here silently
@@ -819,7 +1209,7 @@ describe("renderInsightsPanel / structure", () => {
 
     renderInsightsPanel(container as unknown as HTMLElement, {
       graph: GRAPH,
-      insights: { connections: [connection], gaps: [gap] },
+      bundle: bundleOf([makePair(), makeNodeFinding()]),
       dismissed: new Set(),
       showDismissed: false,
       activeNodeIds: new Set(),
@@ -838,6 +1228,20 @@ describe("renderInsightsPanel / structure", () => {
     ]);
   });
 
+  it("offers the clear-highlight button only while nodes are emphasised", () => {
+    expect(byClass(render({ bundle: bundleOf([makePair()]) }).container, "enhanced-graph-button")).toEqual([]);
+
+    const fixture = render({
+      bundle: bundleOf([makePair()]),
+      activeNodeIds: new Set(["alpha"]),
+    });
+    const clear = one(fixture.container, "enhanced-graph-button");
+
+    expect(clear.textContent).toBe(t("insights.clearHighlight"));
+    clear.click();
+    expect(fixture.focusCalls).toEqual([{ ids: [], edges: [] }]);
+  });
+
   it("defaults to Obsidian's setIcon when no renderer is injected", () => {
     // `vitest.config.ts` aliases `obsidian` to `harness/obsidian-stub.ts`, whose
     // setIcon writes an `<svg data-icon="…">` into the element — so a consumer
@@ -845,7 +1249,7 @@ describe("renderInsightsPanel / structure", () => {
     const container = new FakeElement("div");
     renderInsightsPanel(container as unknown as HTMLElement, {
       graph: GRAPH,
-      insights: { connections: [connection], gaps: [] },
+      bundle: bundleOf([makePair()]),
       dismissed: new Set(),
       showDismissed: false,
       activeNodeIds: new Set(),
@@ -854,60 +1258,7 @@ describe("renderInsightsPanel / structure", () => {
       onToggleShowDismissed: () => {},
     });
 
-    expect(one(container, "enhanced-graph-icon-connection").innerHTML).toContain("link-2");
+    expect(one(container, "enhanced-graph-icon-suggested").innerHTML).toContain("link-2");
     expect(one(container, "enhanced-graph-card-title").textContent).toBe("Alpha ↔ Beta");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Section tabs
-// ---------------------------------------------------------------------------
-
-describe("insight section tabs", () => {
-  const populated = { connections: [makeConnection(GRAPH.nodes[0], GRAPH.nodes[1])], gaps: [makeGap()] };
-
-  it("switches the cards with a button per group, and reports the choice", () => {
-    const chosen: string[] = [];
-    const fixture = render({
-      insights: populated,
-      activeSection: "connections",
-      onSelectSection: (section) => chosen.push(section),
-    });
-
-    const tabs = byClass(fixture.container, "enhanced-graph-button");
-    expect(tabs.map((tab) => tab.textContent)).toEqual(["惊奇连接 (1)", "知识空白 (1)"]);
-    expect(tabs[0].hasClass("is-active")).toBe(true);
-    expect(tabs[1].hasClass("is-active")).toBe(false);
-
-    tabs[0].click();
-    tabs[1].click();
-    expect(chosen).toEqual(["connections", "gaps"]);
-  });
-
-  it("draws only the chosen group's cards", () => {
-    const fixture = render({ insights: populated, activeSection: "gaps", onSelectSection: () => {} });
-    expect(fixture.cards()).toHaveLength(1);
-    // The gap's card, not the connection's.
-    expect(fixture.cards()[0].textContent).toContain("孤立");
-  });
-
-  it("offers no tab for an empty group, and falls back to one that has cards", () => {
-    const fixture = render({
-      insights: { connections: [], gaps: [makeGap()] },
-      activeSection: "connections",
-      onSelectSection: () => {},
-    });
-    // A button that opens an empty list is worse than no button.
-    expect(byClass(fixture.container, "enhanced-graph-button").map((tab) => tab.textContent)).toEqual([
-      "知识空白 (1)",
-    ]);
-    expect(fixture.cards()).toHaveLength(1);
-  });
-
-  it("draws every group under its own heading when no switcher is given", () => {
-    const fixture = render({ insights: populated });
-    expect(byClass(fixture.container, "enhanced-graph-button")).toEqual([]);
-    expect(byClass(fixture.container, "enhanced-graph-section-title")).toHaveLength(2);
-    expect(fixture.cards()).toHaveLength(2);
   });
 });

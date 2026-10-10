@@ -29,6 +29,14 @@ import {
 import { createNodeResolver } from "../src/integrate/official-internals";
 import type { GraphInsights } from "../src/core/insights";
 import {
+  groupFinding,
+  pairFinding,
+  type Finding,
+} from "../src/core/insights/model";
+import { buildBundle } from "../src/core/insights/sections";
+import { rankFindings } from "../src/core/insights/ranking";
+import { edgeKey } from "../src/core/graph-keys";
+import {
   DEFAULT_RELEVANCE_WEIGHTS,
   EMPTY_GRAPH,
   type CommunityInfo,
@@ -198,6 +206,63 @@ function makeApp(leaves: Record<string, unknown[]>): {
   workspace: { getLeavesOfType(type: string): unknown[] };
 } {
   return { workspace: { getLeavesOfType: (type: string) => leaves[type] ?? [] } };
+}
+
+/**
+ * An `InsightBundle` holding one connection card, plus optionally one isolated
+ * group card.
+ *
+ * Built through the real model constructors and the real `buildBundle`, so these
+ * fixtures cannot drift from what the engine actually emits — a hand-written
+ * bundle would let a panel test pass against a shape nothing produces. The
+ * built-in-graph tests care about a card existing and about what clicking it
+ * focuses, so the evidence is empty and the anchors are what they assert on.
+ */
+function insightsWithPair(
+  a: string,
+  b: string,
+  extraConnection?: UnexpectedLink,
+  isolatedIds?: readonly string[],
+): GraphInsights {
+  const pair = (source: string, target: string): Finding =>
+    pairFinding({
+      kind: "existing-link",
+      analyser: "connections",
+      a: source,
+      b: target,
+      titleKey: "insights.finding.existing-link",
+      titleParams: { a: source.toUpperCase(), b: target.toUpperCase() },
+      init: {
+        evidence: [],
+        anchors: { nodeIds: [source, target], edgeKeys: [edgeKey(source, target)] },
+        score: 9,
+        severity: 1,
+        effort: "one-click",
+      },
+    });
+
+  const findings: Finding[] = [pair(a, b)];
+  if (extraConnection) {
+    findings.push(pair(extraConnection.source.id, extraConnection.target.id));
+  }
+  if (isolatedIds && isolatedIds.length > 0) {
+    findings.push(
+      groupFinding({
+        kind: "isolated",
+        analyser: "gaps",
+        anchorId: isolatedIds[0]!,
+        titleKey: "insights.finding.isolated",
+        titleParams: { count: isolatedIds.length },
+        init: {
+          evidence: [],
+          anchors: { nodeIds: [...isolatedIds], edgeKeys: [] },
+        },
+      }),
+    );
+  }
+
+  const bundle = buildBundle(rankFindings(findings, new Map()).ranked);
+  return { connections: [], gaps: [], bundle };
 }
 
 function makeLeaf(renderer: unknown, engine?: unknown): { view: unknown } {
@@ -2566,22 +2631,7 @@ describe("the built-in graph's toolbar", () => {
       expect(panel.querySelectorAll(".enhanced-graph-card").length).toBe(0);
 
       // The plugin finishes building while the graph is already on screen.
-      // A minimal but structurally faithful insight, so the panel renders a card
-      // rather than throwing on a missing field.
-      h.insights = {
-        connections: [
-          {
-            key: "a:::b",
-            source: { id: "a", label: "A", type: "concept", community: 0 } as never,
-            target: { id: "b", label: "B", type: "entity", community: 1 } as never,
-            score: 9,
-            weight: 4,
-            reasons: ["cross-community"],
-            contributions: { "cross-community": 4 },
-          },
-        ],
-        gaps: [],
-      };
+      h.insights = insightsWithPair("a", "b");
       vi.advanceTimersByTime(SAFETY_NET_MS + 50);
 
       // Nothing else re-rendered the panel on that transition, so it used to
@@ -2610,20 +2660,7 @@ describe("the built-in graph's toolbar", () => {
         [makeNode({ id: "a" }), makeNode({ id: "b" }), makeNode({ id: "far" })],
       );
       h.graph = makeGraph([...h.graph.nodes], [...h.graph.communities], [makeEdge("a", "b")]);
-      h.insights = {
-        connections: [
-          {
-            key: "a:::b",
-            source: { id: "a", label: "A", type: "concept", community: 0 } as never,
-            target: { id: "b", label: "B", type: "entity", community: 1 } as never,
-            score: 9,
-            weight: 4,
-            reasons: ["cross-community"],
-            contributions: { "cross-community": 4 },
-          },
-        ],
-        gaps: [],
-      };
+      h.insights = insightsWithPair("a", "b");
       h.enhancer.start();
 
       const panel = h.renderer.containerEl.querySelector<HTMLElement>(".enhanced-graph-official-panel")!;
@@ -2688,7 +2725,7 @@ describe("the built-in graph's toolbar", () => {
       reasons: ["cross-community"],
       contributions: { "cross-community": 4 },
     });
-    h.insights = { connections: [connection("a", "b"), connection("c", "d")], gaps: [] };
+    h.insights = insightsWithPair("a", "b", connection("c", "d"));
     h.enhancer.start();
 
     const panel = h.renderer.containerEl.querySelector<HTMLElement>(".enhanced-graph-official-panel")!;
@@ -2724,20 +2761,7 @@ describe("the built-in graph's toolbar", () => {
     // not drawing.
     const h = setup([{ id: "a.md" }], [makeNode({ id: "a" }), makeNode({ id: "b" })]);
     h.graph = makeGraph([...h.graph.nodes], [...h.graph.communities], [makeEdge("a", "b")]);
-    h.insights = {
-      connections: [
-        {
-          key: "a:::b",
-          source: { id: "a", label: "A", type: "concept", community: 0 } as never,
-          target: { id: "b", label: "B", type: "entity", community: 1 } as never,
-          score: 9,
-          weight: 4,
-          reasons: ["cross-community"],
-          contributions: { "cross-community": 4 },
-        },
-      ],
-      gaps: [],
-    };
+    h.insights = insightsWithPair("a", "b");
     h.enhancer.start();
 
     const panel = h.renderer.containerEl.querySelector<HTMLElement>(".enhanced-graph-official-panel")!;
@@ -2808,41 +2832,19 @@ describe("the built-in graph's toolbar", () => {
       [{ id: "a.md" }, { id: "b.md" }],
       [makeNode({ id: "a" }), makeNode({ id: "b" })],
     );
-    h.insights = {
-      connections: [
-        {
-          key: "a:::b",
-          source: { id: "a", label: "A", type: "concept", community: 0 } as never,
-          target: { id: "b", label: "B", type: "entity", community: 1 } as never,
-          score: 9,
-          weight: 4,
-          reasons: ["cross-community"],
-          contributions: { "cross-community": 4 },
-        },
-      ],
-      gaps: [
-        {
-          key: "gap:isolated:2 个孤立页面:a,b",
-          type: "isolated",
-          title: "2 个孤立页面",
-          description: "A、B",
-          suggestion: "补充链接。",
-          nodeIds: ["a", "b"],
-        },
-      ],
-    };
+    h.insights = insightsWithPair("a", "b", undefined, ["a", "b"]);
     h.enhancer.start();
     const panel = h.renderer.containerEl.querySelector<HTMLElement>(".enhanced-graph-official-panel")!;
     const cardCount = (): number => panel.querySelectorAll(".enhanced-graph-card").length;
 
     // Opens on the connections, and only that group's card is drawn.
-    expect(panel.querySelector('[data-section="connections"]')).not.toBeNull();
+    expect(panel.querySelector('[data-section="suggested"]')).not.toBeNull();
     expect(panel.querySelector('[data-section="gaps"]')).toBeNull();
     expect(cardCount()).toBe(1);
 
-    selectTab(panel, t("insights.gaps"));
+    selectTab(panel, t("insights.section.gaps"));
     expect(panel.querySelector('[data-section="gaps"]')).not.toBeNull();
-    expect(panel.querySelector('[data-section="connections"]')).toBeNull();
+    expect(panel.querySelector('[data-section="suggested"]')).toBeNull();
     expect(cardCount()).toBe(1);
   });
 

@@ -42,7 +42,8 @@ import { type FilterSection, renderFilters } from "./graph-filters";
 import { renderAppearance } from "./graph-appearance";
 import { renderLegend } from "./graph-legend";
 import { renderToolbar, renderZoomControls, type PanelMode } from "./graph-toolbar";
-import { countUndismissed, renderInsightsPanel, type InsightSection } from "./insights-panel";
+import { countUndismissed, renderInsightsPanel, type InsightSectionId } from "./insights-panel";
+import { EMPTY_BUNDLE } from "../core/insights/model";
 import type { EdgeScoreSummary } from "./renderer";
 import {
   GraphRenderer,
@@ -114,7 +115,7 @@ export class EnhancedGraphView extends ItemView {
   private panelMode: PanelMode = "insights";
   private showDismissed = false;
   /** Card group the user is looking at; see `InsightSection`. */
-  private insightSection: InsightSection = "connections";
+  private insightSection: InsightSectionId = "suggested";
   /** Filter group the user is looking at, in this view's filters tab. */
   private filterSection: FilterSection = "types";
   /**
@@ -1277,15 +1278,22 @@ export class EnhancedGraphView extends ItemView {
   }
 
   private undismissedCount(): number {
-    return countUndismissed(this.insights, new Set(this.plugin.settings.dismissedInsights));
+    // The bundle is cached and carries every finding, so the count has to be
+    // derived from the LIVE dismissal set — the same one the panel filters by, or
+    // the toolbar number would disagree with the cards on screen.
+    return countUndismissed(this.insights.bundle ?? EMPTY_BUNDLE, this.dismissedKeys());
+  }
+
+  private dismissedKeys(): ReadonlySet<string> {
+    return new Set(this.plugin.settings.dismissedInsights);
   }
 
   /** Thin adapter: the card DOM itself lives in `insights-panel`. */
   private renderInsights(el: HTMLElement): void {
     renderInsightsPanel(el, {
       graph: this.graph,
-      insights: this.insights,
-      dismissed: new Set(this.plugin.settings.dismissedInsights),
+      bundle: this.insights.bundle ?? EMPTY_BUNDLE,
+      dismissed: this.dismissedKeys(),
       showDismissed: this.showDismissed,
       activeNodeIds: this.highlightNodes,
       onToggleFocus: (ids, edgeKeys) => {

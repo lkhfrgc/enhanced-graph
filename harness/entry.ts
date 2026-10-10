@@ -16,6 +16,7 @@ import { EnhancedGraphView } from "../src/view/graph-view";
 import { captureOfficialLayout } from "../src/integrate/official-layout";
 import { DEFAULT_RELEVANCE_WEIGHTS, type ColorMode, type WikiGraph } from "../src/types";
 import type { GraphInsights } from "../src/core/insights";
+import { analyzeGraph } from "../src/core/insights";
 import type { EnhancedGraphSettings } from "../src/settings-model";
 
 // `main.ts` is only referenced by the view through a type-only import, so the
@@ -48,6 +49,18 @@ const snapshot: Snapshot = {
     folders: raw.graph.folders ?? [],
   } as WikiGraph,
 };
+
+/**
+ * The insights are analysed here rather than read from the snapshot.
+ *
+ * The snapshot's saved `insights` predates the finding model, so a panel reading it
+ * would render nothing and every card assertion in `harness-check.mjs` would pass
+ * vacuously against an empty panel. Analysing the loaded graph keeps the bundle
+ * structurally identical to the one the plugin produces, and it cannot go stale
+ * when the analysis changes — only the graph has to be regenerated.
+ */
+const insights: GraphInsights = analyzeGraph(snapshot.graph);
+snapshot.insights = insights;
 
 /**
  * A settings object shaped like the plugin's.
