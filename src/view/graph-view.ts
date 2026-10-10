@@ -73,6 +73,7 @@ import {
   type VisibilityFilters,
 } from "./visibility";
 import { nodeColorForMode, resolveTypeColors, sameColorMap } from "./palette";
+import { listenForWidthProbe } from "./width-probe";
 
 /**
  * ForceAtlas2 steps taken per gravity-drag event.
@@ -153,6 +154,8 @@ export class EnhancedGraphView extends ItemView {
   private toolbarEl!: HTMLElement;
   /** Whether the current query matches nothing; drives the toolbar message. */
   private panelEl!: HTMLElement;
+  /** Detaches the console width probe; set when the panel is built. */
+  private detachWidthProbe: (() => void) | null = null;
   private legendEl!: HTMLElement;
   private statusEl!: HTMLElement;
   private nodeMenuEl: HTMLElement | null = null;
@@ -199,6 +202,8 @@ export class EnhancedGraphView extends ItemView {
     this.renderer?.destroy();
     this.renderer = null;
     this.sigmaGraph = null;
+    this.detachWidthProbe?.();
+    this.detachWidthProbe = null;
   }
 
   /** Called by the plugin when new graph data is available. */
@@ -286,6 +291,9 @@ export class EnhancedGraphView extends ItemView {
       onFit: () => this.renderer?.fit(),
     });
     this.panelEl = body.createDiv({ cls: "enhanced-graph-panel" });
+    // Answers the console probe that reports this panel's real width; see the module for
+    // why a host-only layout needs to be asked rather than modelled.
+    this.detachWidthProbe = listenForWidthProbe(() => this.panelEl);
 
     this.canvasWrapEl.addEventListener("mousemove", (event) => {
       this.renderer?.trackPointer(event.clientX, event.clientY);

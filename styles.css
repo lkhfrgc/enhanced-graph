@@ -399,25 +399,31 @@
    -------------------------------------------------------------------------- */
 
 .enhanced-graph-panel {
-  /* Fixed, with no exceptions. `0 0` refuses both growth and shrink, and the explicit
-   * `min-width` refuses it again for any context where the flex basis is not what
-   * decides — a nested flex container, a table-ish ancestor, or Obsidian's own layout
-   * rules on the leaf. Stating it twice is deliberate: the width moved once already
-   * because a declaration was present and quietly overridden, and a layout contract is
-   * worth being boring about.
+  /* The width is a layout contract, so the declarations are `!important`.
+   *
+   * That is not a reflex. The width was declared and did not hold twice: once because
+   * `box-sizing` made 320px draw as 337px, and once because `flex-shrink` let the host
+   * pane pull it narrower than the declaration. Both were measured, both were fixed,
+   * and the panel still changed width in the one environment that matters — the graph
+   * view inside Obsidian — which the browser harness does not reproduce faithfully.
+   * When a declaration has lost twice and the failure cannot be reproduced outside the
+   * host, the remaining move is to make it unlosable and find the real cause from the
+   * host's own numbers rather than from a fixture that keeps saying 320px.
+   *
+   * The variable is what a reader should edit; the `!important` only defends it.
    *
    * The cost is real and accepted: in a pane narrower than this the panel keeps its
    * width and the graph beside it gives way, including down to nothing. That is the
-   * trade the fixed width asks for — the panel is where the text is, and a canvas that
-   * narrow is not readable either way. */
-  flex: 0 0 320px;
-  width: 320px;
-  min-width: 320px;
-  max-width: 320px;
-  /* `width` counts the content box by default, so the declared 320px drew as 337px
-   * once the padding and the left rule were added. That discrepancy is what made the
-   * width look arbitrary in the first place. */
-  box-sizing: border-box;
+   * trade a fixed width asks for — the panel holds the text, and a canvas that narrow
+   * is not readable either way. */
+  --enhanced-graph-panel-width: 320px;
+  flex: 0 0 var(--enhanced-graph-panel-width) !important;
+  width: var(--enhanced-graph-panel-width) !important;
+  min-width: var(--enhanced-graph-panel-width) !important;
+  max-width: var(--enhanced-graph-panel-width) !important;
+  /* `width` counts the content box by default, so a declared 320px draws as 337px once
+   * the padding and the left rule are added. */
+  box-sizing: border-box !important;
   border-left: 1px solid var(--background-modifier-border);
   background: var(--background-secondary);
   overflow-y: auto;
@@ -1310,7 +1316,12 @@
 }
 
 .enhanced-graph-official-panel {
-  width: 300px;
+  width: 300px !important;
+  /* Forced for the same reason as the insight panel's width: the declaration held in
+     every environment that could be measured and not in the one that mattered. See the
+     note on `.enhanced-graph-panel`. */
+  min-width: 300px !important;
+  max-width: 300px !important;
   /* `width` counts the content box by default, so 300px would become 320px with the
      padding and the border. The panel is a fixed panel; the declared number should be
      the box the reader sees. */
