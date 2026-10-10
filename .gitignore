@@ -8,6 +8,11 @@ harness/bundle.js
 harness/official-filters.bundle.js
 harness/graph.json
 harness/shots/
+
+# Screenshots of the real app, taken by `scripts/obsidian-shot.mjs` when a layout
+# question cannot be answered from the browser harness. Same reasoning as `shots/`:
+# they are evidence for one investigation, not a fixture anything reads.
+harness/obsidian/
 scripts/verify-vault.cjs
 
 # Editor / OS noise

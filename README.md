@@ -31,9 +31,13 @@ Louvain clustering, with cohesion and mean intra-degree — the latter is indepe
 
 ### Graph insights
 
-- **Surprising connections** — cross-community, cross-type links
-- **Knowledge gaps** — isolated notes, sparse areas, bridge notes
-- Each card can be marked as seen
+Four tabs of cards, each with its evidence and the work it takes to act on:
+
+- **Suggested new links** — a page's name written in prose without a link, and pairs of pages with many shared neighbours and no link between them. Cards you can clear in one click offer an **insert link** button, with a before/after preview and the editor's own undo.
+- **Surprising links** — links you already wrote, scored for crossing a community boundary, joining distant page types, and sharing sources.
+- **Structural risks** — single points of failure, cluster gateways, pages carrying more structure than their link count suggests, and brokerage nodes between groups that do not talk to each other.
+- **Knowledge gaps** — isolated notes, sparse areas, bridge notes.
+- Open both notes side by side, create an index note, or dismiss a card; dismissals persist across rebuilds.
 
 ### Built-in graph enhancement (on by default)
 
