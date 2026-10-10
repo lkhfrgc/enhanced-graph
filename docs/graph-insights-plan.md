@@ -1412,11 +1412,32 @@ Measured on the real vault, the six cards it offers:
 ```
 
 Every card is routed through a page with 38–42 links, and the shared-neighbour counts are
-two to three times what a real link has (5.06, measured in §3.2). **The analyser built
-from the plan's recommendations reproduces the plan's own warning**: on this vault it
-proposes exactly the pairs a user has already considered. That is now an observation with
-a mechanism rather than a prediction, and it is why the human rating at the end matters
-more for this phase than for Phase 2.
+two to three times what a real link has (5.06, measured in §3.2).
+
+**But the comparison that number was missing changes the conclusion.** Measuring the same
+signals over the vault's 420 *real* links:
+
+| | Candidates (30) | Real links (420) |
+|---|---:|---:|
+| Mean shared neighbours | **10.07** | 5.85 |
+| Hub-routed (max shared degree ≥ 20) | **93 %** | 88 % |
+
+The shared-neighbour elevation is real but modest — **1.7×, not the 2.5× an earlier
+hand-measurement suggested** — and **hub-routing is not a bias of this analyser at all**:
+88 % of the vault's own links route through a hub page too. An earlier reading of this
+section said the analyser "proposes exactly the pairs a user has already considered"
+because every card is hub-routed. That was an over-read: hub routing is the *shape of
+this vault*, not a property the ranking introduces, and a comparison without the control
+column could not have shown it.
+
+What survives is weaker and more honest: the candidates share about 1.7× as many
+neighbours as real links do, which is what any local link-prediction index produces by
+construction, and the panel's top six are pairs like `向量检索 ↔ 评估与基准测试` — related
+pages, quite possibly obvious ones. Whether that is a discovery or a nuisance is exactly
+what the rating sheet exists to settle, and **it cannot be settled from these numbers**.
+
+`npm run eval:missing-links` emits the sheet: 30 candidates, the ranked order the panel
+uses, with the shared-neighbour and hub columns and the control row above.
 
 ### Phase 4 — structure: implemented, and it found a real single point of failure
 

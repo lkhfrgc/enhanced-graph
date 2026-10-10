@@ -23,6 +23,7 @@ scripts/weight-eval.cjs
 # (`scripts/stability-eval.cjs` is tracked — it predates this and is left alone.)
 scripts/insight-eval.cjs
 scripts/mention-ratings.cjs
+scripts/missing-link-ratings.cjs
 
 # Built by `npm run build:ci`; the release workflow attaches it.
 /main.js
