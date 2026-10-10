@@ -2448,6 +2448,53 @@ async function main() {
         `${markCheck.paintedAfterClear} px after clearing`,
     );
 
+    // --- 11a-7. the legend's dots are the canvas's colours -------------------
+    // The reported bug, in the built-in graph: a legend dot came from a hash of the type's
+    // name while the node came from the vault's assignment, so `concept` showed a green dot
+    // next to blue nodes. This is that invariant, measured on the standalone view.
+    const legendColours = await page.evaluate(() => {
+      const sigma = window.__HARNESS__.view.renderer.instance;
+      const graph = sigma.getGraph();
+      const toRgb = (hex) => {
+        const value = parseInt(hex.replace("#", ""), 16);
+        return `rgb(${(value >> 16) & 255}, ${(value >> 8) & 255}, ${value & 255})`;
+      };
+      const nodeColourOf = (type) => {
+        for (const id of graph.nodes()) {
+          if (graph.getNodeAttribute(id, "pageType") !== type) continue;
+          const colour = graph.getNodeAttribute(id, "color");
+          return typeof colour === "string" ? toRgb(colour) : null;
+        }
+        return null;
+      };
+      const rows = [...document.querySelectorAll(".enhanced-graph-legend-row")]
+        .map((row) => {
+          const label = row.querySelector(".enhanced-graph-legend-label")?.textContent ?? "";
+          const dot = row.querySelector(".enhanced-graph-legend-dot");
+          return {
+            label,
+            dot: dot ? getComputedStyle(dot).backgroundColor : "",
+            node: nodeColourOf(label),
+            greyed: row.classList.contains("is-hidden-type"),
+          };
+        })
+        .filter((row) => row.node !== null && !row.greyed);
+      return {
+        checked: rows.length,
+        mismatched: rows.filter((row) => row.dot !== row.node).map((row) => `${row.label}: dot ${row.dot} vs node ${row.node}`),
+      };
+    });
+
+    console.log(
+      `\n  legend dot colours: ${legendColours.checked} type rows compared with their nodes; ` +
+        `${legendColours.mismatched.length} mismatched\n`,
+    );
+    check(
+      "every legend type row is drawn in the colour its nodes are",
+      legendColours.checked >= 5 && legendColours.mismatched.length === 0,
+      `${legendColours.checked} rows checked, mismatches: ${legendColours.mismatched.join("; ") || "none"}`,
+    );
+
     // --- 11b. the "no matching nodes" message ------------------------------
     // It used to be a Notice fired from applySearch, which runs on every
     // keystroke — so a non-matching query stacked a column of toasts down the

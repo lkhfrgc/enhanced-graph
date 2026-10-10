@@ -623,6 +623,44 @@ describe("OfficialGraphEnhancer colouring", () => {
     }
   });
 
+  it("draws a legend swatch in the colour the canvas uses for that type", () => {
+    // The reported bug: the legend's dot came from a hash of the type's name while the node
+    // came from the vault's assignment, so `concept` showed a green dot beside blue nodes.
+    // Both must come from the same map — this is the invariant that was missing.
+    const h = setup(
+      [{ id: "a.md" }, { id: "b.md" }],
+      [
+        makeNode({ id: "a", rawType: "concept", type: "concept" as PageType }),
+        makeNode({ id: "b", rawType: "paper", type: "source" as PageType }),
+      ],
+      "type",
+    );
+    h.enhancer.start();
+
+    const assignment = assignTypeColors(["concept", "paper"]);
+    const legend = h.renderer.containerEl.querySelector<HTMLElement>(
+      ".enhanced-graph-official-legend",
+    )!;
+    const asRgb = (hex: string): string => {
+      const value = hexToRgbInt(hex);
+      return `rgb(${(value >> 16) & 255}, ${(value >> 8) & 255}, ${value & 255})`;
+    };
+    const dotColour = (label: string): string => {
+      const row = Array.from(
+        legend.querySelectorAll<HTMLElement>(".enhanced-graph-legend-row"),
+      ).find((candidate) => candidate.querySelector(".enhanced-graph-legend-label")?.textContent === label)!;
+      const dot = row.querySelector<HTMLElement>(".enhanced-graph-legend-dot")!;
+      // The DOM normalises the hex to `rgb(...)`, so compare through the same conversion.
+      return dot.style.backgroundColor || dot.style.background || "";
+    };
+
+    expect(dotColour("concept")).toBe(asRgb(assignment.get("concept")!));
+    expect(dotColour("paper")).toBe(asRgb(assignment.get("paper")!));
+    // And the nodes are painted the same as their swatches.
+    expect(h.renderer.nodeLookup["a.md"].color?.rgb).toBe(hexToRgbInt(assignment.get("concept")!));
+    expect(h.renderer.nodeLookup["b.md"].color?.rgb).toBe(hexToRgbInt(assignment.get("paper")!));
+  });
+
   it("leaves virtual and unknown nodes untouched", () => {
     const tagColor = { a: 1, rgb: 0x123456 };
     const h = setup(

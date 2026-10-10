@@ -841,6 +841,11 @@ export class OfficialGraphEnhancer {
       colorMode: mode === "community" ? "community" : mode === "type" ? "type" : "custom",
       customNodeColor: "#888888",
       typeColorOverrides: this.deps.getTypeColors(),
+      // The same assignment the canvas is drawn from. Without it the swatches fell back
+      // to a hash of the type's name while the nodes used the vault's assignment: the
+      // legend showed `concept` green beside blue nodes, which is exactly the "the label's
+      // colour is not the node's colour" report.
+      typeColors: this.typeColorAssignment(),
       // Read through the live filters, so a row that is currently excluded is
       // drawn as excluded — the legend explains the state, it does not set it.
       hiddenTypes: filters.hiddenTypes,
