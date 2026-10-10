@@ -578,8 +578,10 @@ async function main() {
     // --- 8. insights panel + click-to-highlight ---------------------------
     // One button per populated section, and the cards of the chosen one below it.
     // The section ids and their labels come from the finding model
-    // (`core/insights/model.ts`): the old order was 惊奇连接 / 知识空白, and the
-    // suggested group now leads because it holds the highest-confidence cards.
+    // (`core/insights/model.ts`). The labels are read from the page rather than
+    // hardcoded where possible, but the tab names themselves are asserted, because a
+    // renamed group that the harness silently follows is a group nobody would notice
+    // going missing.
     const insightTabs = await page.evaluate(() =>
       [...document.querySelectorAll(".enhanced-graph-panel-tabs button")].map((el) => el.textContent ?? ""),
     );
@@ -591,22 +593,30 @@ async function main() {
       count: document.querySelectorAll(".enhanced-graph-card").length,
       gaps: document.querySelectorAll(".enhanced-graph-card").length,
     }));
+    // The existing-link group has its own tab now, and it must be reachable: this is
+    // the check that would have caught the six cards being buried in a 20-card list.
+    await selectPanelTab(page, "惊奇连接");
+    const surprisingCards = await page.evaluate(
+      () => document.querySelectorAll(".enhanced-graph-card").length,
+    );
     // Back to the first group: the checks below click a connection card.
-    await selectPanelTab(page, "建议连接");
+    await selectPanelTab(page, "建议新增");
     const panel = {
       count: connectionCards + gapCards.count,
       titles: [],
       sections: insightTabs,
     };
     check(
-      "insights panel switches between suggested and gap cards by tab",
-      insightTabs.length >= 2 &&
-        insightTabs.some((text) => text.includes("建议连接")) &&
+      "insights panel switches between its groups by tab, including existing links",
+      insightTabs.length >= 3 &&
+        insightTabs.some((text) => text.includes("建议新增")) &&
+        insightTabs.some((text) => text.includes("惊奇连接")) &&
         insightTabs.some((text) => text.includes("知识空白")) &&
         connectionCards >= 1 &&
+        surprisingCards >= 1 &&
         gapCards.count >= 1 &&
         panel.count >= 4,
-      `tabs: ${insightTabs.join(" / ")}; ${connectionCards} suggested + ${gapCards.count} gap cards`,
+      `tabs: ${insightTabs.join(" / ")}; ${connectionCards} suggested + ${surprisingCards} existing-link + ${gapCards.count} gap cards`,
     );
 
     // Regression guard: the panel header lives in the SAME element the insight

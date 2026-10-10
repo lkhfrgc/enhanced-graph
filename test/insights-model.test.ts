@@ -28,6 +28,7 @@ import {
   fingerprintFinding,
   FINDING_SECTION,
   INSIGHT_SECTIONS,
+  SECTION_ICONS,
   SECTION_LABEL_KEYS,
   digest,
   type Finding,
@@ -231,6 +232,26 @@ describe("ranking", () => {
       previousKeys: new Set([visible.key]),
     });
     expect(warm.ranked[0]?.key).toBe(better.key);
+  });
+
+  it("puts an existing link and a proposed link in different groups", () => {
+    // The split that stops the two card types being indistinguishable. They were one
+    // group, both titled `{a} ↔ {b}`, ordered by severity — so all 12 proposals sat
+    // above all 6 existing links and nothing on the card said which was which.
+    expect(FINDING_SECTION["existing-link"]).toBe("surprising");
+    expect(FINDING_SECTION["missing-link"]).toBe("suggested");
+    expect(FINDING_SECTION["unlinked-mention"]).toBe("suggested");
+    // Different groups, so they must not share a label either.
+    expect(SECTION_LABEL_KEYS.surprising).not.toBe(SECTION_LABEL_KEYS.suggested);
+  });
+
+  it("offers the actionable group first", () => {
+    // `suggested` proposes 12 links the reader can add; `surprising` reviews 6 that
+    // already exist. The landing tab should be the one with work in it.
+    expect(INSIGHT_SECTIONS[0]).toBe("suggested");
+    expect(INSIGHT_SECTIONS).toContain("surprising");
+    expect(INSIGHT_SECTIONS.length).toBe(Object.keys(SECTION_LABEL_KEYS).length);
+    expect(INSIGHT_SECTIONS.length).toBe(Object.keys(SECTION_ICONS).length);
   });
 
   it("keeps the score out of the severity and effort comparison entirely", () => {

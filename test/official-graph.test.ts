@@ -2837,14 +2837,16 @@ describe("the built-in graph's toolbar", () => {
     const panel = h.renderer.containerEl.querySelector<HTMLElement>(".enhanced-graph-official-panel")!;
     const cardCount = (): number => panel.querySelectorAll(".enhanced-graph-card").length;
 
-    // Opens on the connections, and only that group's card is drawn.
-    expect(panel.querySelector('[data-section="suggested"]')).not.toBeNull();
+    // Opens on the recommendations, and only that group's card is drawn. The pair
+    // fixture is an `existing-link`, which now has its own group — `surprising` — so
+    // this asserts where it actually lands rather than where it used to.
+    expect(panel.querySelector('[data-section="surprising"]')).not.toBeNull();
     expect(panel.querySelector('[data-section="gaps"]')).toBeNull();
     expect(cardCount()).toBe(1);
 
     selectTab(panel, t("insights.section.gaps"));
     expect(panel.querySelector('[data-section="gaps"]')).not.toBeNull();
-    expect(panel.querySelector('[data-section="suggested"]')).toBeNull();
+    expect(panel.querySelector('[data-section="surprising"]')).toBeNull();
     expect(cardCount()).toBe(1);
   });
 

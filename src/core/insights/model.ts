@@ -60,14 +60,38 @@ export type FindingKind =
 /**
  * The panel's groups, in the order they are offered.
  *
- * `suggested` and `structure` are new; `gaps` and `trends` keep the existing
+ * `surprising` and `structure` are new; `gaps` and `trends` keep the existing
  * meaning. The ids are the wire format for persisted panel state, so they are
  * stable strings rather than numbers.
  */
-export type InsightSectionId = "suggested" | "structure" | "gaps" | "trends";
+export type InsightSectionId =
+  | "surprising"
+  | "suggested"
+  | "structure"
+  | "gaps"
+  | "trends";
 
+/**
+ * Split apart deliberately, because the two answer different questions.
+ *
+ * `suggested` proposes a link that **does not exist**. `surprising` reports one that
+ * **does** — a link the reader wrote and may have forgotten, which is why it can be
+ * verified in seconds and why it is the only card type here whose claim is a fact
+ * rather than a prediction.
+ *
+ * They were one group until the two card types became indistinguishable: both were
+ * titled `{a} ↔ {b}`, and severity ordering put all 12 proposals above all 6 existing
+ * links, so the existing ones sat at the bottom of a 20-card list with nothing to say
+ * what they were. Separate groups are the fix, not a label — the distinction is worth
+ * a tab, not a badge.
+ *
+ * `suggested` is offered first because it is the actionable group — 12 cards against
+ * 6, every one of them a link the reader can add. `surprising` is a review of what is
+ * already written, which is worth a tab but not the landing tab.
+ */
 export const INSIGHT_SECTIONS: readonly InsightSectionId[] = [
   "suggested",
+  "surprising",
   "structure",
   "gaps",
   "trends",
@@ -75,6 +99,7 @@ export const INSIGHT_SECTIONS: readonly InsightSectionId[] = [
 
 /** Section label keys, so the panel does not carry its own copy of the list. */
 export const SECTION_LABEL_KEYS: Readonly<Record<InsightSectionId, MessageKey>> = {
+  surprising: "insights.section.surprising",
   suggested: "insights.section.suggested",
   structure: "insights.section.structure",
   gaps: "insights.section.gaps",
@@ -83,6 +108,7 @@ export const SECTION_LABEL_KEYS: Readonly<Record<InsightSectionId, MessageKey>> 
 
 /** Section icons, matching the names Obsidian's `setIcon` understands. */
 export const SECTION_ICONS: Readonly<Record<InsightSectionId, string>> = {
+  surprising: "sparkles",
   suggested: "link-2",
   structure: "git-fork",
   gaps: "alert-triangle",
@@ -96,9 +122,15 @@ export const SECTION_ICONS: Readonly<Record<InsightSectionId, string>> = {
  * compile error, not a finding that silently never appears in the panel.
  */
 export const FINDING_SECTION: Readonly<Record<FindingKind, InsightSectionId>> = {
-  "existing-link": "suggested",
+  // A link that exists. Its own group because it is a fact about the vault, not a
+  // proposal — see the note on `INSIGHT_SECTIONS`.
+  "existing-link": "surprising",
   "missing-link": "suggested",
   "unlinked-mention": "suggested",
+  // A possible duplicate is a link question too, and the most consequential one: it
+  // suggests two pages should *stop* being two. Left here rather than given its own
+  // group because it is rare (0 candidates on the reference vault), and a tab that is
+  // usually empty teaches the reader to ignore the tabs.
   "merge-candidate": "suggested",
   "single-point-of-failure": "structure",
   "cluster-gateway": "structure",

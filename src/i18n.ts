@@ -61,15 +61,14 @@ const zh = {
 
 
   "insights.title": "图谱洞察",
-  "insights.connections": "惊奇连接",
-  "insights.gaps": "知识空白",
   "insights.empty": "暂时没有发现值得关注的洞察",
   "insights.dismiss": "标记为已查看",
   "insights.restore": "恢复已消除的洞察",
   "insights.showDismissed": "显示已消除（{count}）",
   "insights.clearHighlight": "取消高亮",
 
-  "insights.section.suggested": "建议连接",
+  "insights.section.surprising": "惊奇连接",
+  "insights.section.suggested": "建议新增",
   "insights.section.structure": "结构风险",
   "insights.section.gaps": "知识空白",
   "insights.section.trends": "演化趋势",
@@ -352,15 +351,14 @@ const en: Record<MessageKey, string> = {
 
 
   "insights.title": "Insights",
-  "insights.connections": "Surprising connections",
-  "insights.gaps": "Knowledge gaps",
   "insights.empty": "Nothing notable in the graph yet",
   "insights.dismiss": "Mark as seen",
   "insights.restore": "Restore dismissed insights",
   "insights.showDismissed": "Show dismissed ({count})",
   "insights.clearHighlight": "Clear highlight",
 
-  "insights.section.suggested": "Suggested links",
+  "insights.section.surprising": "Surprising links",
+  "insights.section.suggested": "Suggested new links",
   "insights.section.structure": "Structural risks",
   "insights.section.gaps": "Knowledge gaps",
   "insights.section.trends": "Trends",

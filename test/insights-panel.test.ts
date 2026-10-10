@@ -316,18 +316,27 @@ interface PairOverrides {
   readonly withEdge?: boolean;
 }
 
-/** A connection-shaped finding: two pages, and one edge key by default. */
+/**
+ * A connection-shaped finding: two pages, and one edge key by default.
+ *
+ * Defaults to a *proposal* kind rather than an existing link. The two live in
+ * different groups now, and a proposal is what most of these tests are about — the
+ * panel's mechanics do not depend on which kind a pair is, so the default should be
+ * the one whose group is offered first. The existing-link group has its own test
+ * below.
+ */
 function makePair(overrides: PairOverrides = {}): Finding {
   const a = overrides.a ?? ALPHA.id;
   const b = overrides.b ?? BETA.id;
   const [labelA, labelB] = overrides.labels ?? ["Alpha", "Beta"];
   const withEdge = overrides.withEdge ?? true;
+  const kind = overrides.kind ?? "missing-link";
   return pairFinding({
-    kind: overrides.kind ?? "existing-link",
+    kind,
     analyser: "test-pairs",
     a,
     b,
-    titleKey: "insights.finding.existing-link",
+    titleKey: kind === "existing-link" ? "insights.finding.existing-link" : "insights.finding.missing-link",
     titleParams: { a: labelA, b: labelB },
     init: {
       evidence: overrides.evidence ?? [evidence({ contribution: 3 })],
