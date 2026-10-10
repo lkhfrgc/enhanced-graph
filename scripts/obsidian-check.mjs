@@ -556,6 +556,59 @@ async function main() {
     `type=#${(colouring.asType ?? 0).toString(16)} community=#${(colouring.asCommunity ?? 0).toString(16)}`,
   );
 
+  // --- the panel's cards are one width across every group -------------------
+  //
+  // The defect this exists for: a group whose content overflowed lost the scrollbar's
+  // width to it and drew narrower cards than a short group, so switching tabs changed
+  // the card width under the reader's eyes. It could not be caught anywhere else. The
+  // browser harness hands the page one panel and overlay scrollbars that occupy no
+  // width, so it measured every group identical while the app did not — four fixes were
+  // "verified" there before the app was asked directly, and the app disagreed each time.
+  //
+  // Measured in the official panel because that is the one the reader is looking at,
+  // and asserted against `scrollbar-gutter`, because the card widths agreeing is the
+  // symptom and the reserved gutter is the cause.
+  const panelWidths = await page.evaluate(async () => {
+    const labels = ["建议新增", "惊奇连接", "结构风险", "知识空白"];
+    const pick = () =>
+      [...document.querySelectorAll(".enhanced-graph-official-panel")].find(
+        (candidate) => candidate.getBoundingClientRect().width > 0,
+      );
+    const out = [];
+    for (const label of labels) {
+      const panel = pick();
+      if (!panel) return { error: "no visible official panel" };
+      const button = [...panel.querySelectorAll(".enhanced-graph-button")].find((candidate) =>
+        (candidate.textContent ?? "").includes(label),
+      );
+      button?.click();
+      await new Promise((resolve) => setTimeout(resolve, 350));
+      const cards = [...panel.querySelectorAll(".enhanced-graph-card")];
+      if (cards.length === 0) continue;
+      out.push({
+        label,
+        gutter: panel.offsetWidth - panel.clientWidth,
+        gutterStyle: getComputedStyle(panel).scrollbarGutter,
+        card: Math.round(cards[0].getBoundingClientRect().width),
+        scrolls: panel.scrollHeight > panel.clientHeight,
+      });
+    }
+    return { groups: out };
+  });
+
+  const groups = panelWidths.groups ?? [];
+  const cardWidths = new Set(groups.map((group) => group.card));
+  const gutters = new Set(groups.map((group) => group.gutter));
+  check(
+    "every insight group draws its cards at the same width in the real app",
+    groups.length >= 3 && cardWidths.size === 1 && gutters.size === 1,
+    groups.length === 0
+      ? `no groups measured (${panelWidths.error ?? "the panel had no cards"})`
+      : groups
+          .map((group) => `${group.label} card ${group.card}px gutter ${group.gutter} scrolls ${group.scrolls}`)
+          .join("; "),
+  );
+
   await browser.close();
 
   const failed = results.filter((result) => !result.pass);

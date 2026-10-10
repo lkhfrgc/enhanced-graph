@@ -1357,6 +1357,15 @@
   gap: 6px;
   padding: 8px 10px;
   overflow-y: auto;
+  /* Always reserve the scrollbar's width.
+   *
+   * This is the defect the reader reported, reproduced in the app: groups whose content
+   * overflows lost 14px to the scrollbar and drew 266px cards, while short groups drew
+   * 278px ones — so switching tabs changed the card width under their eyes. The insight
+   * panel had the same bug and was fixed there first; this panel was missed, and every
+   * browser-harness measurement said the two matched because the harness hands the page
+   * one panel and overlay scrollbars that occupy nothing. */
+  scrollbar-gutter: stable;
   border: 1px solid var(--background-modifier-border);
   border-radius: var(--radius-m, 8px);
   background: var(--background-primary);
