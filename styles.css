@@ -399,20 +399,24 @@
    -------------------------------------------------------------------------- */
 
 .enhanced-graph-panel {
-  /* The width is a contract, so the horizontal basis is fixed and it does not grow.
+  /* Fixed, with no exceptions. `0 0` refuses both growth and shrink, and the explicit
+   * `min-width` refuses it again for any context where the flex basis is not what
+   * decides — a nested flex container, a table-ish ancestor, or Obsidian's own layout
+   * rules on the leaf. Stating it twice is deliberate: the width moved once already
+   * because a declaration was present and quietly overridden, and a layout contract is
+   * worth being boring about.
    *
-   * Shrink is left at 1, and the canvas beside it is what gives way first: the row's
-   * other child is `flex: 1 1 auto` with `min-width: 0`, so it absorbs the pressure and
-   * the panel holds its width. A rigid `0 0` here would instead keep 320px in a narrow
-   * pane and squeeze the graph to nothing, which is a worse failure than a panel that
-   * eventually narrows with the window.
-   *
-   * The width that *used* to wobble came from the content, not the window: with the
-   * default `box-sizing` the declared 320px drew as 337px once the padding and the left
-   * rule were added, and cards were free to set the floor the panel shrank to. Both are
-   * fixed below rather than by tightening this axis. */
-  flex: 0 1 320px;
+   * The cost is real and accepted: in a pane narrower than this the panel keeps its
+   * width and the graph beside it gives way, including down to nothing. That is the
+   * trade the fixed width asks for — the panel is where the text is, and a canvas that
+   * narrow is not readable either way. */
+  flex: 0 0 320px;
   width: 320px;
+  min-width: 320px;
+  max-width: 320px;
+  /* `width` counts the content box by default, so the declared 320px drew as 337px
+   * once the padding and the left rule were added. That discrepancy is what made the
+   * width look arbitrary in the first place. */
   box-sizing: border-box;
   border-left: 1px solid var(--background-modifier-border);
   background: var(--background-secondary);

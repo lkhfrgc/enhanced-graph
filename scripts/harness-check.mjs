@@ -628,22 +628,51 @@ async function main() {
           rendered: Math.round(rendered),
         };
       });
-    const widths = new Map();
+    // A narrow pane is the other way the width can move, and the built-in graph panel is
+    // docked in one: a flex item with shrink allowed follows its host down. Measured
+    // rather than reasoned about, at widths a real pane is actually set to.
+    const viewport = page.viewportSize();
+    const narrowWidths = {};
+    for (const width of [900, 700, 560, 460, 380, 300, 220]) {
+      await page.setViewportSize({ width, height: viewport?.height ?? 800 });
+      await selectPanelTab(page, "建议新增");
+      const entry = await panelWidth();
+      narrowWidths[width] = entry ? entry.rendered : 0;
+    }
+    await page.setViewportSize(viewport ?? { width: 1200, height: 800 });
+    // The contract: one width, everywhere — across the groups, across pane sizes, and
+    // with content that cannot shrink. Asserted against the *declared* width rather than
+    // only across tabs, because the cross-tab check alone is not enough to be meaningful:
+    // it passed while the panel was 337px instead of 320, since every tab was wrong by
+    // the same amount.
+    const groupWidths = new Map();
     for (const label of ["建议新增", "惊奇连接", "结构风险", "知识空白"]) {
       await selectPanelTab(page, label);
-      widths.set(label, await panelWidth());
+      groupWidths.set(label, await panelWidth());
     }
-    const rendered = new Set([...widths.values()].map((entry) => (entry ? entry.rendered : 0)));
-    const declared = new Set([...widths.values()].map((entry) => (entry ? entry.declared : 0)));
-    const sample = [...widths.entries()][0]?.[1];
+    const rendered = new Set([...groupWidths.values()].map((entry) => (entry ? entry.rendered : 0)));
+    const declared = new Set([...groupWidths.values()].map((entry) => (entry ? entry.declared : 0)));
+    const sample = [...groupWidths.entries()][0]?.[1];
     check(
-      "the insights panel keeps one fixed width, and its declared width is the box drawn",
-      rendered.size === 1 &&
-        declared.size === 1 &&
-        (sample?.rendered ?? 0) === (sample?.declared ?? -1) &&
-        (sample?.rendered ?? 0) >= 200,
-      `declared ${sample?.declared}px, rendered ${[...rendered].join("/")}px across ` +
-        `${widths.size} groups`,
+      "the insights panel keeps one fixed width across every group",
+      rendered.size === 1 && declared.size === 1 && (sample?.rendered ?? 0) >= 200,
+      `groups: ${[...groupWidths.entries()]
+        .map(([label, entry]) => `${label} ${entry?.rendered}px`)
+        .join(", ")}`,
+    );
+    check(
+      "the panel's declared width is the box that is drawn",
+      (sample?.rendered ?? 0) === (sample?.declared ?? -1),
+      `declared ${sample?.declared}px, rendered ${sample?.rendered}px ` +
+        `(box-sizing decides this, and padding counts against the declared width only with border-box)`,
+    );
+    check(
+      "the panel's width does not follow the pane",
+      new Set(Object.values(narrowWidths)).size === 1 &&
+        Object.values(narrowWidths)[0] === (sample?.rendered ?? -1),
+      `by viewport width: ${Object.entries(narrowWidths)
+        .map(([vp, px]) => `${vp}→${px}px`)
+        .join(", ")}`,
     );
     await selectPanelTab(page, "建议新增");
     check(
