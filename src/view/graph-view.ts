@@ -73,7 +73,7 @@ import {
   type VisibilityFilters,
 } from "./visibility";
 import { nodeColorForMode, resolveTypeColors, sameColorMap } from "./palette";
-import { listenForWidthProbe } from "./width-probe";
+import { listenForWidthProbe, reportPanelGeometryOnce } from "./width-probe";
 
 /**
  * ForceAtlas2 steps taken per gravity-drag event.
@@ -997,6 +997,9 @@ export class EnhancedGraphView extends ItemView {
       return;
     }
     el.removeClass("is-hidden");
+    // Print the panel's geometry once, unprompted; see the module for why this is not
+    // left to a console command.
+    if (this.panelMode === "insights") reportPanelGeometryOnce(() => this.panelEl);
 
     const titles: Record<Exclude<PanelMode, "none">, string> = {
       insights: t("insights.title"),

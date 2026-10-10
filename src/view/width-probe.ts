@@ -20,6 +20,39 @@
 
 /** The event a console one-liner dispatches to ask the panel for its numbers. */
 export const WIDTH_PROBE_EVENT = "enhanced-graph:width-probe";
+
+/**
+ * Log the panel's geometry once, unprompted, after the first layout.
+ *
+ * A self-report rather than something the reader has to know to ask for. The defect this
+ * exists for could not be reproduced outside Obsidian: three successive fixes measured
+ * correct in the browser harness and none of them held in the app, and every round trip
+ * spent the reader's patience on a request I could have answered myself. So the numbers
+ * are printed on the first render, in the console they already know how to open, and the
+ * answer arrives without a question.
+ *
+ * Once per session on purpose: a panel that logs on every rebuild would bury the reader's
+ * own console output, and the first layout is the one that answers the question.
+ */
+let reported = false;
+
+export function reportPanelGeometryOnce(getPanel: () => HTMLElement | null): void {
+  if (reported) return;
+  reported = true;
+  const run = (): void => {
+    const panel = getPanel();
+    if (!panel || panel.getBoundingClientRect().width === 0) {
+      // Laid out as nothing yet — put it back and try after the next frame, or the
+      // report would be a page of zeroes that looks like a layout failure.
+      reported = false;
+      return;
+    }
+    // eslint-disable-next-line no-console
+    console.log(reportPanelWidth(panel));
+  };
+  // Two frames: one for the DOM the caller just built, one for layout to settle.
+  requestAnimationFrame(() => requestAnimationFrame(run));
+}
 /** What the probe learned, as a line of text for the console. */
 export function reportPanelWidth(panel: HTMLElement | null): string {
   if (!panel) return "enhanced-graph: the insight panel is not in the DOM (is the view open?)";
@@ -65,6 +98,26 @@ export function reportPanelWidth(panel: HTMLElement | null): string {
   } else {
     parts.push("cards: none in this group");
   }
+
+  // The descendant tree, outdented by depth. A card that is wider than its siblings is
+  // wider because of something *inside* it, and the class names are what make that
+  // identifiable from a pasted report instead of another round of guessing.
+  const rows: string[] = [];
+  let budget = 60;
+  const walk = (node: Element, depth: number): void => {
+    if (budget <= 0) return;
+    budget -= 1;
+    const el = node as HTMLElement;
+    const box = el.getBoundingClientRect();
+    rows.push(
+      `${"  ".repeat(depth)}${el.className || el.tagName} ` +
+        `${Math.round(box.width)}x${Math.round(box.height)} ` +
+        `(scroll ${el.scrollWidth}, client ${el.clientWidth})`,
+    );
+    for (const child of Array.from(node.children)) walk(child, depth + 1);
+  };
+  for (const child of Array.from(panel.children)) walk(child, 1);
+  parts.push(`tree:\n    ${rows.join("\n    ")}`);
 
   // Is the stylesheet loaded at all? A panel with no rule is a different bug from a
   // panel whose rule is being overridden, and the two look identical on screen.
