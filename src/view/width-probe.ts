@@ -28,12 +28,43 @@ export function reportPanelWidth(panel: HTMLElement | null): string {
   const style = getComputedStyle(panel);
   const parts: string[] = [
     `panel: ${Math.round(rect.width)}x${Math.round(rect.height)}px`,
+    `panel boxes: client ${panel.clientWidth}px, offset ${panel.offsetWidth}px, ` +
+      `gutter ${panel.offsetWidth - panel.clientWidth}px ` +
+      `(scrollbar-gutter: ${style.scrollbarGutter}; scrollHeight ${panel.scrollHeight} ` +
+      `vs client ${panel.clientHeight})`,
     `declared: width=${style.width} min=${style.minWidth} max=${style.maxWidth}`,
     `flex: ${style.flexGrow} ${style.flexShrink} ${style.flexBasis}`,
     `box-sizing: ${style.boxSizing}`,
     `display: ${style.display}; parent display: ${panel.parentElement ? getComputedStyle(panel.parentElement).display : "-"}`,
     `classes: ${panel.className}`,
   ];
+
+  // The cards, which is where the width the reader notices actually lives. A panel holds
+  // one width while its cards vary — a scrollbar taking the gutter, a wide child setting
+  // a floor — so reporting only the panel is what made this defect invisible: every
+  // previous probe said 320px and was right.
+  const cards = Array.from(panel.querySelectorAll<HTMLElement>(".enhanced-graph-card"));
+  if (cards.length > 0) {
+    const widths = cards.map((card) => Math.round(card.getBoundingClientRect().width));
+    const unique = [...new Set(widths)].sort((a, b) => a - b);
+    const widest = cards.reduce((best, card) =>
+      card.scrollWidth > best.scrollWidth ? card : best,
+    );
+    parts.push(
+      `cards: ${cards.length}, widths ${unique.join("/")}px, ` +
+        `max scrollWidth ${Math.max(...cards.map((card) => card.scrollWidth))}px`,
+    );
+    // The card whose content overflows its own box is the one setting the width, and
+    // naming it saves a round trip: the fix is in that element, not in the panel.
+    if (widest.scrollWidth > widest.clientWidth) {
+      parts.push(
+        `OVERFLOWING CARD: ${widest.className} scrollWidth ${widest.scrollWidth} > ` +
+          `clientWidth ${widest.clientWidth}; text: ${(widest.textContent ?? "").trim().slice(0, 80)}`,
+      );
+    }
+  } else {
+    parts.push("cards: none in this group");
+  }
 
   // Is the stylesheet loaded at all? A panel with no rule is a different bug from a
   // panel whose rule is being overridden, and the two look identical on screen.

@@ -674,6 +674,40 @@ async function main() {
         .map(([vp, px]) => `${vp}→${px}px`)
         .join(", ")}`,
     );
+    // Per-group card width. The panel holds one width; the cards are what the reader
+    // sees, and a group whose content overflows can draw narrower cards than one that
+    // fits. Reported for every group so the two can be compared directly.
+    const cardWidthByGroup = {};
+    for (const label of ["建议新增", "惊奇连接", "结构风险", "知识空白"]) {
+      await selectPanelTab(page, label);
+      cardWidthByGroup[label] = await page.evaluate(() => {
+        const panel = document.querySelector(".enhanced-graph-panel");
+        if (!panel) return null;
+        const cards = [...panel.querySelectorAll(".enhanced-graph-card")];
+        if (cards.length === 0) return null;
+        return {
+          card: Math.round(cards[0].getBoundingClientRect().width),
+          gutter: panel.offsetWidth - panel.clientWidth,
+          scrolls: panel.scrollHeight > panel.clientHeight,
+          count: cards.length,
+        };
+      });
+    }
+    const cardWidths = new Set(
+      Object.values(cardWidthByGroup)
+        .filter(Boolean)
+        .map((entry) => entry.card),
+    );
+    check(
+      "every group draws its cards at the same width",
+      cardWidths.size === 1,
+      Object.entries(cardWidthByGroup)
+        .map(([label, entry]) =>
+          entry ? `${label} ${entry.card}px (gutter ${entry.gutter}, scrolls ${entry.scrolls})` : `${label} -`,
+        )
+        .join("; "),
+    );
+
     // The panel's own width is one contract; the *cards'* width is another, and it was
     // the one that actually moved. A group whose content overflows loses the scrollbar's
     // width to it, so its cards draw narrower than a short group's — while the panel

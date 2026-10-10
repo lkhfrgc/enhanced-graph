@@ -81,6 +81,38 @@ describe("reportPanelWidth", () => {
     expect(report).toContain("stylesheet rule present:");
   });
 
+  it("reports the cards, which is where the width the reader notices lives", () => {
+    // The defect this probe was extended for: the panel held 320px while the *cards*
+    // changed width between groups, because a scrolled group lost the scrollbar's width.
+    // Every earlier report said 320px and was right, which is exactly why the panel
+    // numbers are not enough.
+    const node = el("enhanced-graph-panel");
+    const card = el("enhanced-graph-card", node);
+    card.textContent = "检索增强生成 ↔ RAG 系统评测方法";
+
+    const report = reportPanelWidth(node);
+
+    expect(report).toContain("cards: 1");
+    expect(report).toContain("widths ");
+  });
+
+  it("says when there are no cards in the group rather than reporting zero", () => {
+    // A group can legitimately be empty — no candidates for that kind — and "0px" would
+    // read as a layout failure rather than an absent section.
+    const report = reportPanelWidth(el("enhanced-graph-panel"));
+    expect(report).toContain("cards: none in this group");
+  });
+
+  it("reports the panel's own boxes, where a scrollbar shows up", () => {
+    // `clientWidth` versus `offsetWidth` is the gutter, and it is the number that moved
+    // when the cards did. jsdom computes neither, so this asserts the report includes
+    // them rather than what they equal.
+    const report = reportPanelWidth(el("enhanced-graph-panel"));
+    expect(report).toContain("panel boxes:");
+    expect(report).toContain("gutter");
+    expect(report).toContain("scrollbar-gutter:");
+  });
+
   it("names its event so the console line can be written down once", () => {
     expect(WIDTH_PROBE_EVENT).toBe("enhanced-graph:width-probe");
   });
