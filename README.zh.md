@@ -1,5 +1,7 @@
 # Enhanced Graph — Obsidian 增强关系图谱
 
+> **结合 [scholar-llm-wiki](https://github.com/lkhfrgc/scholar-llm-wiki) 使用更佳~~~**
+>
 > 本文是中文完整版。目录页展示的是 [English README](README.md)。
 
 给 Obsidian 加一个功能更强的关系图谱视图：**关联度引擎**、**Louvain 社区发现**、**图谱洞察**（建议新增 / 惊奇连接 / 结构风险 / 知识空白 / 演化趋势），基于 `sigma.js` 4.0 + `graphology` + `ForceAtlas2` 渲染。

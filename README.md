@@ -1,5 +1,7 @@
 # Enhanced Graph
 
+> **结合 [scholar-llm-wiki](https://github.com/lkhfrgc/scholar-llm-wiki) 使用更佳~~~**
+
 A graph view for Obsidian with an association engine, Louvain community detection and graph insights — plus an enhancement layer that overlays the same features on the built-in graph.
 
 [中文说明](README.zh.md)
