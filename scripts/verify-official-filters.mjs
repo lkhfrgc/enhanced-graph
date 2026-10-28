@@ -236,8 +236,10 @@ try {
   const includeDefaultTicked = await tickedRows();
   const includeDefaultDrawn = await drawnNodes();
 
-  // 全清 while including keeps NOTHING: an empty selection is a choice the user
-  // made, not the absence of one, so the graph empties.
+  // 全清 while including switches the tag filter OFF: an empty selection is
+  // "nothing picked", not "keep nothing", so the whole graph stays drawn. This
+  // is the regression that blanked the built-in graph: an empty include list
+  // filtered every node away, and the panel's hint promises exactly this.
   await page.locator("button", { hasText: "全清" }).first().click({ delay: PRESS_MS });
   await page.waitForTimeout(600);
   const clearedTicked = await tickedRows();
@@ -286,9 +288,9 @@ try {
       `exclude ${excludeDefaultTicked} ticked → ${excludeDefaultDrawn} drawn (want ${total} drawn both times)`,
   );
   check(
-    "全清 while including keeps nothing",
-    clearedTicked === 0 && clearedDrawn === 0,
-    `${clearedTicked} ticked, ${clearedDrawn} drawn (want 0 and 0)`,
+    "全清 while including leaves the whole graph drawn",
+    clearedTicked === 0 && clearedDrawn === total,
+    `${clearedTicked} ticked, ${clearedDrawn} drawn (want 0 and ${total})`,
   );
   check(
     "包含标签 keeps exactly the pages carrying the one ticked tag",

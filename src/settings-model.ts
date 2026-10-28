@@ -51,10 +51,11 @@ export interface EnhancedGraphSettings {
   /**
    * Tags to keep. Only read while `tagFilterMode` is `"include"`.
    *
-   * `null` means "no selection has been made in include mode yet", which keeps
-   * everything — the state the mode opens in, since its first selection is every
-   * tag. An EMPTY list is a selection the user made, and means the opposite: keep
-   * nothing. The two are deliberately different values, not the same state twice.
+   * `null` is "no selection has been made in include mode yet", and an EMPTY list
+   * is that same state — both keep everything. The mode opens with every tag
+   * ticked; clearing the ticks switches the tag filter off rather than keeping
+   * nothing, because a filter state that empties the graph is indistinguishable
+   * from a crash (and the panel's own hint says so).
    */
   includedTags: string[] | null;
   /**

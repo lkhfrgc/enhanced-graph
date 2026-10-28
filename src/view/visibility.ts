@@ -50,10 +50,13 @@ export interface VisibilityFilters {
    */
   readonly hiddenTags: ReadonlySet<string>;
   /**
-   * The tags include mode keeps, or `null` when none have been picked yet.
+   * The tags include mode keeps; `null` or an empty set mean nothing is picked.
    *
-   * The two are different states on purpose: `null` is "nothing chosen", which
-   * keeps everything, while an empty set is a choice — keep nothing.
+   * Both stand for "the filter is not in use", which keeps everything. The two
+   * are deliberately NOT different states: an empty selection used to mean
+   * "keep nothing", and that made the built-in graph vanish completely after
+   * 全清 — indistinguishable from a crash, with the panel's own hint promising
+   * the opposite ("一个标签都不勾选时不筛选").
    */
   readonly includedTags: ReadonlySet<string> | null;
   readonly tagFilterMode: TagFilterMode;
@@ -144,9 +147,11 @@ export function isNodeVisible(node: GraphNode, filters: VisibilityFilters): bool
   if (filters.hideIsolated && !node.isStructural && node.vaultLinkCount === 0) return false;
   if (filters.tagFilterMode === "include") {
     const keep = filters.includedTags;
-    // `null` is "nothing picked yet", which keeps everything; an EMPTY selection is
-    // a real choice — the user cleared every tick and means to keep nothing.
-    if (keep !== null && !node.tags.some((tag) => keep.has(tag))) return false;
+    // `null` and an empty set are the same state: nothing ticked, so the filter
+    // is not in use and everything is kept. An empty selection must never hide
+    // the whole graph — that is what the hint under the toggle promises, and a
+    // filter state that blanks the built-in graph reads as a crash.
+    if (keep !== null && keep.size > 0 && !node.tags.some((tag) => keep.has(tag))) return false;
   } else if (filters.hiddenTags.size > 0 && node.tags.some((tag) => filters.hiddenTags.has(tag))) {
     return false;
   }

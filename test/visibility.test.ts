@@ -126,16 +126,17 @@ describe("isNodeVisible", () => {
     expect(include(["rag"], [])).toBe(false);
   });
 
-  it("tells 'nothing picked yet' apart from 'keep nothing' in include mode", () => {
+  it("keeps everything when the include list is empty, exactly as when it is null", () => {
     const target = node("a", { tags: ["rag"] });
     // No selection yet keeps everything: that is the state include mode opens in,
     // before its list has been filled with every tag.
     expect(isNodeVisible(target, filters({ includedTags: null, tagFilterMode: "include" }))).toBe(true);
     expect(isNodeVisible(target, filters({ includedTags: null, tagFilterMode: "include" }))).toBe(true);
-    // An EMPTY selection is a choice the user made — 全清 in include mode means keep
-    // nothing, so every page goes.
-    expect(isNodeVisible(target, filters({ includedTags: new Set(), tagFilterMode: "include" }))).toBe(false);
-    expect(isNodeVisible(node("b"), filters({ includedTags: new Set(), tagFilterMode: "include" }))).toBe(false);
+    // 全清 leaves an EMPTY selection. It is the same "the tag filter is not in use"
+    // state, NOT "keep nothing": a filter that could hide the entire graph reads as
+    // a crash, and did — the built-in graph went blank after 全清 and stayed blank.
+    expect(isNodeVisible(target, filters({ includedTags: new Set(), tagFilterMode: "include" }))).toBe(true);
+    expect(isNodeVisible(node("b"), filters({ includedTags: new Set(), tagFilterMode: "include" }))).toBe(true);
   });
 
   it("reads exclude mode from its own list, whatever include mode holds", () => {

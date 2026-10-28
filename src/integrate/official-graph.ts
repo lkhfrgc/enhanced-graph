@@ -595,6 +595,23 @@ export class OfficialGraphEnhancer {
         else delete renderer.setData;
         delete (renderer as RendererWithMarker)[WRAPPED_SET_DATA];
       }
+      // Hand the UNFILTERED payload back. Restoring `setData` only stops future
+      // payloads from being filtered; the nodes a filter already removed stay gone
+      // until the engine happens to render again — which, after the user switches
+      // the enhancement off, reads as "the graph is still broken", and only closing
+      // and reopening the view brought the notes back. Measured in a real vault:
+      // nodes stayed at 0 after the feature was turned off.
+      //
+      // A detached renderer (its leaf closed) is skipped: replaying a full payload
+      // into a view nobody will see is wasted work, and its scene graph may already
+      // be torn down.
+      if (
+        attachment.lastData != null &&
+        typeof attachment.originalSetData === "function" &&
+        renderer.containerEl?.isConnected !== false
+      ) {
+        attachment.originalSetData.call(renderer, attachment.lastData);
+      }
       this.focusIds.delete(renderer);
       this.syncMarkerTicker();
       if (renderer.highlightNode) renderer.highlightNode = null;
@@ -727,8 +744,10 @@ export class OfficialGraphEnhancer {
     const selection = (): ReadonlySet<string> => {
       if (excluding) return this.deps.getVisibility().hiddenTags;
       const included = this.deps.getVisibility().includedTags;
-      // No selection yet keeps everything, and that is what the list shows: every
-      // tag ticked until one is taken away.
+      // Nothing picked yet keeps everything, and that is what the list shows: every
+      // tag ticked until one is taken away. An empty list is ALSO "the filter is
+      // not in use" (see `isNodeVisible`) and is drawn as no ticks at all — which
+      // pairs with the hint under the toggle rather than contradicting it.
       return included ?? new Set(collectTags(graph.nodes).map((entry) => entry.tag));
     };
     /** Write ticks back to the list the mode on screen owns; never the other one. */
@@ -765,8 +784,9 @@ export class OfficialGraphEnhancer {
       // did; the hidden-type and visibility switches are separate decisions the
       // user made elsewhere, and clearing them here would silently overrule them.
       //
-      // 全清 empties the selection in the mode on screen: excluding nothing more, or
-      // — while including — keeping nothing at all. Each mode owns its own list, so
+      // 全清 empties the selection in the mode on screen: excluding nothing more,
+      // or — while including — ticking nothing, which switches the tag filter off
+      // and keeps every page (see `isNodeVisible`). Each mode owns its own list, so
       // this cannot disturb the other one's ticks.
       //
       // Redrawn once the write lands: the boxes are ticked in place as well, but
@@ -803,9 +823,9 @@ export class OfficialGraphEnhancer {
       },
       // Each mode keeps its own selection, so switching back and forth never
       // rewrites the other one. Include mode opens fully ticked the first time it is
-      // entered — everything kept — because a fresh include list is `null`, and an
-      // empty one means the opposite: keep nothing. Written in one call, so the
-      // panel is redrawn once and never shows a half-applied state.
+      // entered — everything kept — because a fresh include list is `null`. An empty
+      // list is that same "not in use" state, not "keep nothing". Written in one
+      // call, so the panel is redrawn once and never shows a half-applied state.
       onSetTagFilterMode: (mode) => {
         const firstTimeIncluding =
           mode === "include" && this.deps.getVisibility().includedTags === null;
@@ -1888,11 +1908,13 @@ export class OfficialGraphEnhancer {
       filters.hiddenTypes.size > 0 ||
       filters.hiddenCommunities.size > 0 ||
       filters.hiddenTags.size > 0 ||
-      // Include mode hides by NOT keeping: a selection that is not null narrows the
-      // graph even when the exclude list is empty, and an empty one is the narrowest
-      // selection there is — keep nothing. Missing this made the fast path hand the
-      // whole graph back as if no filter were in force.
-      (filters.tagFilterMode === "include" && filters.includedTags !== null) ||
+      // Include mode hides by NOT keeping: a selection with at least one tick
+      // narrows the graph. An EMPTY selection is "nothing picked", not "keep
+      // nothing" (see `isNodeVisible`), so it must not enter this path — entering
+      // it handed the renderer an empty node set and blanked the built-in graph.
+      (filters.tagFilterMode === "include" &&
+        filters.includedTags !== null &&
+        filters.includedTags.size > 0) ||
       filters.hideStructural ||
       filters.hideIsolated;
     // The search query is deliberately NOT part of this. Searching marks the

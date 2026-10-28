@@ -394,8 +394,10 @@ export class EnhancedGraphView extends ItemView {
   /**
    * The tag list the current mode reads, as the panel's ticks.
    *
-   * Include mode with no selection yet shows everything ticked, which is what it
-   * means — every tag is kept until one is taken away.
+   * Include mode with nothing picked yet shows everything ticked, which is what it
+   * means — every tag is kept until one is taken away. An empty list is drawn as
+   * no ticks; it is the same "filter not in use" state (see `isNodeVisible`), and
+   * the hint under the toggle says so.
    */
   private activeTagSelection(): ReadonlySet<string> {
     if (this.plugin.settings.tagFilterMode === "exclude") return this.hiddenTags;
@@ -1087,8 +1089,9 @@ export class EnhancedGraphView extends ItemView {
         this.renderLegend();
       },
       // 全清 empties the selection IN THE MODE ON SCREEN: excluding nothing more,
-      // or — while including — keeping nothing at all. Each mode has its own list,
-      // so this cannot disturb the other one's ticks.
+      // or — while including — ticking nothing, which means the tag filter is not
+      // in use and every page is kept. Each mode has its own list, so this cannot
+      // disturb the other one's ticks.
       onClearTags: () => {
         this.setTagSelection(new Set());
         void this.applyGraphData();
@@ -1116,8 +1119,9 @@ export class EnhancedGraphView extends ItemView {
       },
       // Each mode keeps its own selection, so switching back and forth never
       // rewrites the other one. Include mode opens fully ticked the first time it is
-      // entered — everything kept — because a fresh include list is `null`, and an
-      // empty one would mean the opposite: keep nothing.
+      // entered — everything kept — because a fresh include list is `null`. An
+      // empty list is the same "filter not in use" state: it keeps everything, not
+      // nothing, so it can never blank the graph.
       onSetTagFilterMode: (mode) => {
         this.plugin.settings.tagFilterMode = mode;
         if (mode === "include" && this.includedTags === null) {

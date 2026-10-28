@@ -1351,6 +1351,27 @@ describe("built-in graph context menu", () => {
     h.renderer.setData(payload);
     expect(Object.keys(payload.nodes)).toHaveLength(2);
   });
+
+  it("hands the unfiltered payload back when the enhancement stops", () => {
+    const h = setup(
+      [{ id: "concepts/a.md" }, { id: "entities/b.md" }],
+      [makeNode({ id: "concepts/a", type: "concept" }), makeNode({ id: "entities/b", type: "entity" })],
+    );
+    h.enhancer.start();
+    h.hiddenTypes.push("concept");
+    const payload = { nodes: { "concepts/a.md": { type: "concept" }, "entities/b.md": { type: "entity" } } };
+    h.renderer.setData(payload);
+    // Premise: the filter really did take a node off the canvas.
+    expect(Object.keys(received(h).nodes)).toEqual(["entities/b.md"]);
+
+    // Switching the enhancement off has to put it back NOW. Restoring `setData`
+    // alone only affects the NEXT payload, so the node stayed missing until the
+    // graph leaf was closed and reopened — which reads as "the plugin broke the
+    // built-in graph" even after the feature is turned off. Measured in a real
+    // vault: the canvas held 0 nodes with the feature off until the view reopened.
+    h.enhancer.stop();
+    expect(Object.keys(received(h).nodes)).toEqual(["concepts/a.md", "entities/b.md"]);
+  });
 });
 
 describe("focus on the built-in graph", () => {
@@ -2121,12 +2142,15 @@ describe("the built-in graph's toolbar", () => {
     expect([...h.includedTags!].sort()).toEqual(["alpha", "beta", "gamma"]);
     expect([...h.hiddenTags].sort()).toEqual(["alpha", "beta", "gamma"]);
 
-    // Clearing the ticks while including means keep NOTHING — an empty selection is
-    // a choice, not the absence of one.
+    // Clearing the ticks while including switches the tag filter off: an empty
+    // selection is "nothing picked", not "keep nothing". It used to hide every
+    // page, which blanked the built-in graph after one 全清 — and the panel's own
+    // hint promises the opposite. The renderer must still receive all three nodes.
     panelButton(t("filter.clearTags")).dispatchEvent(new MouseEvent("click", { bubbles: true }));
     await settle();
     expect(h.includedTags).toEqual([]);
     expect([...h.hiddenTags].sort()).toEqual(["alpha", "beta", "gamma"]);
+    expect(Object.keys(received(h).nodes).sort()).toEqual(["a.md", "b.md", "c.md"]);
 
     panelButton(t("filter.tagModeExclude")).dispatchEvent(new MouseEvent("click", { bubbles: true }));
     await settle();
